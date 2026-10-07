@@ -22,7 +22,7 @@ Describe one clear, plausible subject action in present tense and chronological 
 
 Write a single flowing English paragraph, normally 4–8 sentences, with detail proportional to the scene. Do not pad it to a word count. Use natural temporal connectors when useful. No headings, tags, timestamps or scene cuts.
 
-The clip ends on this same image to make a seamless loop, so everything that moves returns to where it is on the cover by the end. Choose motion that can come back, such as rocking, swaying, glancing, ripples or a breeze. Avoid walking, falling, pouring, throwing, appearances and disappearances.
+The clip ends on this same image to make a seamless loop, so everything that moves returns to where it is on the cover by the end. Describe that return explicitly as part of the action, for example "she lifts her chin toward the light, holds it briefly, then slowly lowers it back", so it settles gradually instead of snapping back at the last moment. Pace the action across the whole clip: an unhurried movement, a short hold, then an equally gentle return, with motion continuing until the end rather than finishing early. Choose motion that can come back, such as rocking, swaying, glancing, ripples or a breeze. Avoid walking, falling, pouring, throwing, appearances and disappearances.
 
 Preserve identities, composition, lettering, logos and borders. Faces hidden on the cover remain hidden for the whole clip. With three or more visible faces, keep people in place with small expressions or head movements. Keep lighting consistent. Do not invent speech or singing from song lyrics. Sound descriptions are optional because Echora renders video without audio.
 

@@ -59,15 +59,15 @@ FPS = 24
 # The clip starts and ends on the cover; the saved loop drops the closing copy of it.
 LOOP = "pinned"
 # Bump when either generated-prompt strategy changes, so covers get new loops.
-WRITER_REVISION = "ltx-i2v-6-pinned"
+WRITER_REVISION = "ltx-i2v-7-return"
 DISTILLED_SIGMAS = "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
 # Lightricks' distilled second stage: the upscaled latent is refined from partway through.
 REFINE_SIGMAS = "0.909375, 0.725, 0.421875, 0.0"
 # cfg=1 ignores the negative branch, but the conditioning nodes still require one.
 NEGATIVE = "static, blurry, low quality, jpeg artifacts, deformed, distorted face, warped text"
 DEFAULT_INSTRUCTIONS = (
-    "Animate the pictured subject with one clear, natural movement that settles back to the pose "
-    "on the cover by the end. "
+    "Animate the pictured subject with one clear, natural movement paced across the whole clip, "
+    "then a gentle, described return to the pose on the cover by the end. "
     "Include subtle ambient motion in the surroundings only where the artwork supports it. "
     "Preserve the original art style, composition, identities and lettering. "
 ) + CAMERA_RULE
