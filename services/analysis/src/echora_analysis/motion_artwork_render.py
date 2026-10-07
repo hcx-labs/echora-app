@@ -59,7 +59,7 @@ FPS = 24
 # The clip starts and ends on the cover; the saved loop drops the closing copy of it.
 LOOP = "pinned"
 # Bump when either generated-prompt strategy changes, so covers get new loops.
-WRITER_REVISION = "ltx-i2v-7-return"
+WRITER_REVISION = "ltx-i2v-8-guide"
 DISTILLED_SIGMAS = "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
 # Lightricks' distilled second stage: the upscaled latent is refined from partway through.
 REFINE_SIGMAS = "0.909375, 0.725, 0.421875, 0.0"
@@ -68,13 +68,24 @@ NEGATIVE = "static, blurry, low quality, jpeg artifacts, deformed, distorted fac
 DEFAULT_INSTRUCTIONS = (
     "Animate the pictured subject with one clear, natural movement paced across the whole clip, "
     "then a gentle, described return to the pose on the cover by the end. "
-    "Include subtle ambient motion in the surroundings only where the artwork supports it. "
+    "Subjects keep their distance from the camera and their size in the frame. "
+    "Include visible ambient motion in the surroundings wherever the artwork has natural or "
+    "atmospheric elements, such as clouds, water, foliage, smoke, light or stars. "
     "Preserve the original art style, composition, identities and lettering. "
 ) + CAMERA_RULE
 # Zooms crop the cover and warp it as it enlarges, so prompts that ask for one are written again.
 ZOOM_WORDS = re.compile(
     r"\b(zoom\w*|push(?:es|ed|ing)?[- ]?in|pull(?:s|ed|ing)?[- ]?(?:out|back)|dolly\w*|dollies|"
     r"moves? (?:closer|toward|towards|in on))\b",
+    re.IGNORECASE,
+)
+# A subject coming toward or going away from the camera enlarges or shrinks like a zoom and can
+# reveal faces the cover hides, so such prompts are written again too.
+DEPTH_MOVES = re.compile(
+    r"\b(?:walk|step|lean|move|come|stride|advance|approach|edge|reach)(?:s|es|ed|ing)?"
+    r"(?:\s+(?:slowly|gently|slightly|forward|in))*\s+"
+    r"(?:forward|closer|toward(?:s)?\s+(?:the\s+)?(?:camera|viewer|lens)|"
+    r"away\s+from\s+(?:the\s+)?(?:camera|viewer|lens))\b",
     re.IGNORECASE,
 )
 
@@ -171,7 +182,7 @@ CAMERA_MOVES = re.compile(
 )
 
 
-NEGATION = re.compile(r"\b(no|not|never|without|nor|neither)\b|n't\b", re.IGNORECASE)
+NEGATION = re.compile(r"\b(no|not|never|without|nor|neither|nobody|none)\b|n't\b", re.IGNORECASE)
 # A negative in one clause must not excuse a later, affirmative camera move.
 CLAUSE_BREAK = re.compile(
     r"[.;:]|\b(?:but|then|however|while|whereas)\b|"
@@ -193,8 +204,9 @@ FRAME_CHANGES = re.compile(
 
 
 def zooms(prompt: str) -> bool:
-    """Whether a prompt asks for a zoom-like or any other camera move ("no pan", "never zooms" do not count)."""
-    for pattern in (ZOOM_WORDS, CAMERA_MOVES, FRAME_CHANGES):
+    """Whether a prompt asks for a zoom-like or any other camera move, or a subject moving toward or
+    away from the camera ("no pan", "never zooms", "nobody steps forward" do not count)."""
+    for pattern in (ZOOM_WORDS, CAMERA_MOVES, FRAME_CHANGES, DEPTH_MOVES):
         for match in pattern.finditer(prompt):
             # Look at the clause before the match too, for "the camera does not zoom" or "no push-in".
             # Camera patterns may start before a clause boundary ("camera does not pan,
