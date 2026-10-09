@@ -598,3 +598,32 @@ def test_replacing_a_local_checkpoint_changes_its_identity(monkeypatch, tmp_path
             pipeline.current_model_revision()
     finally:
         get_settings.cache_clear()
+
+
+def test_backing_vocal_syllables_are_marked_as_a_second_voice():
+    from echora_analysis.karaoke_pipeline import mark_backing_voice
+
+    lines = [
+        {
+            "text": "Lonely (so lonely)",
+            "syllables": [
+                {"text": "Lone", "start_ms": 0, "end_ms": 1},
+                {"text": "ly (", "start_ms": 1, "end_ms": 2},
+                {"text": "so ", "start_ms": 2, "end_ms": 3},
+                {"text": "lone", "start_ms": 3, "end_ms": 4},
+                {"text": "ly)", "start_ms": 4, "end_ms": 5},
+            ],
+        },
+        {
+            "text": "be alone (be",
+            "syllables": [{"text": "alone (be", "start_ms": 0, "end_ms": 1}],
+        },  # mixed: stays with the lead
+        {
+            "text": "No backing here",
+            "syllables": [{"text": "No ", "start_ms": 0, "end_ms": 1, "voice": 2}],
+        },
+    ]
+    mark_backing_voice(lines)
+    assert [s.get("voice") for s in lines[0]["syllables"]] == [None, None, 2, 2, 2]
+    assert "voice" not in lines[1]["syllables"][0]
+    assert "voice" not in lines[2]["syllables"][0]  # stale marks are cleared

@@ -53,7 +53,7 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { ScrollArea } from "../ui/scroll-area";
-import { groupSyllablesByWord, lyricWordIsRtl as isRtlText } from "./lyricWords";
+import { groupSyllablesByWord, lyricWordIsRtl as isRtlText, splitVoices } from "./lyricWords";
 import KaraokeLine from "./KaraokeLine";
 import LyricsScroller from "./LyricsScroller";
 import WaveformSeek from "./WaveformSeek";
@@ -117,7 +117,7 @@ type LyricsLine = {
   start_ms: number | null;
   end_ms?: number;
   text: string;
-  syllables?: { start_ms: number; end_ms: number; text: string }[];
+  syllables?: { start_ms: number; end_ms: number; text: string; voice?: number }[];
 };
 type LyricsTextSize = "small" | "normal" | "large";
 const lyricsSizeStorageKey = "echora:lyrics-text-size";
@@ -309,13 +309,26 @@ export default function FullscreenPlayer() {
     videos.forEach((video) => delete video.dataset.resume);
   }, [player.playing, showMotion, currentMotion?.src, artworkVisible]);
   const currentLyrics = player.lyrics?.trackId === player.track?.id ? player.lyrics : null;
+  // Each line's lead fragments, and its backing-vocal fragments (voice 2) shown as a second line.
   const lyricFragments = useMemo(
     () =>
-      new Map<LyricsLine, ReturnType<typeof groupSyllablesByWord>[number]>(
-        (currentLyrics?.lines || []).map((line) => [
-          line,
-          groupSyllablesByWord(line.syllables || []).flat(),
-        ]),
+      new Map<
+        LyricsLine,
+        {
+          lead: ReturnType<typeof groupSyllablesByWord>[number];
+          backing: ReturnType<typeof groupSyllablesByWord>[number];
+        }
+      >(
+        (currentLyrics?.lines || []).map((line) => {
+          const { lead, backing } = splitVoices(line.syllables || []);
+          return [
+            line,
+            {
+              lead: groupSyllablesByWord(lead).flat(),
+              backing: groupSyllablesByWord(backing).flat(),
+            },
+          ];
+        }),
       ),
     [currentLyrics?.lines],
   );
@@ -352,12 +365,38 @@ export default function FullscreenPlayer() {
   function karaokeLine(line: LyricsLine, active: boolean) {
     if (!karaokeMode || !currentLyrics?.karaoke || !line.syllables?.length)
       return line.text || "...";
+    const parts = lyricFragments.get(line);
     return (
-      <LiveKaraokeLine
-        fragments={lyricFragments.get(line) || []}
-        active={active}
-        highlightStyle={highlightStyle}
-      />
+      <>
+        <LiveKaraokeLine
+          fragments={parts?.lead || []}
+          active={active}
+          highlightStyle={highlightStyle}
+        />
+        {parts?.backing.length ? (
+          <span className={styles.backingVoice}>
+            <LiveKaraokeLine
+              fragments={parts.backing}
+              active={active}
+              highlightStyle={highlightStyle}
+            />
+          </span>
+        ) : null}
+      </>
+    );
+  }
+
+  /** A line that is not playing: its text, with any backing vocals on their own line as when it plays. */
+  function staticLine(line: LyricsLine) {
+    const parts = karaokeMode && currentLyrics?.karaoke ? lyricFragments.get(line) : undefined;
+    if (!parts?.backing.length) return line.text || "…";
+    const text = (fragments: typeof parts.lead) =>
+      fragments.map((fragment) => fragment.text).join("");
+    return (
+      <>
+        {text(parts.lead)}
+        <span className={styles.backingVoice}>{text(parts.backing)}</span>
+      </>
     );
   }
 
@@ -600,7 +639,7 @@ export default function FullscreenPlayer() {
                 onClick={() => player.seek(Number(line.start_ms) / 1000)}
               >
                 <span dir={isRtlText(line.text) ? "rtl" : "ltr"} className={styles.originalLine}>
-                  {current ? karaokeLine(line, true) : line.text || "…"}
+                  {current ? karaokeLine(line, true) : staticLine(line)}
                 </span>
                 {translatedLine(line)}
               </button>

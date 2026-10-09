@@ -1,4 +1,4 @@
-export type KaraokeSyllable = { start_ms: number; end_ms: number; text: string };
+export type KaraokeSyllable = { start_ms: number; end_ms: number; text: string; voice?: number };
 export type LyricFragment = {
   syllable: KaraokeSyllable;
   index: number;
@@ -72,4 +72,26 @@ export function fragmentProgress(now: number, { syllable, text, fragmentIndex }:
       ((elapsed * syllable.text.length - fragmentIndex) / Math.max(1, text.length)) * 100,
     ),
   );
+}
+
+/** Backing-vocal syllables (``voice: 2``) shown as their own line under the lead.
+ *  The parentheses that marked the backing part are dropped: the separate line says it already.
+ *  A line without backing syllables comes back unchanged, as the lead alone. */
+export function splitVoices(syllables: KaraokeSyllable[]): {
+  lead: KaraokeSyllable[];
+  backing: KaraokeSyllable[];
+} {
+  if (!syllables.some((syllable) => syllable.voice === 2)) return { lead: syllables, backing: [] };
+  const clean = (part: KaraokeSyllable[]) => {
+    const cleaned = part
+      .map((syllable) => ({ ...syllable, text: syllable.text.replace(/[()]/g, "") }))
+      .filter((syllable) => syllable.text.trim());
+    if (cleaned.length)
+      cleaned[cleaned.length - 1] = { ...cleaned.at(-1)!, text: cleaned.at(-1)!.text.trimEnd() };
+    return cleaned;
+  };
+  return {
+    lead: clean(syllables.filter((syllable) => syllable.voice !== 2)),
+    backing: clean(syllables.filter((syllable) => syllable.voice === 2)),
+  };
 }

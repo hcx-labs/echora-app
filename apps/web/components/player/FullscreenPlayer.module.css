@@ -189,3 +189,6 @@
   .mobilePlay[data-slot=button] { width: 58px; height: 58px; }
   .mobileSeek { padding-top: 8px; }
 }
+
+/* Backing vocals: their own smaller, quieter line under the lead, highlighted on their own timing. */
+.backingVoice{display:block;margin-top:.12em;font-size:.68em;line-height:1.25;opacity:.82}

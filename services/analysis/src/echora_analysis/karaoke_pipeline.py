@@ -190,6 +190,37 @@ def build_lines_from_alignment_document(document: dict[str, object]) -> list[dic
     return lines
 
 
+BACKING_VOICE = 2
+
+
+def mark_backing_voice(lines: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Tag backing-vocal syllables with ``"voice": 2`` so players can show them as a second line.
+
+    Lyrics put backing parts in parentheses. A syllable counts as backing when every letter it
+    carries is inside parentheses; one mixing lead and backing letters stays with the lead.
+    Parentheses nest and may span syllables. Lines without backing parts are returned unchanged.
+    """
+    for line in lines:
+        depth = 0
+        for syllable in line.get("syllables") or []:
+            inside = outside = 0
+            for char in str(syllable.get("text", "")):
+                if char == "(":
+                    depth += 1
+                elif char == ")":
+                    depth = max(0, depth - 1)
+                elif char.isalpha():
+                    if depth:
+                        inside += 1
+                    else:
+                        outside += 1
+            if inside and not outside:
+                syllable["voice"] = BACKING_VOICE
+            else:
+                syllable.pop("voice", None)
+    return lines
+
+
 def apply_adaptive_line_padding(lines: list[dict[str, object]]) -> list[dict[str, object]]:
     """Pad line containers only inside silence between aligned syllables."""
     padded = [
@@ -887,6 +918,7 @@ def _backfill_karaoke(
                     "syllable_duration_source": "predicted_token_end",
                     "bound_to_synced_lines": bound_to_source,
                 }
+                result["lines"] = mark_backing_voice(result["lines"])
                 with connection.cursor() as cursor:
                     cursor.execute(
                         """INSERT INTO karaoke_lyrics_variants

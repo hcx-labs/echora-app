@@ -4,7 +4,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 
 const source = stripTypeScriptTypes(readFileSync(new URL('./lyricWords.ts', import.meta.url), 'utf8'));
-const { groupSyllablesByWord, fragmentProgress, lyricWordIsRtl } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+const { groupSyllablesByWord, fragmentProgress, lyricWordIsRtl, splitVoices } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 const syllable = text => ({ text, start_ms: 1000, end_ms: 2000 });
 const wordText = words => words.map(word => word.map(fragment => fragment.text).join(''));
 
@@ -77,4 +77,16 @@ test('brackets and quotes survive fragment segmentation unchanged', () => {
   for (const text of ["تو 'Googles' کر لے یار", 'یہ میرا فیشن (میں کتنا passion)', "I'm a popstar, ناں ٹوک مینوں"]) {
     assert.equal(wordText(groupSyllablesByWord([syllable(text)])).join(''), text);
   }
+});
+
+test('backing vocals become their own line without the parentheses', () => {
+  const at = (text, start, voice) => ({ text, start_ms: start, end_ms: start + 100, ...(voice ? { voice } : {}) });
+  const line = [at('Lone', 0), at('ly (', 100), at('so ', 50, 2), at('lone', 150, 2), at('ly)', 250, 2)];
+  const { lead, backing } = splitVoices(line);
+  assert.deepEqual(lead.map(s => s.text), ['Lone', 'ly']);
+  assert.deepEqual(backing.map(s => s.text), ['so ', 'lone', 'ly']);
+  assert.equal(backing[0].start_ms, 50);  // timing is kept, so both lines can fill at once
+  const plain = [at('No ', 0), at('backing', 100)];
+  assert.equal(splitVoices(plain).lead, plain);  // untouched when there is no second voice
+  assert.equal(splitVoices(plain).backing.length, 0);
 });
