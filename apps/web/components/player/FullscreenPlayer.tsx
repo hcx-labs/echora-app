@@ -625,6 +625,11 @@ export default function FullscreenPlayer() {
         >
           {timedLines.map((line, index) => {
             const current = index === activeLine && lineSinging;
+            // Backing vocals can still be sung after the next line starts: keep painting the
+            // previous line while its timing runs past the current line's start.
+            const overlapping =
+              index === activeLine - 1 &&
+              Number(line.end_ms) > Number(timedLines[activeLine]?.start_ms);
             return (
               <button
                 key={`${line.start_ms}-${index}`}
@@ -639,7 +644,7 @@ export default function FullscreenPlayer() {
                 onClick={() => player.seek(Number(line.start_ms) / 1000)}
               >
                 <span dir={isRtlText(line.text) ? "rtl" : "ltr"} className={styles.originalLine}>
-                  {current ? karaokeLine(line, true) : staticLine(line)}
+                  {current || overlapping ? karaokeLine(line, true) : staticLine(line)}
                 </span>
                 {translatedLine(line)}
               </button>
