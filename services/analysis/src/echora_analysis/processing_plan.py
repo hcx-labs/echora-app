@@ -166,17 +166,7 @@ def plan_karaoke(
             f"""SELECT DISTINCT ts.external_id
                 FROM track_sources ts JOIN lyrics l ON l.track_id=ts.track_id
                 WHERE ts.source_type='subsonic'{restriction}
-                  AND (
-                    (coalesce((l.provenance->>'manual')::boolean, false) AND l.text IS NOT NULL)
-                    OR (
-                      coalesce((l.provenance->>'synced')::boolean, false)
-                      AND l.text IS NOT NULL
-                      AND jsonb_typeof(l.provenance->'lines')='array'
-                      AND jsonb_array_length(l.provenance->'lines') > 0
-                      AND EXISTS (SELECT 1 FROM jsonb_array_elements(l.provenance->'lines') line
-                                  WHERE jsonb_typeof(line->'start_ms')='number')
-                    )
-                  )
+                  AND NULLIF(btrim(l.text), '') IS NOT NULL
                   AND NOT EXISTS (
                     SELECT 1 FROM karaoke_lyrics_variants kv
                     WHERE kv.track_id=l.track_id AND kv.bounded=false
