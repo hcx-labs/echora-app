@@ -183,6 +183,10 @@ def test_camera_movement_detection_respects_local_negation():
         "The framing slowly tightens around the boat.",
         "The camera does not pan, it zooms in.",
         "The camera holds still, then gently pans left.",
+        "The central figure slowly steps forward, then returns.",
+        "She leans toward the camera and smiles.",
+        "The man walks slowly toward the viewer.",
+        "The silhouette moves closer, revealing his face.",
     ):
         assert zooms(prompt), prompt
     for prompt in (
@@ -206,6 +210,9 @@ def test_camera_movement_detection_respects_local_negation():
         "The camera never zooms.",
         "The camera does not pan, tilt or zoom.",
         "The camera is locked off while leaves move.",
+        "Nobody steps forward; the figure sways sideways with feet planted.",
+        "He does not lean toward the camera.",
+        "Mist drifts toward the foreground while waves roll in.",
     ):
         assert not zooms(prompt), prompt
     assert not zooms(DEFAULT_INSTRUCTIONS)

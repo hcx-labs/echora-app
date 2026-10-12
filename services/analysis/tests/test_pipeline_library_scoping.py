@@ -4,6 +4,7 @@ import ast
 from contextlib import nullcontext
 import functools
 import hashlib
+import logging
 from echora_analysis.settings import Settings
 from pathlib import Path
 from types import SimpleNamespace
@@ -95,6 +96,7 @@ class LibraryScopingTests(unittest.TestCase):
             SongTranscriber=MagicMock(),
             needs_repair=lambda draft: False,
             diagnostic_writer=MagicMock(),
+            logging=logging,
         )
         for name in (
             "resolve_library_id",
@@ -104,6 +106,7 @@ class LibraryScopingTests(unittest.TestCase):
             "record_track",
             "finish_attempt",
             "_store_lyrics",
+            "store_original",
             "release_model",
             "_stop_fa_kara_worker",
             "_stored_model_revision",
@@ -125,7 +128,12 @@ class LibraryScopingTests(unittest.TestCase):
         with self.assertRaises(Cancelled):
             ns["backfill_lyrics"]("https://music", "user", "password")
         ns["plan_lyrics"].assert_called_once_with(self.connection, None, library_id=self.library_id)
-        sql, params = self.cursor.execute.call_args.args
+        # The track selection; per-track lyric lookups follow it.
+        sql, params = next(
+            call.args
+            for call in self.cursor.execute.call_args_list
+            if "track_sources" in call.args[0]
+        )
         self.assertIn("ts.library_id=%s", sql)
         self.assertEqual(params, (["shared-id"], self.library_id))
         ns["release_model"].assert_called_once_with(model)

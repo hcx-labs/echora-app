@@ -67,7 +67,7 @@ export type PlayerLyrics = {
     start_ms: number | null;
     end_ms?: number;
     text: string;
-    syllables?: { start_ms: number; end_ms: number; text: string }[];
+    syllables?: { start_ms: number; end_ms: number; text: string; voice?: number }[];
   }[];
   text?: string;
   language?: string;
@@ -78,7 +78,7 @@ export type PlayerLyrics = {
       start_ms: number | null;
       end_ms?: number;
       text: string;
-      syllables?: { start_ms: number; end_ms: number; text: string }[];
+      syllables?: { start_ms: number; end_ms: number; text: string; voice?: number }[];
     }[];
   };
 };

@@ -50,6 +50,18 @@ class Settings(BaseSettings):
     fa_kara_aligner: str = Field("yohane")
     fa_kara_refine_all_lines: bool = Field(False)
     fa_kara_duration_aware_priors: bool = Field(False)
+    # False aligns from the audio alone: synced-lyric line times only give the line breaks.
+    fa_kara_use_source_times: bool = Field(False)
+    # Minimum durations on the audio-only path (0 = off): stop the path cramming words.
+    fa_kara_min_letter_ms: int = Field(40, ge=0)
+    fa_kara_min_token_ms: int = Field(100, ge=0)
+    # Fixed shift of every karaoke time on the audio-only path; calibrated at +45 ms.
+    fa_kara_timing_offset_ms: int = Field(45, ge=-500, le=500)
+    # Minimum durations follow each line's sung pace (x this ratio, capped by the minimums above),
+    # so fast rap isn't stretched; 0 applies the minimums as a fixed floor.
+    fa_kara_duration_pace_ratio: float = Field(0.9, ge=0.0, le=5.0)
+    # Extra cost per letter frame where the vocal stem is quiet (0: off).
+    fa_kara_vocal_activity_weight: float = Field(2.0, ge=0.0, le=20.0)
     # Base image for analysis on Modal. Release images set it to the GPU image of
     # their own version, so remote dependencies match the worker's.
     modal_image: str = Field(
@@ -340,6 +352,12 @@ PROCESSING_FIELDS = (
     "fa_kara_aligner",
     "fa_kara_refine_all_lines",
     "fa_kara_duration_aware_priors",
+    "fa_kara_use_source_times",
+    "fa_kara_min_letter_ms",
+    "fa_kara_min_token_ms",
+    "fa_kara_timing_offset_ms",
+    "fa_kara_duration_pace_ratio",
+    "fa_kara_vocal_activity_weight",
 )
 
 

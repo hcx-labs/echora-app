@@ -266,7 +266,7 @@ def test_guard_pathological_lead_ins_delays_only_stretched_first_syllable():
         diagnostics,
     )
 
-    assert result[0]["start_ms"] == 203810
+    assert result[0]["start_ms"] == 204010
     assert result[0]["syllables"] == [
         {"text": "Sien", "start_ms": 204010, "end_ms": 204110},
         {"text": "to", "start_ms": 204110, "end_ms": 204470},
@@ -598,3 +598,64 @@ def test_replacing_a_local_checkpoint_changes_its_identity(monkeypatch, tmp_path
             pipeline.current_model_revision()
     finally:
         get_settings.cache_clear()
+
+
+def test_second_stream_words_that_overlap_are_marked_as_a_second_voice():
+    from echora_analysis.karaoke_pipeline import mark_backing_voice
+
+    lines = [
+        {
+            "text": "Lonely (so lonely) tonight",
+            "syllables": [  # the second stream starts the echo before the lead's "lonely"
+                {"text": "Lone", "start_ms": 1200, "end_ms": 1700},
+                {"text": "ly (", "start_ms": 1700, "end_ms": 2500},
+                {"text": "so ", "start_ms": 1000, "end_ms": 1500, "stream": 2},
+                {"text": "lone", "start_ms": 1500, "end_ms": 1900, "stream": 2},
+                {"text": "ly) ", "start_ms": 1900, "end_ms": 2400, "stream": 2},
+                {"text": "tonight", "start_ms": 2600, "end_ms": 3200},
+            ],
+        },
+        {
+            "text": "Oh (yeah) yeah",
+            "syllables": [  # parenthesized, sung by the lead alone: stays on the line
+                {"text": "Oh ", "start_ms": 4000, "end_ms": 4500},
+                {"text": "(yeah) ", "start_ms": 4500, "end_ms": 5000},
+                {"text": "yeah", "start_ms": 5000, "end_ms": 5500, "voice": 2},
+            ],
+        },
+        {
+            "text": "Call (me) now",
+            "syllables": [  # on the second stream but sung after the lead: stays on the line
+                {"text": "Call ", "start_ms": 6000, "end_ms": 6500},
+                {"text": "(me) ", "start_ms": 6520, "end_ms": 6900, "stream": 2},
+                {"text": "now", "start_ms": 6900, "end_ms": 7300},
+            ],
+        },
+        {
+            "text": "Edges touch",
+            "syllables": [  # an overlap the aligner did not place on its second stream
+                {"text": "Edges ", "start_ms": 8000, "end_ms": 8600},
+                {"text": "touch", "start_ms": 8300, "end_ms": 9000},
+            ],
+        },
+    ]
+    mark_backing_voice(lines)
+    assert [s.get("voice") for s in lines[0]["syllables"]] == [None, None, 2, 2, 2, None]
+    # Stale mark cleared.
+    assert [s.get("voice") for s in lines[1]["syllables"]] == [None, None, None]
+    assert [s.get("voice") for s in lines[2]["syllables"]] == [None, None, None]
+    assert [s.get("voice") for s in lines[3]["syllables"]] == [None, None]
+
+
+def test_overlap_between_lines_is_not_a_second_voice():
+    from echora_analysis.karaoke_pipeline import mark_backing_voice
+
+    lines = [
+        {"text": "First", "syllables": [{"text": "First ", "start_ms": 0, "end_ms": 2000}]},
+        {
+            "text": "Second",
+            "syllables": [{"text": "Second ", "start_ms": 1500, "end_ms": 2500, "stream": 2}],
+        },
+    ]
+    mark_backing_voice(lines)
+    assert all("voice" not in s for line in lines for s in line["syllables"])

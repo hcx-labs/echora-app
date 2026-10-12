@@ -56,6 +56,11 @@
 
 /* Size containment keeps the panel from adding height, so the stretch gives it exactly the track column's. */
 .panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; contain: size; border: 1px solid rgb(255 255 255 / .08); background: rgb(0 0 0 / .32); backdrop-filter: blur(6px); }
+/* The blur softens the moving backdrop behind the panel. With the backdrop off (or hidden, below
+   1200 x 720) there is only a smooth gradient behind it: blurring that looks the same, yet costs
+   a full-panel blur every frame the lyrics change. */
+.panelFlat { backdrop-filter: none; }
+@media (max-width: 1199px), (max-height: 719px) { .panel { backdrop-filter: none; } }
 .panelHeader { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 0 16px 0 24px; border-bottom: 1px solid rgb(255 255 255 / .08); }
 .panelTabs[data-slot=tabs-list] { border-bottom: 0; gap: 8px; }
 .panelTabs [data-slot=tabs-trigger] { height: 52px; margin-right: 12px; font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: rgb(255 255 255 / .55); }
@@ -90,6 +95,10 @@
  * replaces it starts exactly there and fades to the past colour, with no white flash.
  */
 .karaoke .line[data-state=active] { color: var(--accent); }
+/* Karaoke accents can be light gray or white: recede the other lines further so the wipe stands out. */
+.karaoke .line[data-state=next] { color: rgb(255 255 255 / .2); }
+.karaoke .line[data-state=past] { color: rgb(255 255 255 / .13); }
+.karaoke .line:not([data-state=active]):hover { color: rgb(255 255 255 / .8); }
 .line:hover { color: rgb(255 255 255 / .8); opacity: 1; }
 .originalLine { unicode-bidi: isolate; overflow-wrap: anywhere; }
 /* The face comes from the app font stack and :lang rules; RTL scripts just need more room. */
@@ -189,3 +198,6 @@
   .mobilePlay[data-slot=button] { width: 58px; height: 58px; }
   .mobileSeek { padding-top: 8px; }
 }
+
+/* Backing vocals: their own smaller, quieter line under the lead, highlighted on their own timing. */
+.backingVoice{display:block;margin-top:.12em;font-size:.68em;line-height:1.25;opacity:.82}

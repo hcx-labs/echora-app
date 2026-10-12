@@ -16,6 +16,11 @@ from echora_analysis import sync_plan
 def planner(monkeypatch):
     from echora_analysis import translation_storage
 
+    # Optional pipelines add their own selection queries; keep the host's config out.
+    for name in ("MOSS_MODEL_ID", "MOSS_REVISION", "ECHORA_RECORDING_MODEL_MANIFEST"):
+        monkeypatch.delenv(name, raising=False)
+    get_settings.cache_clear()
+
     monkeypatch.setattr(
         translation_storage, "load_settings", lambda: (SimpleNamespace(enabled=False), None)
     )
@@ -156,6 +161,7 @@ def test_entire_library_selects_recording_only_backfill_without_other_models(pla
     monkeypatch.delenv("ECHORA_RECORDING_MATCH_POLICY", raising=False)
     get_settings.cache_clear()
     monkeypatch.delenv("MOSS_MODEL_ID", raising=False)
+    monkeypatch.delenv("MOSS_REVISION", raising=False)
     get_settings.cache_clear()
     connection, cursor, audio, _ = planner
     cursor.fetchall.side_effect = [[("existing",), ("ready",)], []]
