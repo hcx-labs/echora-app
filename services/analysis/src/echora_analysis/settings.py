@@ -49,10 +49,6 @@ class Settings(BaseSettings):
     fa_kara_model_path: str | None = Field(None)
     fa_kara_audio_speed: float = Field(1.0, ge=0.5, le=1.5)
     fa_kara_aligner: str = Field("yohane")
-    fa_kara_refine_all_lines: bool = Field(False)
-    fa_kara_duration_aware_priors: bool = Field(False)
-    # False aligns from the audio alone: synced-lyric line times only give the line breaks.
-    fa_kara_use_source_times: bool = Field(False)
     # Minimum durations on the audio-only path (0 = off): stop the path cramming words.
     fa_kara_min_letter_ms: int = Field(40, ge=0)
     fa_kara_min_token_ms: int = Field(100, ge=0)
@@ -351,9 +347,6 @@ PROCESSING_FIELDS = (
     "fa_kara_revision",
     "fa_kara_audio_speed",
     "fa_kara_aligner",
-    "fa_kara_refine_all_lines",
-    "fa_kara_duration_aware_priors",
-    "fa_kara_use_source_times",
     "fa_kara_min_letter_ms",
     "fa_kara_min_token_ms",
     "fa_kara_timing_offset_ms",

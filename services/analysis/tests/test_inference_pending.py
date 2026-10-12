@@ -70,24 +70,10 @@ class InferenceRegression(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "source index 1"):
             vendor.normalize_source_lines(["hello", "Ж"], "en", 0, 1)
 
-    def test_blank_anchors_and_bounds(self):
-        source = [
-            {"text": "one", "start_ms": 100},
-            {"text": "", "start_ms": 500},
-            {"text": "two", "start_ms": 900},
-        ]
-        self.assertEqual(len(pipeline._anchored_source_lines(source)), 3)
-        raw = [
-            {
-                "text": "one",
-                "start_ms": 0,
-                "end_ms": 800,
-                "syllables": [{"start_ms": 0, "end_ms": 800}],
-            }
-        ]
-        bounded = pipeline.bound_to_synced_lines(raw, source)
-        self.assertEqual(bounded[0]["syllables"], [{"start_ms": 100, "end_ms": 500}])
-        self.assertEqual(raw[0]["end_ms"], 800)
+    def test_source_lines_give_line_texts_only(self):
+        source = [{"text": "one", "start_ms": 100}, {"text": "", "start_ms": 500}, {"text": " two"}]
+        self.assertEqual(pipeline._source_line_texts(source), ["one", "", "two"])
+        self.assertEqual(pipeline._source_line_texts([{"text": ""}]), [])
 
     def test_empty_line_document(self):
         doc = {

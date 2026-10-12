@@ -9,12 +9,7 @@ sys.path.insert(0, str(VENDOR))
 from ctc_segmentation import SourcePrior, align_with_source_priors  # noqa: E402
 from align_yohane import (  # noqa: E402
     _assign_ctc_blank_holds,
-    _calibrate_source_priors,
-    _collapsed_token_count,
-    _front_loaded_ratio,
     _inference_chunk_starts,
-    _is_collapsed_line,
-    _maximum_internal_gap,
 )
 
 
@@ -85,79 +80,6 @@ def test_source_prior_disambiguates_repeated_acoustic_occurrences():
     )
 
     assert spans[0][0].start == 5
-
-
-def test_source_calibration_corrects_global_offset_and_rejects_bad_line():
-    priors, diagnostics = _calibrate_source_priors(
-        [10.0, 20.0, 30.0, 40.0],
-        [10.5, 20.5, 37.0, 40.5],
-        [0, 4, 8, 12],
-    )
-
-    assert [prior.target_index for prior in priors] == [0, 4, 12]
-    assert all(
-        abs(prior.time_seconds - expected) < 0.01
-        for prior, expected in zip(priors, [10.5, 20.5, 40.5])
-    )
-    assert diagnostics["source_offset_ms"] == 500
-    assert diagnostics["source_outlier_lines"] == [2]
-    assert diagnostics["trusted_source_line_ratio"] == 0.75
-
-
-def test_collapsed_line_requires_multiple_short_tokens_and_low_interval_occupancy():
-    from torchaudio.functional import TokenSpan
-
-    collapsed = [[TokenSpan(1, 10, 11, 0.8)], [TokenSpan(2, 12, 13, 0.8)]]
-    healthy = [[TokenSpan(1, 10, 17, 0.8)], [TokenSpan(2, 18, 25, 0.8)]]
-
-    assert _collapsed_token_count(collapsed, 0.02) == 2
-    assert _is_collapsed_line(collapsed, 0.02, 0.0, 2.0)
-    assert not _is_collapsed_line(healthy, 0.02, 0.0, 2.0)
-    assert not _is_collapsed_line(collapsed, 0.02, 0.0, 0.4)
-
-
-def test_collapsed_line_rejects_well_occupied_source_interval():
-    from torchaudio.functional import TokenSpan
-
-    groups = [
-        [TokenSpan(1, 0, 1, 0.8)],
-        [TokenSpan(2, 1, 2, 0.8)],
-        [TokenSpan(3, 2, 40, 0.8)],
-    ]
-
-    assert _collapsed_token_count(groups, 0.02) == 2
-    assert not _is_collapsed_line(groups, 0.02, 0.0, 1.0)
-
-
-def test_internal_gap_marks_line_for_focused_retry():
-    from torchaudio.functional import TokenSpan
-
-    groups = [
-        [TokenSpan(1, 0, 20, 0.8)],
-        [TokenSpan(2, 240, 260, 0.8)],
-    ]
-
-    assert _maximum_internal_gap(groups, 0.02) == 4.4
-    assert _is_collapsed_line(groups, 0.02, 0.0, 6.0)
-
-
-def test_front_loaded_line_marks_dense_early_highlighting_for_retry():
-    from torchaudio.functional import TokenSpan
-
-    groups = [[TokenSpan(token, token * 2, token * 2 + 2, 0.8)] for token in range(8)]
-
-    assert _front_loaded_ratio(groups, 0.02, 0.0, 4.0) == 1.0
-    assert _is_collapsed_line(groups, 0.02, 0.0, 4.0)
-
-
-def test_front_load_ignores_short_lines_and_even_pacing():
-    from torchaudio.functional import TokenSpan
-
-    short = [[TokenSpan(token, token, token + 1, 0.8)] for token in range(4)]
-    even = [[TokenSpan(token, token * 25, token * 25 + 10, 0.8)] for token in range(8)]
-
-    assert _front_loaded_ratio(short, 0.02, 0.0, 4.0) == 0.0
-    assert _front_loaded_ratio(even, 0.02, 0.0, 4.0) < 0.45
 
 
 def test_inference_chunks_do_not_create_tiny_tail_passes():
