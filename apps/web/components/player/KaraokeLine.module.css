@@ -1,5 +1,29 @@
-.line{position:relative;display:inline-block;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;vertical-align:baseline;color:var(--muted-foreground)}
-.paint{position:absolute;inset:0;pointer-events:none;color:var(--accent)}
+.line {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  vertical-align: baseline;
+  /* Unsung text stays dim, so even a near-white accent reads as the sung part. */
+  color: rgb(255 255 255 / 0.3);
+}
+.paint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: var(--accent);
+}
 /* Holds the clip path. Kept rendered (not display:none) so every engine resolves it. */
-.clipDefs{position:absolute;width:0;height:0;overflow:hidden;pointer-events:none}
-.glowTarget{position:absolute;pointer-events:none}
+.clipDefs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.glowTarget {
+  position: absolute;
+  pointer-events: none;
+}

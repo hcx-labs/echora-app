@@ -160,10 +160,10 @@
 @keyframes echora-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes echora-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes echora-slide-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
-.motion-enter { animation: echora-enter 280ms var(--ease-out-soft) both; }
-.motion-fade { animation: echora-fade 220ms ease-out both; }
-.motion-slide { animation: echora-slide-in 260ms var(--ease-out-soft) both; }
-.motion-stagger > * { animation: echora-enter 320ms var(--ease-out-soft) both; }
+.motion-enter { animation: echora-enter 280ms var(--ease-out-soft) backwards; }
+.motion-fade { animation: echora-fade 220ms ease-out backwards; }
+.motion-slide { animation: echora-slide-in 260ms var(--ease-out-soft) backwards; }
+.motion-stagger > * { animation: echora-enter 320ms var(--ease-out-soft) backwards; }
 .motion-stagger > :nth-child(2) { animation-delay: 30ms; } .motion-stagger > :nth-child(3) { animation-delay: 60ms; }
 .motion-stagger > :nth-child(4) { animation-delay: 90ms; } .motion-stagger > :nth-child(5) { animation-delay: 120ms; }
 .motion-stagger > :nth-child(6) { animation-delay: 150ms; } .motion-stagger > :nth-child(n+7) { animation-delay: 180ms; }

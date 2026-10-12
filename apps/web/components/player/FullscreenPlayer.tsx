@@ -149,9 +149,13 @@ export default function FullscreenPlayer() {
   const [highlightStyle, setHighlightStyle] = useState(
     defaultPlaybackPreferences.karaokeHighlightStyle,
   );
+  // Whether the audio-reactive backdrop is moving behind the panel (its blur only matters then).
+  const [backdropMoving, setBackdropMoving] = useState(defaultPlaybackPreferences.wavesEnabled);
   useEffect(() => {
-    const accept = (value: PlaybackPreferences) =>
+    const accept = (value: PlaybackPreferences) => {
       setHighlightStyle(value.karaokeHighlightStyle === "syllable" ? "syllable" : "lava");
+      setBackdropMoving(value.wavesEnabled !== false);
+    };
     const frame = requestAnimationFrame(() => accept(readPlaybackPreferences()));
     const update = (event: Event) => accept((event as CustomEvent<PlaybackPreferences>).detail);
     window.addEventListener("echora:playback-preferences", update);
@@ -903,7 +907,10 @@ export default function FullscreenPlayer() {
                 </div>
               </section>
 
-              <section className={styles.panel} aria-label="Lyrics and queue">
+              <section
+                className={`${styles.panel} ${backdropMoving ? "" : styles.panelFlat}`}
+                aria-label="Lyrics and queue"
+              >
                 <header className={styles.panelHeader}>
                   <Tabs
                     value={activePanel}
@@ -952,8 +959,40 @@ function linePosition(lines: LyricsLine[], nowMs: number): string {
   return `${index}:${nowMs < end ? 1 : 0}`;
 }
 
-/** The only lyric element that follows the clock every frame. */
-function LiveKaraokeLine(props: Omit<ComponentProps<typeof KaraokeLine>, "now">) {
-  const now = useSyncExternalStore(subscribePlaybackTime, playbackTimeSnapshot, () => 0) * 1000;
-  return <KaraokeLine {...props} now={now} />;
+/** Karaoke wipes repaint at 30 fps: every frame they change costs a full paint and composite. */
+const KARAOKE_FRAME_MS = 1000 / 30;
+const karaokeListeners = new Set<() => void>();
+let karaokeFrameAt = -Infinity;
+let karaokeTimeAt = 0;
+let stopKaraokeClock: (() => void) | null = null;
+
+/** One shared gate, so every live line paints on the same frames. Seeks always go through. */
+function subscribeKaraokeTime(listener: () => void) {
+  karaokeListeners.add(listener);
+  stopKaraokeClock ??= subscribePlaybackTime(() => {
+    const at = performance.now();
+    const time = playbackTimeSnapshot();
+    const jumped = Math.abs(time - karaokeTimeAt) > 0.1;
+    // A few ms of slack so a 60 Hz display lands on every other frame, not every third.
+    if (!jumped && at - karaokeFrameAt < KARAOKE_FRAME_MS - 4) return;
+    karaokeFrameAt = at;
+    karaokeTimeAt = time;
+    karaokeListeners.forEach((each) => each());
+  });
+  return () => {
+    karaokeListeners.delete(listener);
+    if (karaokeListeners.size) return;
+    stopKaraokeClock?.();
+    stopKaraokeClock = null;
+  };
+}
+
+const playbackClock = {
+  subscribe: subscribeKaraokeTime,
+  now: () => playbackTimeSnapshot() * 1000,
+};
+
+/** The only lyric element that follows the clock (at 30 fps), outside React rendering. */
+function LiveKaraokeLine(props: Omit<ComponentProps<typeof KaraokeLine>, "now" | "clock">) {
+  return <KaraokeLine {...props} clock={playbackClock} />;
 }

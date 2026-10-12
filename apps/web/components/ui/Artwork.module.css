@@ -14,5 +14,9 @@
 .artwork[data-now-playing=playing] .nowPlaying i:nth-child(2){animation-duration:.7s;animation-delay:-.3s}
 .artwork[data-now-playing=playing] .nowPlaying i:nth-child(3){animation-duration:.85s;animation-delay:-.55s}
 .artwork[data-now-playing=paused] .nowPlaying i:nth-child(2){transform:scaleY(.6)}
+/* Behind the full-screen player the bars are hidden: pause them, or they keep the compositor
+   producing frames. The player's own queue keeps its bars moving. */
+:global(body.echora-fullscreen-player) .artwork[data-now-playing=playing] .nowPlaying i{animation-play-state:paused}
+:global(body.echora-fullscreen-player [role=dialog]) .artwork[data-now-playing=playing] .nowPlaying i{animation-play-state:running}
 @keyframes now-playing-bar{from{transform:scaleY(.25)}to{transform:scaleY(1)}}
 @media (prefers-reduced-motion: reduce){.artwork[data-now-playing=playing] .nowPlaying i{animation:none}.artwork[data-now-playing=playing] .nowPlaying i:nth-child(2){transform:scaleY(.6)}}

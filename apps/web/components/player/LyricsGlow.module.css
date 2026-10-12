@@ -1,1 +1,41 @@
-.glow{position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none;mix-blend-mode:screen}@media(max-width:1199px),(max-height:719px){.glow{z-index:5}}@media(prefers-reduced-motion:reduce){.glow{display:none}}
+.glow {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+  mix-blend-mode: screen;
+  --glow-rgb: 77 204 184;
+}
+/* One light: a 100 px soft gradient, positioned and scaled with transform (compositor only).
+   The stops follow the old shader's falloff, exp(-2.5 d²), at its 0.08 peak alpha. */
+.spot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100px;
+  height: 100px;
+  opacity: 0;
+  transform-origin: 0 0;
+  will-change: transform, opacity;
+  background: radial-gradient(
+    closest-side,
+    rgb(var(--glow-rgb) / 0.08) 0%,
+    rgb(var(--glow-rgb) / 0.054) 40%,
+    rgb(var(--glow-rgb) / 0.02) 75%,
+    rgb(var(--glow-rgb) / 0.0066) 95%,
+    transparent 100%
+  );
+}
+@media (max-width: 1199px), (max-height: 719px) {
+  .glow {
+    z-index: 5;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .glow {
+    display: none;
+  }
+}

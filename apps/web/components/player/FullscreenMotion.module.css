@@ -1,6 +1,8 @@
-/* The view fades in over the app, above the player bar, and fades back out. */
+/* The view fades in over the app, above the player bar, and fades back out. Entrances fill
+   backwards only: they end at the element's own style, and holding the last frame would keep
+   the whole view on its own compositor layer for as long as it is open. */
 .surface {
-  animation: player-surface-in var(--motion-slow) var(--motion-enter) both;
+  animation: player-surface-in var(--motion-slow) var(--motion-enter) backwards;
 }
 
 .surface.closing {
@@ -9,7 +11,7 @@
 }
 
 .content {
-  animation: player-content-in var(--motion-sheet) var(--ease-out-soft) both;
+  animation: player-content-in var(--motion-sheet) var(--ease-out-soft) backwards;
 }
 
 @keyframes player-surface-in {
