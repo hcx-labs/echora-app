@@ -37,7 +37,7 @@ FA_KARA_REVISION = "168ca5f01cecaa1290e31c0ce8dc44af8c7451bb"
 # timing calibration.
 KARAOKE_PIPELINE_REVISION = "v4-audio-only-duration-floor"
 DEFAULT_MODEL_ID = "hcX02/echora-mms-300m-multilingual-lyrics-forced-aligner"
-DEFAULT_MODEL_REVISION = "1f241323a4f5d961160ae7c7c88e5c7d27f32f59"
+DEFAULT_MODEL_REVISION = "701595f1be1125cce835d4e32fd432358ea8ed9f"
 _DIALOGUE = re.compile(r"^Dialogue: [^,]*,([^,]+),([^,]+),(?:[^,]*,){6}(.*)$")
 _KARAOKE_TAG = re.compile(r"\{\\k(\d+)\}")
 _ASS_TAG = re.compile(r"\{[^}]*\}")
