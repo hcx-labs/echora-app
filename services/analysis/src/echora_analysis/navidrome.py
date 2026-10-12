@@ -399,6 +399,16 @@ class NavidromeClient:
             },
         )
         response.raise_for_status()
+        if "application/json" in response.headers.get("content-type", ""):
+            # A Subsonic error (e.g. a song Navidrome no longer has), not audio: never cache it.
+            try:
+                payload = response.json().get("subsonic-response", {})
+                message = payload.get("error", {}).get(
+                    "message", "Navidrome returned JSON instead of audio"
+                )
+            except Exception:
+                message = "Navidrome returned JSON instead of audio"
+            raise RuntimeError(str(message))
         audio = response.content
         if state:
             state["check"]()

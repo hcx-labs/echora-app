@@ -67,7 +67,13 @@ def test_batch_audio_cache_reuses_bytes_and_cleans_up():
     client.base_url, client.username = "https://music/", "user"
     client._auth = lambda: {}
     client.client = SimpleNamespace(
-        get=Mock(return_value=SimpleNamespace(content=b"audio", raise_for_status=lambda: None))
+        get=Mock(
+            return_value=SimpleNamespace(
+                content=b"audio",
+                headers={"content-type": "audio/flac"},
+                raise_for_status=lambda: None,
+            )
+        )
     )
 
     class Cancelled(BaseException):
@@ -83,6 +89,34 @@ def test_batch_audio_cache_reuses_bytes_and_cleans_up():
             raise Cancelled()
     assert not directory.exists()
     assert _batch_state.get() is None
+
+
+def test_audio_bytes_rejects_a_subsonic_error_instead_of_returning_it_as_audio():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import pytest
+
+    client = object.__new__(NavidromeClient)
+    client.base_url, client.username = "https://music/", "user"
+    client._auth = lambda: {}
+    error = {
+        "subsonic-response": {
+            "status": "failed",
+            "error": {"code": 70, "message": "Song not found"},
+        }
+    }
+    client.client = SimpleNamespace(
+        get=Mock(
+            return_value=SimpleNamespace(
+                content=b"{}",
+                headers={"content-type": "application/json"},
+                json=lambda: error,
+                raise_for_status=lambda: None,
+            )
+        )
+    )
+    with pytest.raises(RuntimeError, match="Song not found"):
+        client.audio_bytes("dropped")
 
 
 def test_lyrics_selects_main_and_preserves_all_structured_tracks():
