@@ -155,6 +155,30 @@ def main(argv=None):
     parser.add_argument(
         "--timeline_json", default=None, help="Source lyric line timestamps for anchored alignment"
     )
+    parser.add_argument("--min_letter_ms", type=int, default=0, help="Minimum duration per letter")
+    parser.add_argument(
+        "--min_token_ms", type=int, default=0, help="Minimum duration per acoustic token"
+    )
+    parser.add_argument(
+        "--timing_offset_ms", type=int, default=0, help="Shift every token time (calibration)"
+    )
+    parser.add_argument(
+        "--vocal_activity_weight",
+        type=float,
+        default=0.0,
+        help="Extra cost per letter frame where the vocal stem is quiet (0: off)",
+    )
+    parser.add_argument(
+        "--duration_pace_ratio",
+        type=float,
+        default=0.0,
+        help="Scale the minimum durations to each line's pace (0: fixed floor)",
+    )
+    parser.add_argument(
+        "--ignore_source_times",
+        action="store_true",
+        help="Use the timeline only for line breaks: align from the audio alone",
+    )
     parser.add_argument(
         "--refine_all_lines",
         action="store_true",
@@ -356,7 +380,9 @@ def main(argv=None):
             alignment_results = align_audio_with_timeline(
                 y_processed,
                 [tokens for tokens, _ in timed_token_lines],
-                [line["start_ms"] for _, line in timed_token_lines],
+                None
+                if args.ignore_source_times
+                else [line["start_ms"] for _, line in timed_token_lines],
                 sr=sr,
                 speed=audio_speed,
                 use_gpu=align_use_gpu,
@@ -364,6 +390,11 @@ def main(argv=None):
                 refine_all_lines=args.refine_all_lines,
                 duration_aware_priors=args.duration_aware_priors,
                 reference_audio=reference_processed,
+                min_letter_ms=args.min_letter_ms,
+                min_token_ms=args.min_token_ms,
+                timing_offset_ms=args.timing_offset_ms,
+                duration_pace_ratio=args.duration_pace_ratio,
+                vocal_activity_weight=args.vocal_activity_weight,
             )
     else:
         alignment_results = align_func(

@@ -33,7 +33,9 @@ from .processing_plan import plan_karaoke, resolve_library_id
 logger = logging.getLogger(__name__)
 
 FA_KARA_REVISION = "168ca5f01cecaa1290e31c0ce8dc44af8c7451bb"
-KARAOKE_PIPELINE_REVISION = "v3-matched-reference-grid"
+# v4: aligned from the audio alone (no synced-line times), minimum syllable durations, +45 ms
+# timing calibration.
+KARAOKE_PIPELINE_REVISION = "v4-audio-only-duration-floor"
 DEFAULT_MODEL_ID = "hcX02/echora-mms-300m-multilingual-lyrics-forced-aligner"
 DEFAULT_MODEL_REVISION = "1f241323a4f5d961160ae7c7c88e5c7d27f32f59"
 _DIALOGUE = re.compile(r"^Dialogue: [^,]*,([^,]+),([^,]+),(?:[^,]*,){6}(.*)$")
@@ -193,31 +195,53 @@ def build_lines_from_alignment_document(document: dict[str, object]) -> list[dic
 BACKING_VOICE = 2
 
 
-def mark_backing_voice(lines: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Tag backing-vocal syllables with ``"voice": 2`` so players can show them as a second line.
+BACKING_MIN_OVERLAP_MS = 80  # four aligner frames: shorter overlaps are boundary noise
+SECOND_STREAM = 2  # syllable["stream"]: the aligner placed it on its second (overlapping) stream
+WORD_END = re.compile(r"\s[(\[]*$")
 
-    Lyrics put backing parts in parentheses. A syllable counts as backing when every letter it
-    carries is inside parentheses; one mixing lead and backing letters stays with the lead.
-    Parentheses nest and may span syllables. Lines without backing parts are returned unchanged.
+
+def mark_backing_voice(lines: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Tag a line's second, simultaneous voice with ``"voice": 2`` so players can show it as a
+    second line.
+
+    Decided by the aligner, never by parentheses (lyrics also parenthesize words the lead sings
+    alone) or by which word starts first. A phrase (consecutive words of a line) that the aligner
+    placed on its second stream (``"stream": 2``) is a second voice when it overlaps the line's
+    other words by at least ``BACKING_MIN_OVERLAP_MS``; otherwise it stays on the line. Overlaps
+    between lines are not marked: players already show those as two lines. Stale marks are cleared.
     """
     for line in lines:
-        depth = 0
+        words: list[list[dict[str, object]]] = []
+        current: list[dict[str, object]] = []
         for syllable in line.get("syllables") or []:
-            inside = outside = 0
-            for char in str(syllable.get("text", "")):
-                if char == "(":
-                    depth += 1
-                elif char == ")":
-                    depth = max(0, depth - 1)
-                elif char.isalpha():
-                    if depth:
-                        inside += 1
-                    else:
-                        outside += 1
-            if inside and not outside:
-                syllable["voice"] = BACKING_VOICE
+            syllable.pop("voice", None)
+            current.append(syllable)
+            # A word ends at whitespace, also when an opening bracket for the next word is
+            # glued after it ("won't (" then "but").
+            if WORD_END.search(str(syllable.get("text", ""))):
+                words.append(current)
+                current = []
+        if current:
+            words.append(current)
+        phrases: list[list[list[dict[str, object]]]] = []
+        others: list[tuple[int, int]] = []
+        previous_second = False
+        for word in words:
+            second = any(syllable.get("stream") == SECOND_STREAM for syllable in word)
+            if second:
+                if not previous_second:
+                    phrases.append([])
+                phrases[-1].append(word)
             else:
-                syllable.pop("voice", None)
+                others.append((int(word[0].get("start_ms", 0)), int(word[-1].get("end_ms", 0))))
+            previous_second = second
+        for phrase in phrases:
+            start = int(phrase[0][0].get("start_ms", 0))
+            end = max(int(word[-1].get("end_ms", 0)) for word in phrase)
+            if any(min(end, e) - max(start, s) >= BACKING_MIN_OVERLAP_MS for s, e in others):
+                for word in phrase:
+                    for syllable in word:
+                        syllable["voice"] = BACKING_VOICE
     return lines
 
 
@@ -674,6 +698,17 @@ def _run_fa_kara(
             command.extend(["--timeline_json", "timeline.json"])
         if get_settings().fa_kara_refine_all_lines:
             command.append("--refine_all_lines")
+        if not get_settings().fa_kara_use_source_times:
+            command.append("--ignore_source_times")
+            command.extend(["--min_letter_ms", str(get_settings().fa_kara_min_letter_ms)])
+            command.extend(["--min_token_ms", str(get_settings().fa_kara_min_token_ms)])
+            command.extend(["--timing_offset_ms", str(get_settings().fa_kara_timing_offset_ms)])
+            command.extend(
+                ["--duration_pace_ratio", str(get_settings().fa_kara_duration_pace_ratio)]
+            )
+            command.extend(
+                ["--vocal_activity_weight", str(get_settings().fa_kara_vocal_activity_weight)]
+            )
         if get_settings().fa_kara_duration_aware_priors:
             command.append("--duration_aware_priors")
         audio_speed = float(get_settings().fa_kara_audio_speed)
@@ -880,9 +915,11 @@ def _backfill_karaoke(
                     result = next(aligned)
                     if isinstance(result, BaseException):
                         raise result
-                result["lines"] = guard_pathological_lead_ins(
-                    result["lines"], source_lines or [], result["diagnostics"]
-                )
+                use_source_times = get_settings().fa_kara_use_source_times
+                if use_source_times:
+                    result["lines"] = guard_pathological_lead_ins(
+                        result["lines"], source_lines or [], result["diagnostics"]
+                    )
                 # Karaoke now always stores the calibrated unbounded path.
                 # The targeted lead-in guard handles measured multi-second
                 # first-syllable failures without trusting every source window.
@@ -899,7 +936,9 @@ def _backfill_karaoke(
                         "weight": 0.8,
                         "delta_ms": 750,
                         "outliers": "disabled",
-                    },
+                    }
+                    if use_source_times
+                    else "disabled",
                     "source_line_start_stabilization": bound_to_source,
                     "korean_labels": "pronunciation_v1",
                     "pathological_lead_in_guard": {
