@@ -33,21 +33,28 @@ def test_replace_playlist_creates_by_name_when_no_id_exists() -> None:
 
 def test_catalog_exceeds_old_limit_and_probes_short_pages():
     client = object.__new__(NavidromeClient)
+
     def request(method, **params):
-        offset = params['songOffset']
-        return {'searchResult3': {'song': [{'id': str(i)} for i in range(offset, min(offset + 211, 20003))]}}
+        offset = params["songOffset"]
+        return {
+            "searchResult3": {
+                "song": [{"id": str(i)} for i in range(offset, min(offset + 211, 20003))]
+            }
+        }
+
     client._request = request
     assert len(client.all_tracks()) == 20003
 
 
 def test_catalog_rejects_repetition_and_incomplete_responses():
     import pytest
+
     client = object.__new__(NavidromeClient)
-    client._request = lambda *a, **k: {'searchResult3': {'song': [{'id': 'same'}]}}
-    with pytest.raises(RuntimeError, match='Repeating'):
+    client._request = lambda *a, **k: {"searchResult3": {"song": [{"id": "same"}]}}
+    with pytest.raises(RuntimeError, match="Repeating"):
         client.all_tracks()
     client._request = lambda *a, **k: {}
-    with pytest.raises(RuntimeError, match='Incomplete'):
+    with pytest.raises(RuntimeError, match="Incomplete"):
         client.all_tracks()
 
 
@@ -55,17 +62,23 @@ def test_batch_audio_cache_reuses_bytes_and_cleans_up():
     from types import SimpleNamespace
     from unittest.mock import Mock
     from echora_analysis.navidrome import batch_audio_cache, _batch_state
+
     client = object.__new__(NavidromeClient)
-    client.base_url, client.username = 'https://music/', 'user'
+    client.base_url, client.username = "https://music/", "user"
     client._auth = lambda: {}
-    client.client = SimpleNamespace(get=Mock(return_value=SimpleNamespace(content=b'audio', raise_for_status=lambda: None)))
+    client.client = SimpleNamespace(
+        get=Mock(return_value=SimpleNamespace(content=b"audio", raise_for_status=lambda: None))
+    )
+
     class Cancelled(BaseException):
         pass
+
     import pytest
+
     with pytest.raises(Cancelled):
         with batch_audio_cache():
-            directory = _batch_state.get()['directory']
-            assert client.audio_bytes('one') == client.audio_bytes('one') == b'audio'
+            directory = _batch_state.get()["directory"]
+            assert client.audio_bytes("one") == client.audio_bytes("one") == b"audio"
             assert client.client.get.call_count == 1
             raise Cancelled()
     assert not directory.exists()
@@ -75,17 +88,35 @@ def test_batch_audio_cache_reuses_bytes_and_cleans_up():
 def test_lyrics_selects_main_and_preserves_all_structured_tracks():
     client = object.__new__(NavidromeClient)
     translation = {"kind": "translation", "lang": "es", "line": [{"value": "Hola"}]}
-    main = {"kind": "main", "lang": "en", "synced": True,
-            "line": [{"value": "Hello", "start": 1000}],
-            "cueLine": [{"index": 0, "value": "Hello", "start": 1000, "end": 2000,
-                         "cue": [{"value": "Hello", "start": 1000, "end": 2000,
-                                  "byteStart": 0, "byteEnd": 4}]}]}
+    main = {
+        "kind": "main",
+        "lang": "en",
+        "synced": True,
+        "line": [{"value": "Hello", "start": 1000}],
+        "cueLine": [
+            {
+                "index": 0,
+                "value": "Hello",
+                "start": 1000,
+                "end": 2000,
+                "cue": [
+                    {"value": "Hello", "start": 1000, "end": 2000, "byteStart": 0, "byteEnd": 4}
+                ],
+            }
+        ],
+    }
     calls = []
+
     def request(method, **params):
         calls.append((method, params))
         # Exercise Navidrome's opt-in: only enhanced requests include these layers.
-        entries = [translation, main] if params.get("enhanced") else [{"lang": "en", "line": main["line"]}]
+        entries = (
+            [translation, main]
+            if params.get("enhanced")
+            else [{"lang": "en", "line": main["line"]}]
+        )
         return {"lyricsList": {"structuredLyrics": entries}}
+
     client._request = request
     result = client.lyrics("song")
     assert result["text"] == "Hello"
