@@ -14,16 +14,11 @@ import soundfile as sf
 from echora_analysis import karaoke_pipeline as pipeline
 
 from echora_analysis.karaoke_pipeline import (
-    _anchored_source_lines,
     _stored_model_revision,
     apply_adaptive_line_padding,
     build_lines_from_alignment_document,
-    _timed_source_lines,
     _validate_alignment_document,
-    bound_to_synced_lines,
-    guard_pathological_lead_ins,
     parse_ass_karaoke,
-    stabilize_to_synced_lines,
 )
 
 
@@ -124,87 +119,8 @@ def test_adaptive_padding_uses_real_silence_and_syllable_duration():
     assert result[1]["start_ms"] == 1900
 
 
-def test_lead_in_guard_matches_source_text_after_blank_lines():
-    karaoke = [
-        {
-            "text": "'Cause everything",
-            "start_ms": 72877,
-            "end_ms": 77179,
-            "syllables": [
-                {"text": "'Cause ", "start_ms": 72877, "end_ms": 72977},
-                {"text": "ev", "start_ms": 72977, "end_ms": 76719},
-                {"text": "erything", "start_ms": 76719, "end_ms": 77179},
-            ],
-        }
-    ]
-    source = [
-        {"text": "", "start_ms": 62660},
-        {"text": "Other line", "start_ms": 68950},
-        {"text": "'Cause everything", "start_ms": 76020},
-    ]
-
-    result = guard_pathological_lead_ins(karaoke, source, {})
-
-    assert result[0]["start_ms"] == 76020
-    assert result[0]["syllables"][0]["start_ms"] == 76020
-    assert result[0]["syllables"][1]["start_ms"] == 76120
-    assert result[0]["syllables"][2]["start_ms"] == 76719
-
-
 def test_parse_ass_karaoke_ignores_headers():
     assert parse_ass_karaoke("[Script Info]\nTitle: example\n") == []
-
-
-def test_timed_source_lines_filters_untimed_and_empty_entries():
-    assert _timed_source_lines(
-        [
-            {"text": " First line ", "start_ms": 1000},
-            {"text": "", "start_ms": 1500},
-            {"text": "Untimed"},
-            {"text": "Second line", "start_ms": 2200.9},
-        ]
-    ) == [
-        {"text": "First line", "start_ms": 1000},
-        {"text": "Second line", "start_ms": 2200},
-    ]
-
-
-def test_anchored_source_lines_interpolates_without_dropping_lyrics():
-    assert _anchored_source_lines(
-        [
-            {"text": "One", "start_ms": 1000},
-            {"text": "Missing"},
-            {"text": "Three", "start_ms": 5000},
-        ]
-    ) == [
-        {"text": "One", "start_ms": 1000, "interpolated": False},
-        {"text": "Missing", "start_ms": 3000, "interpolated": True},
-        {"text": "Three", "start_ms": 5000, "interpolated": False},
-    ]
-
-
-def test_stabilize_to_synced_lines_shifts_the_whole_line_not_only_first_syllable():
-    karaoke = [
-        {
-            "text": "Learn to sign",
-            "start_ms": 5500,
-            "end_ms": 7000,
-            "syllables": [
-                {"text": "Learn", "start_ms": 5700, "end_ms": 6000},
-                {"text": " to", "start_ms": 6000, "end_ms": 6300},
-                {"text": " sign", "start_ms": 6300, "end_ms": 6800},
-            ],
-        }
-    ]
-
-    result = stabilize_to_synced_lines(karaoke, [{"text": "Learn to sign", "start_ms": 6500}])
-
-    assert result[0]["start_ms"] == 6500
-    assert result[0]["syllables"] == [
-        {"text": "Learn", "start_ms": 6500, "end_ms": 6800},
-        {"text": " to", "start_ms": 6800, "end_ms": 7100},
-        {"text": " sign", "start_ms": 7100, "end_ms": 7600},
-    ]
 
 
 def test_validate_alignment_document_accepts_monotonic_structured_output():
@@ -248,58 +164,8 @@ def test_validate_alignment_document_rejects_reversed_tokens():
         raise AssertionError("expected document validation failure")
 
 
-def test_guard_pathological_lead_ins_delays_only_stretched_first_syllable():
-    diagnostics = {"source_offset_ms": 0, "source_drift_ms_per_minute": 0}
-    result = guard_pathological_lead_ins(
-        [
-            {
-                "text": "Siento frío",
-                "start_ms": 197680,
-                "end_ms": 205110,
-                "syllables": [
-                    {"text": "Sien", "start_ms": 197880, "end_ms": 203830},
-                    {"text": "to", "start_ms": 203990, "end_ms": 204470},
-                ],
-            }
-        ],
-        [{"text": "Siento frío", "start_ms": 204010}],
-        diagnostics,
-    )
-
-    assert result[0]["start_ms"] == 204010
-    assert result[0]["syllables"] == [
-        {"text": "Sien", "start_ms": 204010, "end_ms": 204110},
-        {"text": "to", "start_ms": 204110, "end_ms": 204470},
-    ]
-    assert diagnostics["pathological_lead_in_guarded_lines"] == [0]
-
-
-def test_bound_to_synced_lines_clamps_syllables_to_source_window():
-    karaoke = [
-        {
-            "text": "First line",
-            "start_ms": 800,
-            "end_ms": 2400,
-            "syllables": [
-                {"text": "First", "start_ms": 900, "end_ms": 1300},
-                {"text": " line", "start_ms": 1900, "end_ms": 2400},
-            ],
-        }
-    ]
-    source = [{"text": "First line", "start_ms": 1000}, {"text": "Second line", "start_ms": 2000}]
-
-    result = bound_to_synced_lines(karaoke, source)
-
-    assert result[0]["start_ms"] == 1000
-    assert result[0]["end_ms"] == 2000
-    assert result[0]["syllables"] == [
-        {"text": "First", "start_ms": 1000, "end_ms": 1300},
-        {"text": " line", "start_ms": 1900, "end_ms": 2000},
-    ]
-
-
 @pytest.mark.parametrize("separate", [None, True, False])
-def test_worker_uses_cached_vocals_and_original_reference(monkeypatch, tmp_path, separate):
+def test_worker_aligns_cached_vocals_without_line_times(monkeypatch, tmp_path, separate):
     monkeypatch.setenv("HF_HOME", str(tmp_path))
     get_settings.cache_clear()
     monkeypatch.setenv("FA_KARA_VOCAL_SEPARATION", "false")
@@ -329,30 +195,24 @@ def test_worker_uses_cached_vocals_and_original_reference(monkeypatch, tmp_path,
     monkeypatch.setattr(pipeline, "_stop_fa_kara_worker", lambda: events.append("stop"))
     monkeypatch.setattr(pipeline, "vocal_audio_bytes", vocals)
 
-    def decode(data, check):
-        assert data == original and callable(check)
-        return waveform
-
-    monkeypatch.setattr(pipeline, "vocal_reference_waveform", decode)
     monkeypatch.setattr(pipeline, "_fa_kara_worker", lambda *args: object())
 
     def job(worker, argv):
         assert "--separate_vocals" not in argv
         work = Path(argv[argv.index("--path_io") + 1])
         input_path = Path(argv[argv.index("--input_audio") + 1])
+        assert "--reference_audio" not in argv
         if separate is False:
             assert events == []
             assert input_path.read_bytes() == original
-            assert "--reference_audio" not in argv
         else:
             assert events == ["stop", "vocals"]
-            reference = Path(argv[argv.index("--reference_audio") + 1])
-            for path, expected in ((input_path, -waveform), (reference, waveform)):
-                info = sf.info(path)
-                assert (info.samplerate, info.channels, info.subtype) == (16000, 1, "FLOAT")
-                np.testing.assert_array_equal(sf.read(path)[0], expected)
+            info = sf.info(input_path)
+            assert (info.samplerate, info.channels, info.subtype) == (16000, 1, "FLOAT")
+            np.testing.assert_array_equal(sf.read(input_path)[0], -waveform)
+        # Synced lines give the line text; their start times never reach the aligner.
         assert (work / "i.txt").read_text() == "Hello\n"
-        assert json.loads((work / "timeline.json").read_text())[0]["start_ms"] == 100
+        assert "--timeline_json" not in argv and not (work / "timeline.json").exists()
         (work / "o.ass").write_text("")
         (work / "o_ruby.lrc").write_text("")
         (work / "o.alignment.json").write_text(
@@ -410,7 +270,7 @@ def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch,
     monkeypatch.setattr(pipeline, "_stop_fa_kara_worker", lambda: events.append("stop"))
 
     def prepare(data, **kwargs):
-        assert kwargs["reference"] is True
+        assert not kwargs.get("reference")  # the line-time path's full-mix reference is gone
         assert "mono_rates" not in kwargs
         assert kwargs["vocals"] is True
         assert callable(kwargs["check"])
@@ -430,7 +290,6 @@ def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch,
             "lines": [],
             "diagnostics": {
                 "audio_source": "roformer_vocals",
-                "reference_audio_source": "full_mix",
                 "separator_revision": "revision",
             },
             "model": "model",

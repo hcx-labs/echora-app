@@ -238,12 +238,12 @@ def test_remote_containers_adopt_the_workers_processing_settings(monkeypatch):
     values = {
         **processing_settings(),
         "fa_kara_revision": "a" * 40,
-        "fa_kara_refine_all_lines": True,
+        "fa_kara_min_letter_ms": 60,
         "fa_kara_audio_speed": 0.9,
     }
     adopt_processing_settings(values)
     assert processing_settings() == values
-    assert get_settings().fa_kara_refine_all_lines is True
+    assert get_settings().fa_kara_min_letter_ms == 60
     with pytest.raises(ValueError, match="Not processing settings"):
         adopt_processing_settings({"database_url": "postgresql://elsewhere"})
 
@@ -598,7 +598,7 @@ def test_modal_batch_aligns_karaoke_remotely(monkeypatch):
     assert digests == [sha256(b"audio a").hexdigest(), sha256(b"audio b").hexdigest()]
     # Separated first, for exactly the songs being aligned, with what alignment reads.
     assert remote.prepare_vocals.call_args.args[0] == digests
-    assert remote.prepare_vocals.call_args.kwargs == {"vocals": True, "reference": True}
+    assert remote.prepare_vocals.call_args.kwargs == {"vocals": True}
 
 
 # Motion artwork

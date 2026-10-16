@@ -63,6 +63,13 @@ class LibraryScopingTests(unittest.TestCase):
                         if ids is not None:
                             self.assertIn(ids, params)
 
+    def test_karaoke_plans_any_lyric_text(self):
+        # Aligned from the audio alone: plain (unsynced) lyrics qualify too.
+        self.plan_namespace()["plan_karaoke"](self.connection, "pipeline")
+        sql = self.cursor.execute.call_args.args[0]
+        self.assertIn("btrim(l.text)", sql)
+        self.assertNotIn("'synced'", sql)
+
     def test_library_resolution_fails_closed(self):
         resolve = self.plan_namespace()["resolve_library_id"]
         for rows in ([], [(uuid.uuid4(),), (uuid.uuid4(),)]):

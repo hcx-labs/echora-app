@@ -1,5 +1,4 @@
 import argparse
-from functools import partial
 import json
 import os
 import soundfile as sf
@@ -152,9 +151,6 @@ def main(argv=None):
     )
     parser.add_argument("-hf", "--hf_model_path", default=None, help="HuggingFace模型ID或本地路径")
     parser.add_argument("--head_correct", type=int, default=-999, help="是否进行静音检测")
-    parser.add_argument(
-        "--timeline_json", default=None, help="Source lyric line timestamps for anchored alignment"
-    )
     parser.add_argument("--min_letter_ms", type=int, default=0, help="Minimum duration per letter")
     parser.add_argument(
         "--min_token_ms", type=int, default=0, help="Minimum duration per acoustic token"
@@ -173,24 +169,6 @@ def main(argv=None):
         type=float,
         default=0.0,
         help="Scale the minimum durations to each line's pace (0: fixed floor)",
-    )
-    parser.add_argument(
-        "--ignore_source_times",
-        action="store_true",
-        help="Use the timeline only for line breaks: align from the audio alone",
-    )
-    parser.add_argument(
-        "--refine_all_lines",
-        action="store_true",
-        help="Retry every line inside its source-cued interval",
-    )
-    parser.add_argument(
-        "--duration_aware_priors",
-        action="store_true",
-        help="Guide inner token onsets across each source line",
-    )
-    parser.add_argument(
-        "--reference_audio", default=None, help="Original mix for dual-audio line refinement"
     )
     parser.add_argument(
         "--separate_vocals", action="store_true", help="Align a persistent Demucs vocal stem"
@@ -306,7 +284,6 @@ def main(argv=None):
         )
         audio_channels, sr = sf.read(decoded_audio_path, dtype="float32", always_2d=True)
     input_sr = sr
-    reference_audio = audio_channels.mean(axis=1) if args.separate_vocals else None
     if args.separate_vocals:
         if os.environ.get("FA_KARA_SINGLE_VOCAL_CHECKPOINT", "true").lower() == "true":
             from separate_vocals import separate_vocals_single_checkpoint as separate_vocals
@@ -328,74 +305,31 @@ def main(argv=None):
 
             return align_audio_with_text
         if model_name == "yohane_hf":
-            from align_yohane import align_audio_with_text
-
-            return partial(align_audio_with_text, hf_model_id=hf_model_path)
+            return None  # one global pass below
         raise ValueError(f"Unsupported FA model: '{model_name}'. ")
 
     align_func = get_align_function(fa_model_select)  # TODO: 面向对象方法实现
 
     y_processed = time_stretch_audio(audio_file, audio_speed)
-    reference_processed = None
-    if args.reference_audio:
-        reference_channels, reference_sr = sf.read(
-            args.reference_audio, dtype="float32", always_2d=True
+    print("Aligning...")
+    if fa_model_select == "yohane_hf":
+        # One global CTC pass over the whole song, from the audio alone; the lyric lines
+        # give line ranges and each line's pace.
+        from align_yohane import align_audio_with_timeline
+
+        alignment_results = align_audio_with_timeline(
+            y_processed,
+            [tokens for tokens in alignment_token_lines if tokens],
+            sr=sr,
+            speed=audio_speed,
+            use_gpu=align_use_gpu,
+            hf_model_id=hf_model_path,
+            min_letter_ms=args.min_letter_ms,
+            min_token_ms=args.min_token_ms,
+            timing_offset_ms=args.timing_offset_ms,
+            duration_pace_ratio=args.duration_pace_ratio,
+            vocal_activity_weight=args.vocal_activity_weight,
         )
-        reference_audio = reference_channels.mean(axis=1)
-        if reference_sr != sr:
-            raise ValueError("reference audio sample rate must match alignment audio")
-    if reference_audio is not None:
-        if args.separate_vocals and input_sr != sr:
-            import librosa
-
-            reference_audio = librosa.resample(reference_audio, orig_sr=input_sr, target_sr=sr)
-        reference_processed = time_stretch_audio(reference_audio, audio_speed)
-    print("Adding timelines...")
-    if args.timeline_json:
-        with open(
-            os.path.join(real_io_path, args.timeline_json), "r", encoding="utf-8"
-        ) as timeline_file:
-            timeline = json.load(timeline_file)
-        if len(timeline) != len(alignment_token_lines):
-            raise ValueError(
-                f"Timeline has {len(timeline)} lines but parsed lyrics have {len(alignment_token_lines)}"
-            )
-        timed_token_lines = [
-            (tokens, line) for tokens, line in zip(alignment_token_lines, timeline) if tokens
-        ]
-        if fa_model_select == "MMS_FA_torch":
-            from align_yohane import align_audio_with_timeline_mms
-
-            alignment_results = align_audio_with_timeline_mms(
-                y_processed,
-                [tokens for tokens, _ in timed_token_lines],
-                [line["start_ms"] for _, line in timed_token_lines],
-                sr=sr,
-                speed=audio_speed,
-                use_gpu=align_use_gpu,
-            )
-        else:
-            from align_yohane import align_audio_with_timeline
-
-            alignment_results = align_audio_with_timeline(
-                y_processed,
-                [tokens for tokens, _ in timed_token_lines],
-                None
-                if args.ignore_source_times
-                else [line["start_ms"] for _, line in timed_token_lines],
-                sr=sr,
-                speed=audio_speed,
-                use_gpu=align_use_gpu,
-                hf_model_id=hf_model_path,
-                refine_all_lines=args.refine_all_lines,
-                duration_aware_priors=args.duration_aware_priors,
-                reference_audio=reference_processed,
-                min_letter_ms=args.min_letter_ms,
-                min_token_ms=args.min_token_ms,
-                timing_offset_ms=args.timing_offset_ms,
-                duration_pace_ratio=args.duration_pace_ratio,
-                vocal_activity_weight=args.vocal_activity_weight,
-            )
     else:
         alignment_results = align_func(
             y_processed, alignment_tokens, non_silent_ranges, sr, audio_speed, use_gpu=align_use_gpu
@@ -415,7 +349,6 @@ def main(argv=None):
 
     canonical_lines = []
     token_offset = 0
-    source_timeline = timeline if args.timeline_json else []
     for line_index, line_tokens in enumerate(alignment_token_lines):
         token_records = []
         for token_index, _ in enumerate(line_tokens):
@@ -448,16 +381,14 @@ def main(argv=None):
                 }
             )
         token_offset += len(line_tokens)
-        source = source_timeline[line_index] if line_index < len(source_timeline) else {}
         canonical_lines.append(
             {
                 "source_index": line_index,
                 "text": re.sub(
                     r"\{([^{}|]*)\|[^{}]*\}|\[([^\[\]|]*)\|[^\[\]]*\]",
                     lambda match: match.group(1) if match.group(1) is not None else match.group(2),
-                    str(source.get("text", source_texts[line_index])),
+                    str(source_texts[line_index]),
                 ),
-                "source_start_ms": source.get("start_ms"),
                 "start_ms": token_records[0]["start_ms"] if token_records else None,
                 "end_ms": token_records[-1]["end_ms"] if token_records else None,
                 "tokens": token_records,
@@ -472,7 +403,7 @@ def main(argv=None):
     )
     alignment_document = {
         "schema_version": 1,
-        "alignment": {"mode": "global_ctc_calibrated_source_prior", "lines": canonical_lines},
+        "alignment": {"mode": "global_ctc_audio_only", "lines": canonical_lines},
         "diagnostics": {
             "inference_passes": max(
                 (int(result.get("inference_passes", 1)) for result in alignment_results), default=0
@@ -481,9 +412,6 @@ def main(argv=None):
             "token_count": len(finite_scores),
             "mean_ctc_score": sum(finite_scores) / len(finite_scores) if finite_scores else 0.0,
             "minimum_ctc_score": min(finite_scores) if finite_scores else 0.0,
-            "interpolated_source_lines": [
-                index for index, line in enumerate(source_timeline) if line.get("interpolated")
-            ],
             **source_diagnostics,
             "line_count": len(canonical_lines),
             "acoustic_line_source_indexes": [

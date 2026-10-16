@@ -30,11 +30,15 @@ class NavidromeTrack:
 
 
 _media_http_client = httpx.Client(
-    timeout=httpx.Timeout(get_settings().navidrome_timeout_seconds, read=get_settings().navidrome_read_timeout_seconds),
+    timeout=httpx.Timeout(
+        get_settings().navidrome_timeout_seconds, read=get_settings().navidrome_read_timeout_seconds
+    ),
     follow_redirects=True,
-    limits=httpx.Limits(max_connections=get_settings().navidrome_max_connections,
-                        max_keepalive_connections=get_settings().navidrome_max_keepalive_connections,
-                        keepalive_expiry=get_settings().navidrome_keepalive_expiry_seconds),
+    limits=httpx.Limits(
+        max_connections=get_settings().navidrome_max_connections,
+        max_keepalive_connections=get_settings().navidrome_max_keepalive_connections,
+        keepalive_expiry=get_settings().navidrome_keepalive_expiry_seconds,
+    ),
 )
 
 
@@ -46,9 +50,12 @@ _batch_state: ContextVar = ContextVar("navidrome_batch", default=None)
 def batch_audio_cache(check=lambda: None):
     """Bounded private disk cache; removed even on BaseException cancellation."""
     with TemporaryDirectory(prefix="echora-audio-") as directory:
-        state = {"directory": Path(directory), "size": 0,
-                 "limit": max(0, int(get_settings().audio_cache_bytes)),
-                 "check": check}
+        state = {
+            "directory": Path(directory),
+            "size": 0,
+            "limit": max(0, int(get_settings().audio_cache_bytes)),
+            "check": check,
+        }
         token = _batch_state.set(state)
         try:
             yield
@@ -60,18 +67,36 @@ class NavidromeClient:
     """Small Subsonic client. Credentials are only sent from the analysis service."""
 
     def __init__(
-        self, base_url: str, username: str, password: str, *, http_client: httpx.Client | None = None,
+        self,
+        base_url: str,
+        username: str,
+        password: str,
+        *,
+        http_client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/") + "/"
         self.username = username
         self.password = password
         self._owns_client = http_client is None
-        self.client = http_client or httpx.Client(timeout=httpx.Timeout(get_settings().navidrome_timeout_seconds, read=get_settings().navidrome_read_timeout_seconds), follow_redirects=True)
+        self.client = http_client or httpx.Client(
+            timeout=httpx.Timeout(
+                get_settings().navidrome_timeout_seconds,
+                read=get_settings().navidrome_read_timeout_seconds,
+            ),
+            follow_redirects=True,
+        )
 
     def _auth(self) -> dict[str, str]:
         salt = secrets.token_hex(8)
         token = hashlib.md5((self.password + salt).encode(), usedforsecurity=False).hexdigest()
-        return {"u": self.username, "t": token, "s": salt, "v": "1.16.1", "c": "echora", "f": "json"}
+        return {
+            "u": self.username,
+            "t": token,
+            "s": salt,
+            "v": "1.16.1",
+            "c": "echora",
+            "f": "json",
+        }
 
     def _endpoint(self, method: str) -> str:
         return urljoin(self.base_url, f"rest/{method}.view")
@@ -84,7 +109,9 @@ class NavidromeClient:
         response.raise_for_status()
         payload = response.json()["subsonic-response"]
         if payload.get("status") != "ok":
-            raise RuntimeError(f"Navidrome error: {payload.get('error', {}).get('message', 'unknown')}")
+            raise RuntimeError(
+                f"Navidrome error: {payload.get('error', {}).get('message', 'unknown')}"
+            )
         return payload
 
     @staticmethod
@@ -117,8 +144,14 @@ class NavidromeClient:
         tracks: list[NavidromeTrack] = []
         seen: set[str] = set()
         while True:
-            payload = self._request("search3", query="", songCount=page_size,
-                                    songOffset=len(tracks), artistCount=0, albumCount=0)
+            payload = self._request(
+                "search3",
+                query="",
+                songCount=page_size,
+                songOffset=len(tracks),
+                artistCount=0,
+                albumCount=0,
+            )
             result = payload.get("searchResult3")
             if not isinstance(result, dict):
                 raise RuntimeError("Incomplete Navidrome catalog response")
@@ -150,16 +183,30 @@ class NavidromeClient:
             payload = self._request("getLyricsBySongId", id=song_id, enhanced=True)
             entries = payload.get("lyricsList", {}).get("structuredLyrics", [])
             if entries:
-                entry = next((item for item in entries if item.get("kind", "main") in ("main", "")), None)
+                entry = next(
+                    (item for item in entries if item.get("kind", "main") in ("main", "")), None
+                )
                 if entry is None:
-                    return {"status": "missing", "text": None, "language": None, "synced": False,
-                            "lines": [], "source": "getLyricsBySongId", "structured_lyrics": entries}
+                    return {
+                        "status": "missing",
+                        "text": None,
+                        "language": None,
+                        "synced": False,
+                        "lines": [],
+                        "source": "getLyricsBySongId",
+                        "structured_lyrics": entries,
+                    }
                 lines = entry.get("line", [])
                 text = "\n".join(str(line.get("value") or "") for line in lines).strip()
                 return {
-                    "status": "available" if text else "missing", "text": text or None,
-                    "language": entry.get("lang"), "synced": bool(entry.get("synced")),
-                    "lines": [{"start_ms": line.get("start"), "text": line.get("value") or ""} for line in lines],
+                    "status": "available" if text else "missing",
+                    "text": text or None,
+                    "language": entry.get("lang"),
+                    "synced": bool(entry.get("synced")),
+                    "lines": [
+                        {"start_ms": line.get("start"), "text": line.get("value") or ""}
+                        for line in lines
+                    ],
                     "source": "getLyricsBySongId",
                     "structured_lyrics": entries,
                 }
@@ -169,17 +216,31 @@ class NavidromeClient:
             payload = self._request("getLyrics", songId=song_id)
             entry = payload.get("lyrics") or {}
             text = str(entry.get("value") or "").strip()
-            return {"status": "available" if text else "missing", "text": text or None,
-                    "language": None, "synced": False, "lines": [], "source": "getLyrics"}
+            return {
+                "status": "available" if text else "missing",
+                "text": text or None,
+                "language": None,
+                "synced": False,
+                "lines": [],
+                "source": "getLyrics",
+            }
         except Exception:
-            return {"status": "unavailable", "text": None, "language": None, "synced": False,
-                    "lines": [], "source": "navidrome"}
+            return {
+                "status": "unavailable",
+                "text": None,
+                "language": None,
+                "synced": False,
+                "lines": [],
+                "source": "navidrome",
+            }
 
     def playlists(self) -> list[dict[str, object]]:
         payload = self._request("getPlaylists")
         return list(payload.get("playlists", {}).get("playlist", []))
 
-    def replace_playlist(self, name: str, song_ids: list[str], playlist_id: str | None = None) -> str:
+    def replace_playlist(
+        self, name: str, song_ids: list[str], playlist_id: str | None = None
+    ) -> str:
         # Subsonic createPlaylist updates in place when playlistId is supplied.
         # Creating by name first and deleting the old ID leaves duplicate
         # playlists when deletion fails or clients refresh between requests.
@@ -220,19 +281,34 @@ class NavidromeClient:
         submission=True records a completed play (feeds Navidrome play counts)."""
         self._request("scrobble", id=song_id, submission="true" if submission else "false")
 
-    def transcode_chunks(self, song_id: str, max_bit_rate: int = 320, range_header: str | None = None) -> Iterator[bytes]:
+    def transcode_chunks(
+        self, song_id: str, max_bit_rate: int = 320, range_header: str | None = None
+    ) -> Iterator[bytes]:
         headers = {"Range": range_header} if range_header else {}
         with self.client.stream(
             "GET",
             self._endpoint("stream"),
-            params={**self._auth(), "id": song_id, "format": "mp3", "maxBitRate": max_bit_rate, "estimateContentLength": "true"},
+            params={
+                **self._auth(),
+                "id": song_id,
+                "format": "mp3",
+                "maxBitRate": max_bit_rate,
+                "estimateContentLength": "true",
+            },
             headers=headers,
         ) as response:
             response.raise_for_status()
             yield from response.iter_bytes(64 * 1024)
 
-    def open_transcode_stream(self, song_id: str, max_bit_rate: int | None = 320, range_header: str | None = None) -> httpx.Response:
-        stream_params = {**self._auth(), "id": song_id, "format": "raw" if max_bit_rate is None else "mp3", "estimateContentLength": "true"}
+    def open_transcode_stream(
+        self, song_id: str, max_bit_rate: int | None = 320, range_header: str | None = None
+    ) -> httpx.Response:
+        stream_params = {
+            **self._auth(),
+            "id": song_id,
+            "format": "raw" if max_bit_rate is None else "mp3",
+            "estimateContentLength": "true",
+        }
         if max_bit_rate is not None:
             stream_params["maxBitRate"] = max_bit_rate
         request = self.client.build_request(
@@ -247,25 +323,44 @@ class NavidromeClient:
             try:
                 response.read()
                 payload = response.json().get("subsonic-response", {})
-                message = payload.get("error", {}).get("message", "Navidrome returned JSON instead of audio")
+                message = payload.get("error", {}).get(
+                    "message", "Navidrome returned JSON instead of audio"
+                )
             except Exception:
                 message = "Navidrome returned JSON instead of audio"
             response.close()
             raise RuntimeError(str(message))
         return response
 
-    def transcode_range(self, song_id: str, range_header: str, max_bit_rate: int = 320) -> tuple[bytes, dict[str, str], int]:
+    def transcode_range(
+        self, song_id: str, range_header: str, max_bit_rate: int = 320
+    ) -> tuple[bytes, dict[str, str], int]:
         response = self.client.get(
             self._endpoint("stream"),
-            params={**self._auth(), "id": song_id, "format": "mp3", "maxBitRate": max_bit_rate, "estimateContentLength": "true"},
+            params={
+                **self._auth(),
+                "id": song_id,
+                "format": "mp3",
+                "maxBitRate": max_bit_rate,
+                "estimateContentLength": "true",
+            },
             headers={"Range": range_header},
         )
         response.raise_for_status()
-        headers = {key: value for key, value in response.headers.items() if key.lower() in {"content-length", "content-range", "accept-ranges"}}
+        headers = {
+            key: value
+            for key, value in response.headers.items()
+            if key.lower() in {"content-length", "content-range", "accept-ranges"}
+        }
         return response.content, headers, response.status_code
 
     def transcode(self, song_id: str, max_bit_rate: int | None = 320) -> tuple[bytes, str]:
-        stream_params = {**self._auth(), "id": song_id, "format": "raw" if max_bit_rate is None else "mp3", "estimateContentLength": "true"}
+        stream_params = {
+            **self._auth(),
+            "id": song_id,
+            "format": "raw" if max_bit_rate is None else "mp3",
+            "estimateContentLength": "true",
+        }
         if max_bit_rate is not None:
             stream_params["maxBitRate"] = max_bit_rate
         response = self.client.get(
@@ -277,7 +372,9 @@ class NavidromeClient:
         if "application/json" in content_type:
             try:
                 payload = response.json().get("subsonic-response", {})
-                message = payload.get("error", {}).get("message", "Navidrome returned JSON instead of audio")
+                message = payload.get("error", {}).get(
+                    "message", "Navidrome returned JSON instead of audio"
+                )
             except Exception:
                 message = "Navidrome returned JSON instead of audio"
             raise RuntimeError(str(message))
@@ -294,9 +391,24 @@ class NavidromeClient:
                 return path.read_bytes()
         response = self.client.get(
             self._endpoint("stream"),
-            params={**self._auth(), "id": song_id, "format": "raw", "estimateContentLength": "true"},
+            params={
+                **self._auth(),
+                "id": song_id,
+                "format": "raw",
+                "estimateContentLength": "true",
+            },
         )
         response.raise_for_status()
+        if "application/json" in response.headers.get("content-type", ""):
+            # A Subsonic error (e.g. a song Navidrome no longer has), not audio: never cache it.
+            try:
+                payload = response.json().get("subsonic-response", {})
+                message = payload.get("error", {}).get(
+                    "message", "Navidrome returned JSON instead of audio"
+                )
+            except Exception:
+                message = "Navidrome returned JSON instead of audio"
+            raise RuntimeError(str(message))
         audio = response.content
         if state:
             state["check"]()
