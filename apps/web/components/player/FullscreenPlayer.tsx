@@ -959,40 +959,19 @@ function linePosition(lines: LyricsLine[], nowMs: number): string {
   return `${index}:${nowMs < end ? 1 : 0}`;
 }
 
-/** Karaoke wipes repaint at 30 fps: every frame they change costs a full paint and composite. */
-const KARAOKE_FRAME_MS = 1000 / 30;
-const karaokeListeners = new Set<() => void>();
-let karaokeFrameAt = -Infinity;
-let karaokeTimeAt = 0;
-let stopKaraokeClock: (() => void) | null = null;
+/**
+ * The clock is read at the start of a display frame, but the wipe it paints appears on screen a
+ * frame later, so painting the time one 60 Hz frame ahead lines the wipe up with what is heard.
+ */
+const KARAOKE_LEAD_MS = 1000 / 60;
 
-/** One shared gate, so every live line paints on the same frames. Seeks always go through. */
-function subscribeKaraokeTime(listener: () => void) {
-  karaokeListeners.add(listener);
-  stopKaraokeClock ??= subscribePlaybackTime(() => {
-    const at = performance.now();
-    const time = playbackTimeSnapshot();
-    const jumped = Math.abs(time - karaokeTimeAt) > 0.1;
-    // A few ms of slack so a 60 Hz display lands on every other frame, not every third.
-    if (!jumped && at - karaokeFrameAt < KARAOKE_FRAME_MS - 4) return;
-    karaokeFrameAt = at;
-    karaokeTimeAt = time;
-    karaokeListeners.forEach((each) => each());
-  });
-  return () => {
-    karaokeListeners.delete(listener);
-    if (karaokeListeners.size) return;
-    stopKaraokeClock?.();
-    stopKaraokeClock = null;
-  };
-}
-
+/** Wipes follow every clock tick (once per display frame while playing). */
 const playbackClock = {
-  subscribe: subscribeKaraokeTime,
-  now: () => playbackTimeSnapshot() * 1000,
+  subscribe: subscribePlaybackTime,
+  now: () => playbackTimeSnapshot() * 1000 + KARAOKE_LEAD_MS,
 };
 
-/** The only lyric element that follows the clock (at 30 fps), outside React rendering. */
+/** The only lyric element that follows the clock (every frame), outside React rendering. */
 function LiveKaraokeLine(props: Omit<ComponentProps<typeof KaraokeLine>, "now" | "clock">) {
   return <KaraokeLine {...props} clock={playbackClock} />;
 }

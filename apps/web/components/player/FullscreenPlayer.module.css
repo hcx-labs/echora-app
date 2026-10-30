@@ -81,6 +81,8 @@
 .lineList::-webkit-scrollbar { display: none; }
 /* Spacers let the first and last lines reach the centre; percentages here resolve against the list height. */
 .lineList::before, .lineList::after { content: ""; flex: 0 0 42%; }
+/* Half the list below the last line, so the final line can still reach the exact centre. */
+.lineList::after { flex-basis: 50%; }
 .line { max-width: 100%; padding: 4px 0; border: 0; background: transparent; text-align: center; cursor: pointer;
   font-family: inherit; font-weight: 600; font-size: var(--line); line-height: 1.4; letter-spacing: -.01em; white-space: pre-wrap; overflow-wrap: anywhere;
   color: rgb(255 255 255 / .38);
