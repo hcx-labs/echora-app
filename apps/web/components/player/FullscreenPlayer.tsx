@@ -53,8 +53,14 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { ScrollArea } from "../ui/scroll-area";
-import { groupSyllablesByWord, lyricWordIsRtl as isRtlText, splitVoices } from "./lyricWords";
-import KaraokeLine from "./KaraokeLine";
+import {
+  groupSyllablesByWord,
+  lineRubies,
+  lyricWordIsRtl as isRtlText,
+  splitVoices,
+  type LyricFragment,
+} from "./lyricWords";
+import KaraokeLine, { RubyText } from "./KaraokeLine";
 import LyricsScroller from "./LyricsScroller";
 import WaveformSeek from "./WaveformSeek";
 import { formatDuration } from "../ui/TrackRow";
@@ -393,9 +399,15 @@ export default function FullscreenPlayer() {
   /** A line that is not playing: its text, with any backing vocals on their own line as when it plays. */
   function staticLine(line: LyricsLine) {
     const parts = karaokeMode && currentLyrics?.karaoke ? lyricFragments.get(line) : undefined;
-    if (!parts?.backing.length) return line.text || "…";
-    const text = (fragments: typeof parts.lead) =>
-      fragments.map((fragment) => fragment.text).join("");
+    // Furigana stay on lines that are not playing, so a line keeps its height when it starts.
+    const text = (fragments: LyricFragment[]) => (
+      <RubyText
+        text={fragments.map((fragment) => fragment.text).join("")}
+        rubies={lineRubies(fragments)}
+      />
+    );
+    if (!parts?.backing.length)
+      return parts && lineRubies(parts.lead).length ? text(parts.lead) : line.text || "…";
     return (
       <>
         {text(parts.lead)}

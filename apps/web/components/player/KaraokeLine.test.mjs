@@ -56,3 +56,16 @@ test('highlight copy preserves whole text and is hidden from screen readers', ()
   const html = render(['yel', 'low']);
   assert.match(html, /aria-hidden="true"[^>]*>yellow<\/span>/);
 });
+
+test('Japanese kanji carry furigana as native ruby in both text layers', () => {
+  const morae = [['か', 0], ['の', 100], ['じょ', 200]].map(([text, at]) => ({ text, start_ms: at, end_ms: at + 100 }));
+  const syllables = [
+    { text: '「彼女', start_ms: 0, end_ms: 300, ruby: [{ start: 1, end: 3, text: 'かのじょ', morae }] },
+    { text: 'は」', start_ms: 300, end_ms: 400 },
+  ];
+  const fragments = lyrics.groupSyllablesByWord(syllables).flat();
+  assert.deepEqual(lyrics.lineRubies(fragments), [{ from: 1, to: 3, text: 'かのじょ', morae }]);
+  const html = renderToStaticMarkup(createElement(KaraokeLine, { fragments, now: 150, active: true, highlightStyle: 'lava' }));
+  const ruby = '「<ruby>彼女<rt data-ruby="0">かのじょ</rt></ruby>は」';
+  assert.equal(html.split(ruby).length - 1, 2);
+});
