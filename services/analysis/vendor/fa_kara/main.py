@@ -53,8 +53,11 @@ def file_identity(path):
     return {"path": str(path.resolve()), "sha256": hashes}
 
 
-def normalize_source_lines(lines, language, sokuon_split, hatsuon_split):
-    """Split source boundaries before normalization; never normalize a newline."""
+def normalize_source_lines(lines, language, sokuon_split, hatsuon_split, label_rules="v1"):
+    """Split source boundaries before normalization; never normalize a newline.
+
+    ``label_rules`` selects the shared normalizer's rule set (label_rules.RULES); "v1" is the
+    behaviour of every shipped model, "v2" must only be used with a model trained on v2 labels."""
     records, source_texts = [], []
     for index, line in enumerate(lines):
         text = line.rstrip("\r\n")
@@ -63,12 +66,12 @@ def normalize_source_lines(lines, language, sokuon_split, hatsuon_split):
         # Keep their source index/text and boundary without inventing speech.
         display_only = all(c.isspace() or unicodedata.category(c).startswith("P") for c in text)
         items = (
-            hn.process_haruhi_line(text, language, sokuon_split, hatsuon_split)
+            hn.process_haruhi_line(text, language, sokuon_split, hatsuon_split, rules=label_rules)
             if not display_only
             else []
         )
         # Hangul is labelled by pronunciation (같이 → ga+chi), as in training.
-        items = korean_pronunciation.apply_to_items(items)
+        items = korean_pronunciation.apply_to_items(items, v2=label_rules != "v1")
         if not display_only and not any(item.get("pron") for item in items):
             raise ValueError(f"Unsupported display line at source index {index}: {text!r}")
         records.extend(items)
@@ -134,6 +137,16 @@ def main(argv=None):
     parser.add_argument("--bpm", type=float, default=60, help="歌曲的BPM，导唱指示灯用")
     parser.add_argument("--bpb", type=int, default=3, help="导唱指示灯的符号个数")
     parser.add_argument("--lang", default="auto", help="歌词语言")
+    parser.add_argument(
+        "--label_rules",
+        choices=("v1", "v2", "v2-orthographic", "v3", "v3-orthographic", "v3-sung"),
+        default="v1",
+        help="Label rules of the shared normalizer (label_rules.py). v1: every shipped model. "
+        "v2: the 2026-10-18 label round (pronunciation labels for en/de/fr, numbers, acronyms, "
+        "vocables, Indic/Tamil/Arabic/Japanese fixes); only with a model trained on v2 labels. "
+        "v3: v2 plus LABEL_RULES_V3.md (lyric lexicon, homographs, dropped g, spell-outs, per-line "
+        "language via fastText lid.176.ftz); only with a model trained on v3 labels",
+    )
     parser.add_argument("-f", "--txt_format", default="hrh", help="歌词文本格式")
     parser.add_argument(
         "-cl", "--characters_per_line", type=int, default=0, help="输出文件每行最大字数"
@@ -165,6 +178,34 @@ def main(argv=None):
         help="Extra cost per letter frame where the vocal stem is quiet (0: off)",
     )
     parser.add_argument(
+        "--vocal_activity_source",
+        choices=("energy", "vad", "external"),
+        default="energy",
+        help="What --vocal_activity_weight penalises against: energy (loudness of the input, "
+        "the shipped behaviour), vad (the checkpoint's auxiliary vocal-activity head, "
+        "aux_heads.safetensors next to a w2v-BERT checkpoint) or external (--vocal_activity_file)",
+    )
+    parser.add_argument(
+        "--background_decoding",
+        action="store_true",
+        help="B0: decode whole bracketed lines on the checkpoint's background head (may overlap the lead)",
+    )
+    parser.add_argument(
+        "--optional_brackets",
+        action="store_true",
+        help="inline bracketed words may leave the lead path; the ones left out go on a second stream",
+    )
+    parser.add_argument(
+        "--blank_free_tokens",
+        action="store_true",
+        help="No blank between letters of one token, as in training (held notes stay on their word)",
+    )
+    parser.add_argument(
+        "--vocal_activity_file",
+        default=None,
+        help="float32 .npy of per-20 ms singing activity (with --vocal_activity_source external)",
+    )
+    parser.add_argument(
         "--duration_pace_ratio",
         type=float,
         default=0.0,
@@ -172,6 +213,43 @@ def main(argv=None):
     )
     parser.add_argument(
         "--separate_vocals", action="store_true", help="Align a persistent Demucs vocal stem"
+    )
+    # Decoder experiments (V1_LARGE_PLAN E3, SYLLABLE_ALIGNMENT_RESEARCH S1/S2); all off by default.
+    parser.add_argument(
+        "--exact_frame_clock",
+        action="store_true",
+        help="E3: report each frame at its true receptive-field centre (no duration/frames stretch)",
+    )
+    parser.add_argument(
+        "--subframe_refinement",
+        action="store_true",
+        help="S2: sub-frame token starts from the first letter's interpolated log-odds",
+    )
+    parser.add_argument(
+        "--onset_offsets",
+        default=None,
+        help="S2: JSON object {onset class: ms} added to --timing_offset_ms per token "
+        "(classes: ctc_segmentation.ONSET_CLASSES)",
+    )
+    parser.add_argument(
+        "--edge_weight",
+        type=float,
+        default=0.0,
+        help="S1: weight of the checkpoint's edge head in the Viterbi transitions (0: off)",
+    )
+    parser.add_argument(
+        "--fusion",
+        choices=("off", "on", "gate0"),
+        default="off",
+        help="§5f MuQ fusion checkpoints: on = load the frozen MuQ branch the checkpoint was "
+        "trained with (needs the muq package and OpenMuQ/MuQ-large-msd-iter in HF_HOME); "
+        "gate0 = run the checkpoint as the plain model (ablation); off (default) refuses a "
+        "fusion checkpoint and changes nothing for the others",
+    )
+    parser.add_argument(
+        "--fusion_model",
+        default=None,
+        help="Override the MuQ hub id / local snapshot recorded in the fusion checkpoint",
     )
     args = parser.parse_args(argv)
     sokuon_split = args.sokuon_split
@@ -232,7 +310,7 @@ def main(argv=None):
     if txt_format == "moe":
         lines = [lrcfmt.moeg_process_line(line) for line in lines]
     result_list, source_texts = normalize_source_lines(
-        lines, lrc_language, sokuon_split, hatsuon_split
+        lines, lrc_language, sokuon_split, hatsuon_split, args.label_rules
     )
     if not any(item.get("pron") for item in result_list):
         raise ValueError("Lyrics contain no alignable text")
@@ -243,13 +321,22 @@ def main(argv=None):
     alignment_tokens = []
     alignment_token_lines = [[]]
     token_to_index_map = {}
+    bracketed = []  # per acoustic token: inside a bracket of its line
+    depth = 0
     for i, item in enumerate(result_list):
         if item.get("orig") == "\n":
             alignment_token_lines.append([])
+            depth = 0
         elif "pron" in item and item["pron"]:
             alignment_tokens.append(item["pron"])
             alignment_token_lines[-1].append(item["pron"])
             token_to_index_map[len(alignment_tokens) - 1] = i
+            bracketed.append(depth > 0)
+        else:
+            for char in str(item.get("orig") or ""):
+                depth = (
+                    depth + 1 if char in "(（" else max(0, depth - 1) if char in ")）" else depth
+                )
     if alignment_token_lines and not alignment_token_lines[-1]:
         alignment_token_lines.pop()
 
@@ -317,6 +404,25 @@ def main(argv=None):
         # give line ranges and each line's pace.
         from align_yohane import align_audio_with_timeline
 
+        background_lines = None
+        if args.background_decoding:
+            # B0: lines that are one bracketed span are background vocals, decoded on the background
+            # head ("(Three) stop your staring at my- (hey!)" is a lead line with inline brackets).
+            background_lines = [
+                bool(re.fullmatch(r"\s*[(（][^()（）]*[)）]\s*", str(source_texts[i])))
+                for i, tokens in enumerate(alignment_token_lines)
+                if tokens
+            ]
+        optional_tokens = None
+        if args.optional_brackets:
+            # Inline brackets ("I know ('til the day that I die)") are backing vocals the lead path
+            # may leave out; lines that are one bracketed span stay whole (B0 or the lead).
+            optional_tokens, cursor = [], 0
+            for i, tokens in enumerate(alignment_token_lines):
+                flags = bracketed[cursor : cursor + len(tokens)]
+                # A line needs a lead word to stay on the path ("(oh) (yeah)" is kept whole).
+                optional_tokens.extend(flag and not all(flags) for flag in flags)
+                cursor += len(tokens)
         alignment_results = align_audio_with_timeline(
             y_processed,
             [tokens for tokens in alignment_token_lines if tokens],
@@ -329,6 +435,17 @@ def main(argv=None):
             timing_offset_ms=args.timing_offset_ms,
             duration_pace_ratio=args.duration_pace_ratio,
             vocal_activity_weight=args.vocal_activity_weight,
+            exact_frame_clock=args.exact_frame_clock,
+            subframe_refinement=args.subframe_refinement,
+            onset_offsets_ms=json.loads(args.onset_offsets) if args.onset_offsets else None,
+            edge_weight=args.edge_weight,
+            vocal_activity_source=args.vocal_activity_source,
+            vocal_activity_file=args.vocal_activity_file,
+            blank_free_tokens=args.blank_free_tokens,
+            background_lines=background_lines,
+            optional_tokens=optional_tokens,
+            fusion=args.fusion,
+            fusion_model=args.fusion_model,
         )
     else:
         alignment_results = align_func(
@@ -378,8 +495,17 @@ def main(argv=None):
                         * 1000
                     ),
                     "ctc_score": float(original_item["alignment_score"]),
+                    **(
+                        {"stream": 2}
+                        if alignment_results[alignment_index].get("stream") == 2
+                        else {}
+                    ),
                 }
             )
+        line_is_background = any(
+            alignment_results[token_offset + i].get("voice") == "background"
+            for i in range(len(line_tokens))
+        )
         token_offset += len(line_tokens)
         canonical_lines.append(
             {
@@ -389,9 +515,11 @@ def main(argv=None):
                     lambda match: match.group(1) if match.group(1) is not None else match.group(2),
                     str(source_texts[line_index]),
                 ),
-                "start_ms": token_records[0]["start_ms"] if token_records else None,
-                "end_ms": token_records[-1]["end_ms"] if token_records else None,
+                # Second-stream words (optional brackets) may end after the line's last lead word.
+                "start_ms": min(t["start_ms"] for t in token_records) if token_records else None,
+                "end_ms": max(t["end_ms"] for t in token_records) if token_records else None,
                 "tokens": token_records,
+                **({"voice": "background"} if line_is_background else {}),
             }
         )
     finite_scores = [token["ctc_score"] for line in canonical_lines for token in line["tokens"]]
@@ -418,6 +546,7 @@ def main(argv=None):
                 i for i, tokens in enumerate(alignment_token_lines) if tokens
             ],
             "normalizer_identity": file_identity(hn.__file__),
+            "label_rules": args.label_rules,
             "source_identity": file_identity(input_text_path),
             "audio_identity": file_identity(input_audio_path),
             "checkpoint_identity": file_identity(hf_model_path)

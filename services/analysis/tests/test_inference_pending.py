@@ -67,8 +67,9 @@ class InferenceRegression(unittest.TestCase):
                     pipeline._validate_alignment_document(doc)
 
     def test_unsupported_line_fails_at_source_index(self):
+        # Cyrillic is romanized since the multilingual normalizer; a symbol-only line has no sound.
         with self.assertRaisesRegex(ValueError, "source index 1"):
-            vendor.normalize_source_lines(["hello", "Ж"], "en", 0, 1)
+            vendor.normalize_source_lines(["hello", "★"], "en", 0, 1)
 
     def test_source_lines_give_line_texts_only(self):
         source = [{"text": "one", "start_ms": 100}, {"text": "", "start_ms": 500}, {"text": " two"}]

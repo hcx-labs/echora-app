@@ -6,7 +6,7 @@ import torch
 VENDOR = Path(__file__).resolve().parents[1] / "vendor" / "fa_kara"
 sys.path.insert(0, str(VENDOR))
 
-from ctc_segmentation import SourcePrior, align_with_source_priors  # noqa: E402
+from ctc_segmentation import align_ctc  # noqa: E402
 from align_yohane import (  # noqa: E402
     _assign_ctc_blank_holds,
     _inference_chunk_starts,
@@ -40,13 +40,7 @@ def _emission(labels, vocabulary=4):
 def test_global_ctc_alignment_returns_monotonic_grouped_spans():
     emission = _emission([0, 1, 1, 0, 2, 2, 0])
 
-    spans = align_with_source_priors(
-        emission,
-        [[1], [2]],
-        blank=0,
-        frame_shift_seconds=0.02,
-        source_priors=[SourcePrior(0, 0.02), SourcePrior(1, 0.08)],
-    )
+    spans = align_ctc(emission, [[1], [2]], blank=0)
 
     assert [(span.start, span.end) for group in spans for span in group] == [(1, 3), (4, 6)]
 
@@ -54,32 +48,9 @@ def test_global_ctc_alignment_returns_monotonic_grouped_spans():
 def test_repeated_ctc_labels_require_an_intervening_blank():
     emission = _emission([0, 1, 0, 1, 0])
 
-    spans = align_with_source_priors(
-        emission,
-        [[1], [1]],
-        blank=0,
-        frame_shift_seconds=0.02,
-        source_priors=[],
-    )
+    spans = align_ctc(emission, [[1], [1]], blank=0)
 
     assert spans[0][0].end <= spans[1][0].start
-
-
-def test_source_prior_disambiguates_repeated_acoustic_occurrences():
-    # Two equally plausible occurrences of token 1. The onset prior should pick
-    # the later one instead of the first path available to Viterbi.
-    emission = _emission([0, 1, 0, 0, 0, 1, 0])
-
-    spans = align_with_source_priors(
-        emission,
-        [[1]],
-        blank=0,
-        frame_shift_seconds=0.1,
-        source_priors=[SourcePrior(0, 0.5)],
-        prior_weight=4.0,
-    )
-
-    assert spans[0][0].start == 5
 
 
 def test_inference_chunks_do_not_create_tiny_tail_passes():
@@ -102,13 +73,7 @@ def test_impossible_alignment_fails_instead_of_returning_partial_output():
     emission = _emission([0, 1])
 
     try:
-        align_with_source_priors(
-            emission,
-            [[1], [2], [3]],
-            blank=0,
-            frame_shift_seconds=0.02,
-            source_priors=[],
-        )
+        align_ctc(emission, [[1], [2], [3]], blank=0)
     except RuntimeError as error:
         assert "fewer frames" in str(error)
     else:
@@ -126,9 +91,7 @@ def test_minimum_frames_counts_repeats_across_group_boundaries():
 def test_repeated_targets_reject_windows_without_room_for_blanks():
     emission = torch.log_softmax(torch.zeros(2, 3), dim=-1)
     try:
-        align_with_source_priors(
-            emission, [[1, 1]], blank=0, frame_shift_seconds=0.02, source_priors=[]
-        )
+        align_ctc(emission, [[1, 1]], blank=0)
     except RuntimeError as error:
         assert "fewer frames" in str(error)
     else:
@@ -148,9 +111,7 @@ def test_minimum_durations_match_plain_ctc_at_one_frame_and_stop_cramming():
     emission = torch.log_softmax(logits, dim=-1)
     groups = [[a], [b, c]]
 
-    plain = align_with_source_priors(
-        emission, groups, blank=blank, frame_shift_seconds=0.02, source_priors=[]
-    )
+    plain = align_ctc(emission, groups, blank=blank)
     ones = align_with_minimum_durations(emission, groups, blank=blank, minimum_frames=[1, 1, 1])
     assert [(s.start, s.end) for g in ones for s in g] == [
         (s.start, s.end) for g in plain for s in g
@@ -224,3 +185,46 @@ def test_vocal_activity_costs_only_letters_in_quiet_frames():
     assert torch.equal(adjusted[:, 0], emission[:, 0])  # blanks unchanged
     assert (adjusted[:8, 1] < emission[:8, 1] - 1.5).all()  # quiet: letters cost more
     assert torch.allclose(adjusted[-5:, 1], emission[-5:, 1], atol=0.2)  # singing: about free
+
+
+def test_optional_groups_leave_the_lead_path_only_when_they_cost_it_time():
+    from ctc_segmentation import align_with_minimum_durations
+
+    blank, a, b, c, d = 0, 1, 2, 3, 4
+    # Lead "a b" then "d" straight after; "(c)" is an echo sung over "d" (no frame hears c).
+    emission = _emission([0, 1, 1, 0, 2, 2, 4, 4, 4, 0], vocabulary=5)
+    groups = [[a], [b], [c], [d]]
+    kwargs = dict(blank=blank, minimum_frames=[1, 1, 1, 1], blank_free_tokens=True)
+
+    forced = align_with_minimum_durations(emission, groups, **kwargs)
+    skipped = align_with_minimum_durations(emission, groups, optional_groups={2}, **kwargs)
+    assert skipped[2] == []  # left out
+    assert [(s.start, s.end) for g in skipped for s in g] == [(1, 3), (4, 6), (6, 9)]
+    assert (forced[1][0].end, forced[3][0].start) != (
+        6,
+        6,
+    )  # walking through "c" takes b's or d's frames
+
+    # Sung in sequence ("Lonely (so lonely)"), the echo stays on the lead path.
+    sung = _emission([0, 1, 1, 0, 2, 2, 0, 3, 3, 0, 4, 4], vocabulary=5)
+    kept = align_with_minimum_durations(sung, groups, optional_groups={2}, **kwargs)
+    assert [(s.start, s.end) for s in kept[2]] == [(7, 9)]
+
+
+def test_optional_runs_at_the_song_edges_and_without_options_change_nothing():
+    from ctc_segmentation import align_with_minimum_durations
+
+    blank, a, b, c = 0, 1, 2, 3
+    emission = _emission([0, 2, 2, 0, 0, 0], vocabulary=4)
+    groups = [[a], [b], [c]]
+    spans = align_with_minimum_durations(
+        emission, groups, blank=blank, minimum_frames=[1, 1, 1], optional_groups={0, 2}
+    )
+    assert spans[0] == [] and spans[2] == [] and [(s.start, s.end) for s in spans[1]] == [(1, 3)]
+    plain = align_with_minimum_durations(emission, groups, blank=blank, minimum_frames=[1, 1, 1])
+    empty = align_with_minimum_durations(
+        emission, groups, blank=blank, minimum_frames=[1, 1, 1], optional_groups=set()
+    )
+    assert [[(s.start, s.end) for s in g] for g in plain] == [
+        [(s.start, s.end) for s in g] for g in empty
+    ]
