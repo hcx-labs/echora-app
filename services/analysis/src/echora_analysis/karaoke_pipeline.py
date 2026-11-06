@@ -27,22 +27,24 @@ from .remote_compute import current as current_remote
 from .roformer import separation_phase
 from .roformer import SEPARATION_REVISION
 from .navidrome import NavidromeClient
+from .furigana import ruby_segments
 from .processing_plan import plan_karaoke, resolve_library_id
 
 logger = logging.getLogger(__name__)
 
 FA_KARA_REVISION = "168ca5f01cecaa1290e31c0ce8dc44af8c7451bb"
-# v4: aligned from the audio alone (no synced-line times), minimum syllable durations, +45 ms
-# timing calibration.
-KARAOKE_PIPELINE_REVISION = "v4-audio-only-duration-floor"
-DEFAULT_MODEL_ID = "hcX02/echora-mms-300m-multilingual-lyrics-forced-aligner"
-DEFAULT_MODEL_REVISION = "701595f1be1125cce835d4e32fd432358ea8ed9f"
+# v5: the Echora Kara model on the exact frame clock, with blank-free syllables, backing lines on
+# their own head, the in-line gap cost and the text head's bonus (v4: audio-only alignment with
+# minimum syllable durations and a +45 ms calibration).
+KARAOKE_PIPELINE_REVISION = "v5-echora-kara"
+DEFAULT_MODEL_ID = "hcxlabs/echora-kara-300m"
+DEFAULT_MODEL_REVISION = "64087e1078b1aaf39cc1e6a9fc93874ca2f60e22"
 _DIALOGUE = re.compile(r"^Dialogue: [^,]*,([^,]+),([^,]+),(?:[^,]*,){6}(.*)$")
 _KARAOKE_TAG = re.compile(r"\{\\k(\d+)\}")
 _ASS_TAG = re.compile(r"\{[^}]*\}")
 _KARAOKE_LOCK = threading.Lock()
 _FA_KARA_WORKER: subprocess.Popen[str] | None = None
-_FA_KARA_WORKER_KEY: tuple[str, str] | None = None
+_FA_KARA_WORKER_KEY: tuple[str, ...] | None = None
 
 
 @functools.lru_cache(maxsize=4)
@@ -138,6 +140,17 @@ def _restore_display_text(
         start = 0 if index == 0 else positions[index][0]
         end = positions[index + 1][0] if index + 1 < len(positions) else len(source_text)
         syllable["text"] = source_text[start:end]
+        # Leading text restored before the first token (an opening 「) shifts its ruby offsets.
+        shift = positions[index][0] - start
+        if shift and syllable.get("ruby"):
+            syllable["ruby"] = [
+                {
+                    **segment,
+                    "start": int(segment["start"]) + shift,
+                    "end": int(segment["end"]) + shift,
+                }
+                for segment in syllable["ruby"]
+            ]
     return restored
 
 
@@ -156,6 +169,11 @@ def build_lines_from_alignment_document(document: dict[str, object]) -> list[dic
     canonical_lines = alignment.get("lines")
     if not isinstance(canonical_lines, list):
         return []
+    diagnostics = document.get("diagnostics")
+    # Japanese kanji groups get furigana from their timed morae (furigana.py).
+    japanese = isinstance(diagnostics, dict) and str(
+        diagnostics.get("normalization_language") or ""
+    ).startswith("ja")
     lines: list[dict[str, object]] = []
     for line_record in canonical_lines:
         if not isinstance(line_record, dict):
@@ -164,6 +182,7 @@ def build_lines_from_alignment_document(document: dict[str, object]) -> list[dic
         if not isinstance(tokens, list) or not tokens:
             continue
         syllables: list[dict[str, object]] = []
+        morae: list[list[dict[str, object]]] = []
         for token in tokens:
             if not isinstance(token, dict):
                 continue
@@ -172,15 +191,38 @@ def build_lines_from_alignment_document(document: dict[str, object]) -> list[dic
             end_ms = token.get("end_ms")
             if not isinstance(start_ms, int) or not isinstance(end_ms, int):
                 continue
+            mora = {
+                "unit": str(token.get("acoustic_token") or ""),
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+            }
             if text:
-                syllables.append({"start_ms": start_ms, "end_ms": end_ms, "text": text})
+                syllables.append(
+                    {
+                        "start_ms": start_ms,
+                        "end_ms": end_ms,
+                        "text": text,
+                        **(
+                            {"stream": SECOND_STREAM}
+                            if token.get("stream") == SECOND_STREAM
+                            else {}
+                        ),
+                    }
+                )
+                morae.append([mora])
             elif syllables:
                 # Acoustic continuation of an indivisible glyph group (or ruby).
                 # Keep its full duration without repeating display characters.
                 syllables[-1]["end_ms"] = max(int(syllables[-1]["end_ms"]), end_ms)
+                morae[-1].append(mora)
         if not syllables:
             continue
         source_text = str(line_record.get("text") or "")
+        if japanese:
+            for syllable, units in zip(syllables, morae):
+                ruby = ruby_segments(str(syllable["text"]), units)
+                if ruby:
+                    syllable["ruby"] = ruby
         syllables = _restore_display_text(source_text, syllables)
         text = source_text or "".join(str(s["text"]) for s in syllables)
         line_start = int(line_record.get("start_ms") or syllables[0]["start_ms"])
@@ -296,7 +338,9 @@ def _validate_alignment_document(document: object) -> dict[str, object]:
     alignment = document.get("alignment")
     if not isinstance(alignment, dict) or not isinstance(alignment.get("lines"), list):
         raise RuntimeError("FA-Kara alignment document has no line records")
-    previous_end = 0
+    # Timing is monotonic per voice: background lines (B0) are decoded on their own path and may
+    # overlap the lead, and so are second-stream words (optional inline brackets).
+    previous_ends = {"lead": 0, "background": 0, "lead stream 2": 0, "background stream 2": 0}
     token_count = 0
     for line_index, line in enumerate(alignment["lines"]):
         if not isinstance(line, dict) or line.get("source_index") != line_index:
@@ -310,9 +354,12 @@ def _validate_alignment_document(document: object) -> dict[str, object]:
             continue
         if not isinstance(tokens, list) or not tokens:
             raise RuntimeError(f"FA-Kara line {line_index} contains no aligned tokens")
+        line_voice = "background" if line.get("voice") == "background" else "lead"
         for token in tokens:
             if not isinstance(token, dict):
                 raise RuntimeError("FA-Kara alignment document contains an invalid token")
+            voice = f"{line_voice} stream 2" if token.get("stream") == SECOND_STREAM else line_voice
+            previous_end = previous_ends[voice]
             start = token.get("start_ms")
             end = token.get("end_ms")
             score = token.get("ctc_score")
@@ -322,10 +369,13 @@ def _validate_alignment_document(document: object) -> dict[str, object]:
                 or end < start
                 or start < previous_end
             ):
-                raise RuntimeError("FA-Kara alignment document contains non-monotonic timing")
+                raise RuntimeError(
+                    "FA-Kara alignment document contains non-monotonic timing"
+                    f" (line {line_index}, {voice} voice, start {start} ms after {previous_end} ms)"
+                )
             if not isinstance(score, (int, float)) or not 0 <= float(score) <= 1:
                 raise RuntimeError("FA-Kara alignment document contains an invalid CTC score")
-            previous_end = end
+            previous_ends[voice] = end
             token_count += 1
     if token_count == 0:
         raise RuntimeError("FA-Kara alignment document contains no tokens")
@@ -334,7 +384,13 @@ def _validate_alignment_document(document: object) -> dict[str, object]:
 
 def _fa_kara_worker(vendor: Path, model_revision: str) -> subprocess.Popen[str]:
     global _FA_KARA_WORKER, _FA_KARA_WORKER_KEY
-    key = (str(vendor), model_revision)
+    # The vendored decoder reads these two from its environment (the text head is loaded only
+    # when the bonus is on), so they belong to the worker's identity.
+    decoder_environment = {
+        "FA_KARA_TEXT_BONUS": str(get_settings().fa_kara_text_bonus),
+        "FA_KARA_IN_LINE_GAP_COST": str(get_settings().fa_kara_in_line_gap_cost),
+    }
+    key = (str(vendor), model_revision, *decoder_environment.values())
     if (
         _FA_KARA_WORKER is not None
         and _FA_KARA_WORKER.poll() is None
@@ -349,6 +405,7 @@ def _fa_kara_worker(vendor: Path, model_revision: str) -> subprocess.Popen[str]:
         **os.environ,
         "NUMBA_CACHE_DIR": str(numba_cache),
         "PYTHONPATH": f"{vendor}{os.pathsep}{os.environ.get('PYTHONPATH', '')}",
+        **decoder_environment,
     }
     _FA_KARA_WORKER = subprocess.Popen(
         [sys.executable, str(vendor / "worker.py")],
@@ -428,6 +485,62 @@ def _source_line_texts(source: list[dict[str, object]]) -> list[str]:
     return texts if any(texts) else []
 
 
+# Lyric languages forwarded to the normalizer as ``--lang`` per label rule set (settings
+# fa_kara_label_rules). v1: the allowlist every shipped model was trained with (en/es/fr/zh reach
+# the normalizer as auto). v2 (2026-10-18 label round) also forwards en/de/fr (pronunciation labels),
+# tr (Turkish rules), yue and zh; a v2 model mislabels Latin lines without it, a v1 model with it.
+# data/finetune-curation/echora_normalization.py mirrors both sets (test_alignment_fixes checks).
+FA_KARA_LANGUAGES_V1 = frozenset({"auto", "ja", "jaen", "zhen", "ko", "ur", "hi", "pa", "indic"})
+FA_KARA_LANGUAGES_V2 = FA_KARA_LANGUAGES_V1 | frozenset({"en", "de", "fr", "tr", "yue", "zh"})
+
+# Keep in sync with label_rules.NON_LATIN_SCRIPT_LANGUAGES (vendor runs in a subprocess).
+FA_KARA_LANGUAGES_V3 = FA_KARA_LANGUAGES_V2 | frozenset(
+    {
+        "ko",
+        "ja",
+        "zh",
+        "yue",
+        "th",
+        "ar",
+        "fa",
+        "ur",
+        "he",
+        "hi",
+        "bn",
+        "ta",
+        "te",
+        "mr",
+        "gu",
+        "kn",
+        "ml",
+        "pa",
+        "ru",
+        "uk",
+        "bg",
+        "sr",
+        "mk",
+        "be",
+        "kk",
+        "el",
+        "ka",
+        "hy",
+        "km",
+        "lo",
+        "my",
+    }
+)
+
+
+def fa_kara_languages(label_rules: str) -> frozenset[str]:
+    return (
+        FA_KARA_LANGUAGES_V1
+        if label_rules == "v1"
+        else FA_KARA_LANGUAGES_V3
+        if label_rules in ("v3", "v3-orthographic", "v3-sung")
+        else FA_KARA_LANGUAGES_V2
+    )
+
+
 def _run_fa_kara(
     audio: bytes,
     lyrics_text: str,
@@ -482,9 +595,11 @@ def _run_fa_kara(
             aligner,
             "--lang",
             language
-            if language in {"auto", "ja", "jaen", "zhen", "ko", "ur", "hi", "pa", "indic"}
+            if language in fa_kara_languages(get_settings().fa_kara_label_rules)
             else "auto",
         ]
+        if get_settings().fa_kara_label_rules != "v1":
+            command.extend(["--label_rules", get_settings().fa_kara_label_rules])
         if aligner == "yohane":
             command.extend(["--hf_model_path", str(snapshot)])
         command.extend(["--head_correct", "0", "--tail_correct", "0"])
@@ -495,6 +610,23 @@ def _run_fa_kara(
         command.extend(
             ["--vocal_activity_weight", str(get_settings().fa_kara_vocal_activity_weight)]
         )
+        if get_settings().fa_kara_exact_frame_clock:
+            command.append("--exact_frame_clock")
+        if get_settings().fa_kara_background_decoding:
+            command.append("--background_decoding")
+        if get_settings().fa_kara_blank_free_tokens:
+            command.append("--blank_free_tokens")
+        if os.environ.get("FA_KARA_OPTIONAL_BRACKETS") == "1":
+            # Experiment, off: inline bracketed words may leave the lead path. It did not help.
+            command.append("--optional_brackets")
+        external_activity = os.environ.get("FA_KARA_VOCAL_ACTIVITY_FILE")
+        if external_activity:
+            # Listening tests: activity from another model on the same mix (see listen_align_mix.py).
+            command.extend(
+                ["--vocal_activity_source", "external", "--vocal_activity_file", external_activity]
+            )
+        if get_settings().fa_kara_fusion != "off":
+            command.extend(["--fusion", get_settings().fa_kara_fusion])
         audio_speed = float(get_settings().fa_kara_audio_speed)
         if not 0.5 <= audio_speed <= 1.5:
             raise ValueError("FA_KARA_AUDIO_SPEED must be between 0.5 and 1.5")

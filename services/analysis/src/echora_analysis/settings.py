@@ -42,9 +42,11 @@ class Settings(BaseSettings):
     moss_model_id: str = Field("")
     moss_revision: str = Field("")
     hum_diagnostic_dir: str = Field("/models/torch/hum-diagnostics")
-    fa_kara_model_id: str = Field("hcX02/echora-mms-300m-multilingual-lyrics-forced-aligner")
-    # v8: fine-tuned on separated vocal stems; karaoke uses its lead output.
-    fa_kara_revision: str = Field("701595f1be1125cce835d4e32fd432358ea8ed9f")
+    # Echora Kara 300M (github.com/hcx-labs/echora-kara): trained on full mixes with MuQ fusion, a
+    # backing-vocal head and a text head. Echora aligns the separated vocal stem it already extracts.
+    # The decoder defaults below are the ones this model was evaluated with; change them together.
+    fa_kara_model_id: str = Field("hcxlabs/echora-kara-300m")
+    fa_kara_revision: str = Field("64087e1078b1aaf39cc1e6a9fc93874ca2f60e22")
     # Local checkpoint directory; overrides the model ID snapshot when set.
     fa_kara_model_path: str | None = Field(None)
     fa_kara_audio_speed: float = Field(1.0, ge=0.5, le=1.5)
@@ -52,13 +54,38 @@ class Settings(BaseSettings):
     # Minimum durations on the audio-only path (0 = off): stop the path cramming words.
     fa_kara_min_letter_ms: int = Field(40, ge=0)
     fa_kara_min_token_ms: int = Field(100, ge=0)
-    # Fixed shift of every karaoke time on the audio-only path; calibrated at +45 ms.
-    fa_kara_timing_offset_ms: int = Field(45, ge=-500, le=500)
+    # Fixed shift of every karaoke time. 0 on the exact frame clock; models before Echora Kara ran
+    # on the legacy clock and were calibrated at +45 ms.
+    fa_kara_timing_offset_ms: int = Field(0, ge=-500, le=500)
     # Minimum durations follow each line's sung pace (x this ratio, capped by the minimums above),
     # so fast rap isn't stretched; 0 applies the minimums as a fixed floor.
     fa_kara_duration_pace_ratio: float = Field(0.9, ge=0.0, le=5.0)
     # Extra cost per letter frame where the vocal stem is quiet (0: off).
     fa_kara_vocal_activity_weight: float = Field(2.0, ge=0.0, le=20.0)
+    # MuQ fusion checkpoints: "on" (default) loads the frozen MuQ branch the checkpoint was
+    # trained with (OpenMuQ/MuQ-large-msd-iter in HF_HOME, weights CC BY-NC 4.0),
+    # "gate0" runs such a checkpoint as the plain encoder (ablation), "off" refuses a fusion
+    # checkpoint and is what the MMS aligners before Echora Kara need.
+    fa_kara_fusion: str = Field("on")
+    # Label rules of the shared lyric normalizer (vendor/fa_kara/label_rules.py); always the rules
+    # the model was trained with, never changed alone. "v1" is what the MMS aligners before Echora
+    # Kara were trained with. "v2" (pronunciation labels for en/de/fr, numbers, acronyms, vocables,
+    # Indic/Tamil/Arabic/Japanese fixes) also forwards en/de/fr/tr/yue/zh as --lang and needs
+    # espeak-ng, phonemizer and num2words in the analysis image. "v3" adds the lyric lexicon,
+    # homographs, dropped g, spell-outs and per-line language (fastText lid.176.ftz,
+    # FA_KARA_LID_MODEL). "v3-sung" (default, Echora Kara) spells reduced vowels as they are sung
+    # and cuts long words into syllables. "-orthographic" variants spell en/de/fr words.
+    fa_kara_label_rules: str = Field("v3-sung")
+    # Time each frame at its true receptive-field centre instead of the legacy 20 ms grid.
+    fa_kara_exact_frame_clock: bool = Field(True)
+    # No blank frames inside a syllable, as in training, so held notes stay on their word.
+    fa_kara_blank_free_tokens: bool = Field(True)
+    # Decode lines written entirely in brackets on the backing-vocal head; they may overlap the lead.
+    fa_kara_background_decoding: bool = Field(True)
+    # Weight of the text head's per-frame evidence in the lead decode (0: off, head not loaded).
+    fa_kara_text_bonus: float = Field(0.4, ge=0.0, le=5.0)
+    # Cost per blank frame between two syllables of one line (0: off).
+    fa_kara_in_line_gap_cost: float = Field(0.2, ge=0.0, le=20.0)
     # Base image for analysis on Modal. Release images set it to the GPU image of
     # their own version, so remote dependencies match the worker's.
     modal_image: str = Field(
@@ -323,6 +350,19 @@ class Settings(BaseSettings):
             raise ValueError("Worker heartbeat must be less than half the lease")
         if self.fa_kara_aligner.lower() not in {"yohane", "mms"}:
             raise ValueError("FA_KARA_ALIGNER must be yohane or mms")
+        if self.fa_kara_fusion not in {"off", "on", "gate0"}:
+            raise ValueError("FA_KARA_FUSION must be off, on or gate0")
+        if self.fa_kara_label_rules not in {
+            "v1",
+            "v2",
+            "v2-orthographic",
+            "v3",
+            "v3-orthographic",
+            "v3-sung",
+        }:
+            raise ValueError(
+                "FA_KARA_LABEL_RULES must be v1, v2, v2-orthographic, v3, v3-orthographic or v3-sung"
+            )
         if self.job_retry_base_seconds > self.job_retry_max_seconds:
             raise ValueError("Job retry base must be <= retry maximum")
         if self.semantic_fusion_weight_lyrics + self.semantic_fusion_weight_audio <= 0:
@@ -352,6 +392,13 @@ PROCESSING_FIELDS = (
     "fa_kara_timing_offset_ms",
     "fa_kara_duration_pace_ratio",
     "fa_kara_vocal_activity_weight",
+    "fa_kara_fusion",
+    "fa_kara_label_rules",
+    "fa_kara_exact_frame_clock",
+    "fa_kara_blank_free_tokens",
+    "fa_kara_background_decoding",
+    "fa_kara_text_bonus",
+    "fa_kara_in_line_gap_cost",
 )
 
 

@@ -63,8 +63,8 @@ services:
       MERT_REVISION: ${MERT_REVISION:-12af15fef9d0ac838c3f475bfbbf26d2060dd4f5}
       LYRICS_MODEL_ID: ${LYRICS_MODEL_ID:-BAAI/bge-m3}
       LYRICS_REVISION: ${LYRICS_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
-      FA_KARA_MODEL_ID: ${FA_KARA_MODEL_ID:-hcX02/echora-mms-300m-multilingual-lyrics-forced-aligner}
-      FA_KARA_REVISION: ${FA_KARA_REVISION:-701595f1be1125cce835d4e32fd432358ea8ed9f}
+      FA_KARA_MODEL_ID: ${FA_KARA_MODEL_ID:-hcxlabs/echora-kara-300m}
+      FA_KARA_REVISION: ${FA_KARA_REVISION:-64087e1078b1aaf39cc1e6a9fc93874ca2f60e22}
       # Vocal-only analysis always uses the pinned Roformer overlap-2 recipe.
       # Optional recording bundle for `python -m echora_analysis.download_models`.
       # Serving and --prune-only never download models.

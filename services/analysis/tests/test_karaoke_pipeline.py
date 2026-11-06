@@ -213,6 +213,12 @@ def test_worker_aligns_cached_vocals_without_line_times(monkeypatch, tmp_path, s
         # Synced lines give the line text; their start times never reach the aligner.
         assert (work / "i.txt").read_text() == "Hello\n"
         assert "--timeline_json" not in argv and not (work / "timeline.json").exists()
+        # The Echora Kara decoder defaults reach the aligner.
+        assert {"--exact_frame_clock", "--blank_free_tokens", "--background_decoding"} <= set(argv)
+        assert argv[argv.index("--label_rules") + 1] == "v3-sung"
+        assert argv[argv.index("--fusion") + 1] == "on"
+        assert argv[argv.index("--timing_offset_ms") + 1] == "0"
+        assert "--optional_brackets" not in argv
         (work / "o.ass").write_text("")
         (work / "o_ruby.lrc").write_text("")
         (work / "o.alignment.json").write_text(
@@ -518,3 +524,32 @@ def test_overlap_between_lines_is_not_a_second_voice():
     ]
     mark_backing_voice(lines)
     assert all("voice" not in s for line in lines for s in line["syllables"])
+
+
+def test_worker_environment_carries_the_decoder_weights(monkeypatch, tmp_path):
+    get_settings.cache_clear()
+    seen = []
+
+    class Worker:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            seen.append("terminated")
+
+    def popen(command, **options):
+        seen.append(options["env"])
+        return Worker()
+
+    monkeypatch.setattr(pipeline.subprocess, "Popen", popen)
+    monkeypatch.setattr(pipeline, "_FA_KARA_WORKER", None)
+    monkeypatch.setattr(pipeline, "_FA_KARA_WORKER_KEY", None)
+    worker = pipeline._fa_kara_worker(tmp_path, "revision")
+    assert (seen[0]["FA_KARA_TEXT_BONUS"], seen[0]["FA_KARA_IN_LINE_GAP_COST"]) == ("0.4", "0.2")
+    assert pipeline._fa_kara_worker(tmp_path, "revision") is worker and len(seen) == 1
+    # A changed weight is a different decoder: the worker is replaced.
+    monkeypatch.setenv("FA_KARA_TEXT_BONUS", "0.1")
+    get_settings.cache_clear()
+    assert pipeline._fa_kara_worker(tmp_path, "revision") is not worker
+    assert seen[-1]["FA_KARA_TEXT_BONUS"] == "0.1" and "terminated" in seen
+    get_settings.cache_clear()
