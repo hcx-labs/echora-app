@@ -368,9 +368,10 @@ def _retry(db, row, error):
         updated_at=now() WHERE id=%s''', (error, min(get_settings().job_retry_max_seconds, get_settings().job_retry_base_seconds ** row['attempts']), row['id']))
 
 
-def fail(job_id, token, error, retryable=True):
+def fail(job_id, token, error, retryable=True, note=None):
     # Never persist exception text: URLs, SQL and provider credentials can occur anywhere.
-    safe_error = 'Job execution failed.'
+    # `note` is a status line the caller builds itself, shown in place of the generic one.
+    safe_error = note or 'Job execution failed.'
     with _db() as db:
         row = _owned(db, job_id, token)
         if not row or _ack_cancel(db, row):

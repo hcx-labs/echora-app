@@ -29,6 +29,21 @@ def _has_failures(value: object) -> bool:
     return False
 
 
+# Translations can be filled in later on their own; one failed request shouldn't re-run a batch.
+RETRY_EXEMPT = {'translations'}
+
+
+def _failed_stages(summary: dict) -> list[str]:
+    return [key.replace('_', ' ') for key, item in summary.items()
+            if (key == 'failed' and isinstance(item, (int, float)) and item > 0) or (key != 'failed' and _has_failures(item))]
+
+
+def _failure_note(stages: list[str], retrying: bool) -> str:
+    # Built from summary keys only, never exception text.
+    named = [s for s in stages if s != 'failed'] or ['songs']
+    return f"Some songs failed in {', '.join(named)}." + (' Retrying.' if retrying else '')
+
+
 def execute(job: dict, work_directory: str | None = None, supervisor_pid: int | None = None,
             lease_seconds: int | None = None) -> None:
     """Run one claim in an isolated process so model memory dies with the claim."""
@@ -61,11 +76,13 @@ def execute(job: dict, work_directory: str | None = None, supervisor_pid: int | 
         # None means the scan expanded into durable child batches.
         if summary is not None:
             partial = _has_failures(summary)
-            if partial and job.get('attempts', 1) < job.get('max_attempts', get_settings().job_max_attempts):
+            retry = [s for s in _failed_stages(summary) if s not in RETRY_EXEMPT]
+            if retry and job.get('attempts', 1) < job.get('max_attempts', get_settings().job_max_attempts):
                 # Per-song failures are swallowed by pipelines to preserve the rest
                 # of the batch. Retry that batch using its committed artifact plan.
-                context.report({'message': 'Retrying incomplete analysis', 'summary': summary})
-                jobs.fail(job['id'], job['claim_token'], 'Incomplete analysis', retryable=True)
+                note = _failure_note(retry, retrying=True)
+                context.report({'message': note, 'summary': summary})
+                jobs.fail(job['id'], job['claim_token'], 'Incomplete analysis', retryable=True, note=note)
             else:
                 context.complete(summary, status="partial" if partial else "complete")
     except jobs.JobCancelled:
