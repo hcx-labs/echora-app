@@ -74,10 +74,10 @@ const models: {
     detail: "Detects lyrics language, including romanized Indic text.",
   },
   {
-    name: "Echora MMS-300M aligner",
+    name: "Echora Kara 300M",
     phases: ["karaoke"],
     role: "Karaoke timing",
-    detail: "Forced alignment of lyrics to audio for syllable timing.",
+    detail: "Aligns lyrics to the song for syllable-timed karaoke.",
   },
   {
     name: "Echora MOSS Transcribe + Diarize",
@@ -129,14 +129,14 @@ export default function SyncExplanation({ activePhases = [] }: { activePhases?: 
         title="Analysis models"
         hint={`${models.length} models and analysis steps power Echora.`}
       >
-        <ul className="grid gap-px border border-border bg-border">
+        <ul className="grid grid-cols-[minmax(0,1fr)] gap-px border border-border bg-border">
           {models.map((model) => {
             const running = model.phases.some((phase) => activePhases.includes(phase));
             return (
               <li
                 key={model.name}
                 aria-current={running ? "step" : undefined}
-                className={`px-3 py-2.5 transition-colors ${running ? "bg-primary/10 shadow-[inset_2px_0_0_var(--accent)]" : "bg-rail"}`}
+                className={`min-w-0 px-3 py-2.5 transition-colors ${running ? "bg-primary/10 shadow-[inset_2px_0_0_var(--accent)]" : "bg-rail"}`}
               >
                 <div className="flex items-baseline justify-between gap-2">
                   <p
