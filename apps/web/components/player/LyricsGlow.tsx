@@ -132,9 +132,18 @@ export default function LyricsGlow({
     };
     const place = (from: Group, offset: number, origin: DOMRect) => {
       const anchor = from.line?.isConnected ? from.line.getBoundingClientRect() : null;
+      // The lyrics list fades its top and bottom fifth out (its mask); fade the light the same
+      // way, so a line scrolled out of view never leaves a glow outside the panel.
+      const view = anchor ? from.line?.parentElement?.getBoundingClientRect() : null;
+      const shown = (y: number) => {
+        if (!view || !view.height) return 1;
+        const at = (y - view.top) / view.height;
+        return Math.max(0, Math.min(1, at / 0.2, (1 - at) / 0.2));
+      };
       for (let index = 0; index < SPOTS; index++) {
         const element = elements[offset + index];
-        const lit = anchor && index < from.count ? from.weight : 0;
+        const lit =
+          anchor && index < from.count ? from.weight * shown(anchor.y + from.rel[index].y) : 0;
         if (!lit || !anchor) {
           if (element.style.opacity !== "0") element.style.opacity = "0";
           continue;
@@ -161,9 +170,7 @@ export default function LyricsGlow({
         last = now;
         return;
       }
-      // 30 fps, in step with the karaoke wipe it follows.
-      if (now - last < 1000 / 30 - 4) return;
-      const dt = Math.min(0.08, (now - last) / 1000 || 0.033);
+      const dt = Math.min(0.08, (now - last) / 1000 || 0.016);
       last = now;
       // Nothing to light and nothing still fading: stop measuring until the song plays again
       // (pauses and instrumental breaks cost almost nothing).
@@ -179,11 +186,13 @@ export default function LyricsGlow({
       const playing = playingRef.current;
       current.weight += ((visible && playing ? 1 : 0) - current.weight) * (1 - Math.exp(-dt * 10));
       previous.weight += (0 - previous.weight) * (1 - Math.exp(-dt * 12));
+      // The glow sits exactly on the sung edge (no positional easing, which would trail the
+      // wipe); only its size eases, so word-width changes stay soft.
       const glide = 1 - Math.exp(-dt * 16);
       current.rel.forEach((rel, index) => {
         const target = current.target[index];
-        rel.x += (target.x - rel.x) * glide;
-        rel.y += (target.y - rel.y) * glide;
+        rel.x = target.x;
+        rel.y = target.y;
         rel.w += (target.w - rel.w) * glide;
         rel.h += (target.h - rel.h) * glide;
       });

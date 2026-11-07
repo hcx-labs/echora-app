@@ -39,6 +39,23 @@ def test_partial_batch_retries_then_reports_partial(execution, monkeypatch):
     context.complete.assert_called_once_with(summary, status='partial')
 
 
+def test_failed_translation_finishes_partial_without_retry(execution, monkeypatch):
+    job, context, failure = execution
+    summary = {'karaoke': {'failed': 0, 'aligned': 32}, 'translations': {'failed': 1, 'translated': 9}}
+    monkeypatch.setattr(analysis_jobs, 'execute', Mock(return_value=summary))
+    worker.execute(job)
+    failure.assert_not_called()
+    context.complete.assert_called_once_with(summary, status='partial')
+
+
+def test_retry_names_the_failed_stages(execution, monkeypatch):
+    job, context, failure = execution
+    summary = {'failed': 0, 'karaoke': {'failed': 2}, 'translations': {'failed': 1}}
+    monkeypatch.setattr(analysis_jobs, 'execute', Mock(return_value=summary))
+    worker.execute(job)
+    assert failure.call_args.kwargs['note'] == 'Some songs failed in karaoke. Retrying.'
+
+
 def test_cancel_does_not_retry(execution, monkeypatch):
     job, context, failure = execution
     monkeypatch.setattr(analysis_jobs, 'execute', Mock(side_effect=jobs.JobCancelled()))

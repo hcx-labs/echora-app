@@ -120,6 +120,10 @@ def test_fencing_checkpoint_retry_and_error(database):
     assert final['status'] == 'failed'
     assert final['error'] == 'Job execution failed.'
     assert 'secret' not in str(final)
+    third = jobs.enqueue('curation', 'curation', owner, payload={})
+    claim = jobs.claim('curation', 'worker')
+    assert jobs.fail(third['id'], claim['token'], 'secret', retryable=False, note='Some songs failed in lyrics.')
+    assert jobs.get_job(third['id'], owner)['error'] == 'Some songs failed in lyrics.'
 
 
 def test_expired_lease_and_bounded_attempts(database):

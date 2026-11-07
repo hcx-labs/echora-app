@@ -1,4 +1,14 @@
-export type KaraokeSyllable = { start_ms: number; end_ms: number; text: string; voice?: number };
+/** One timed mora of a reading: the kana and when it is sung. */
+export type RubyMora = { text: string; start_ms: number; end_ms: number };
+/** Furigana over `text.slice(start, end)` of a syllable (Japanese kanji). */
+export type RubySegment = { start: number; end: number; text: string; morae: RubyMora[] };
+export type KaraokeSyllable = {
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  voice?: number;
+  ruby?: RubySegment[];
+};
 export type LyricFragment = {
   syllable: KaraokeSyllable;
   index: number;
@@ -94,4 +104,28 @@ export function splitVoices(syllables: KaraokeSyllable[]): {
     lead: clean(syllables.filter((syllable) => syllable.voice !== 2)),
     backing: clean(syllables.filter((syllable) => syllable.voice === 2)),
   };
+}
+
+/** A reading placed on a line: furigana over `text.slice(from, to)` of the joined fragments. */
+export type LineRuby = { from: number; to: number; text: string; morae: RubyMora[] };
+
+/** Readings of a line's fragments, as offsets into their joined text (whole segments only). */
+export function lineRubies(fragments: LyricFragment[]): LineRuby[] {
+  const rubies: LineRuby[] = [];
+  let offset = 0;
+  for (const fragment of fragments) {
+    const first = fragment.fragmentIndex;
+    const last = first + fragment.text.length;
+    for (const segment of fragment.syllable.ruby || []) {
+      if (segment.start >= first && segment.end <= last && segment.end > segment.start)
+        rubies.push({
+          from: offset + segment.start - first,
+          to: offset + segment.end - first,
+          text: segment.text,
+          morae: segment.morae,
+        });
+    }
+    offset += fragment.text.length;
+  }
+  return rubies;
 }

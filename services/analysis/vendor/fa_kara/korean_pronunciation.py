@@ -16,6 +16,11 @@ module, so the aligner hears the same letters it was trained on.
 from __future__ import annotations
 
 VERSION = "ko_pronunciation_v1"
+# Label rules v2 (DATASET_FIXES_2026-10-18.md; V7_PLAN.md "Korean ㅢ after a consonant"): 표준 발음법 제5항
+# — ㅢ after a consonant onset is [ㅣ] (희망 → hi+mang, 무늬 → mu+ni), a non-initial 의 is [ㅣ] inside a
+# run and the run-final particle 의 is [ㅔ] (나의 → na+e); a run-initial 의 stays ui; ㄺ before ㄱ is
+# [ㄹ] + tensed ㄱ (읽고 → il+kko). v1 is unchanged.
+VERSION_V2 = "ko_pronunciation_v2"
 
 ONSETS = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ"
 VOWELS = [
@@ -166,8 +171,11 @@ def decompose(char: str) -> list[str]:
     return [ONSETS[code // 588], VOWELS[code % 588 // 28], CODAS[code % 28]]
 
 
-def _join(cur: list[str], nxt: list[str]) -> None:
+def _join(cur: list[str], nxt: list[str], v2: bool = False) -> None:
     """Apply the boundary rules between two adjacent syllables in place."""
+    if v2 and cur[2] == "ㄺ" and nxt[0] == "ㄱ":
+        # 제11항 다만: ㄺ before ㄱ is [ㄹ] and the ㄱ tenses (읽고 → il+kko, 맑게 → mal+kke).
+        cur[2], nxt[0] = "ㄹ", "ㄲ"
     coda, onset = cur[2], nxt[0]
     # ㅎ in the coda: aspirates ㄱㄷㅈ, tenses ㅅ, drops before vowels, nasal before ㄴ.
     if coda in ("ㅎ", "ㄶ", "ㅀ"):
@@ -220,11 +228,11 @@ def _join(cur: list[str], nxt: list[str]) -> None:
     cur[2], nxt[0] = coda, onset
 
 
-def romanize_run(text: str) -> list[str]:
-    """Romanize adjacent Hangul syllables by sound, one string per syllable."""
+def romanize_run(text: str, v2: bool = False) -> list[str]:
+    """Romanize adjacent Hangul syllables by sound, one string per syllable (``v2``: ㅢ rules)."""
     syllables = [decompose(c) for c in text]
     for cur, nxt in zip(syllables, syllables[1:]):
-        _join(cur, nxt)
+        _join(cur, nxt, v2)
     if syllables:
         syllables[-1][2] = NEUTRAL[syllables[-1][2]]
     result = []
@@ -235,11 +243,17 @@ def romanize_run(text: str) -> list[str]:
             if onset == "ㄹ" and index and syllables[index - 1][2] == "ㄹ"
             else ONSET_ROMAN[onset]
         )
-        result.append(roman_onset + VOWEL_ROMAN[vowel] + CODA_ROMAN[coda])
+        roman_vowel = VOWEL_ROMAN[vowel]
+        if v2 and vowel == "ㅢ":
+            if onset != "ㅇ":
+                roman_vowel = "i"
+            elif index:
+                roman_vowel = "e" if index == len(syllables) - 1 else "i"
+        result.append(roman_onset + roman_vowel + CODA_ROMAN[coda])
     return result
 
 
-def apply_to_items(items: list[dict]) -> list[dict]:
+def apply_to_items(items: list[dict], v2: bool = False) -> list[dict]:
     """Replace spelling-based prons of adjacent single-syllable Hangul items."""
     items = [dict(item) for item in items]
     index = 0
@@ -251,9 +265,9 @@ def apply_to_items(items: list[dict]) -> list[dict]:
         while end < len(items) and is_syllable(str(items[end].get("orig", ""))):
             end += 1
         for item, pron in zip(
-            items[index:end], romanize_run("".join(i["orig"] for i in items[index:end]))
+            items[index:end], romanize_run("".join(i["orig"] for i in items[index:end]), v2)
         ):
             item["pron"] = pron
-            item["pronunciation"] = VERSION
+            item["pronunciation"] = VERSION_V2 if v2 else VERSION
         index = end
     return items

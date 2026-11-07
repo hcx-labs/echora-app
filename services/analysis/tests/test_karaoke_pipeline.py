@@ -22,17 +22,20 @@ from echora_analysis.karaoke_pipeline import (
 )
 
 
-def test_stored_model_revision_tracks_roformer_independent_of_legacy_env(monkeypatch):
+def test_stored_model_revision_tracks_the_audio_input(monkeypatch):
     from echora_analysis.roformer import SEPARATION_REVISION
 
+    # The original mix by default; the legacy switches no longer decide it.
     for value in ("true", "false"):
         monkeypatch.setenv("FA_KARA_VOCAL_SEPARATION", value)
-        get_settings.cache_clear()
         monkeypatch.setenv("FA_KARA_DEMUCS_MODEL", "ignored")
         get_settings.cache_clear()
-        assert _stored_model_revision("model-revision").endswith(
-            f":model-revision:roformer:{SEPARATION_REVISION}"
-        )
+        assert _stored_model_revision("model-revision").endswith(":model-revision:mix")
+    monkeypatch.setenv("FA_KARA_AUDIO_INPUT", "vocals")
+    get_settings.cache_clear()
+    assert _stored_model_revision("model-revision").endswith(
+        f":model-revision:roformer:{SEPARATION_REVISION}"
+    )
 
 
 def test_parse_ass_karaoke_preserves_line_and_syllable_timing():
@@ -164,12 +167,24 @@ def test_validate_alignment_document_rejects_reversed_tokens():
         raise AssertionError("expected document validation failure")
 
 
-@pytest.mark.parametrize("separate", [None, True, False])
-def test_worker_aligns_cached_vocals_without_line_times(monkeypatch, tmp_path, separate):
+@pytest.mark.parametrize(
+    "audio_input, separate, source",
+    [
+        ("mix", None, "original_mix"),
+        ("mix", True, "roformer_vocals"),
+        ("mix", False, "provided_audio"),
+        ("vocals", None, "roformer_vocals"),
+        ("vocals", False, "provided_audio"),
+    ],
+)
+def test_worker_aligns_the_configured_audio_without_line_times(
+    monkeypatch, tmp_path, audio_input, separate, source
+):
     monkeypatch.setenv("HF_HOME", str(tmp_path))
-    get_settings.cache_clear()
+    monkeypatch.setenv("FA_KARA_AUDIO_INPUT", audio_input)
     monkeypatch.setenv("FA_KARA_VOCAL_SEPARATION", "false")
     get_settings.cache_clear()
+    separated = source == "roformer_vocals"
     snapshot = (
         tmp_path
         / "hub"
@@ -202,7 +217,7 @@ def test_worker_aligns_cached_vocals_without_line_times(monkeypatch, tmp_path, s
         work = Path(argv[argv.index("--path_io") + 1])
         input_path = Path(argv[argv.index("--input_audio") + 1])
         assert "--reference_audio" not in argv
-        if separate is False:
+        if not separated:
             assert events == []
             assert input_path.read_bytes() == original
         else:
@@ -213,6 +228,12 @@ def test_worker_aligns_cached_vocals_without_line_times(monkeypatch, tmp_path, s
         # Synced lines give the line text; their start times never reach the aligner.
         assert (work / "i.txt").read_text() == "Hello\n"
         assert "--timeline_json" not in argv and not (work / "timeline.json").exists()
+        # The Echora Kara decoder defaults reach the aligner.
+        assert {"--exact_frame_clock", "--blank_free_tokens", "--background_decoding"} <= set(argv)
+        assert argv[argv.index("--label_rules") + 1] == "v3-sung"
+        assert argv[argv.index("--fusion") + 1] == "on"
+        assert argv[argv.index("--timing_offset_ms") + 1] == "0"
+        assert "--optional_brackets" not in argv
         (work / "o.ass").write_text("")
         (work / "o_ruby.lrc").write_text("")
         (work / "o.alignment.json").write_text(
@@ -244,12 +265,14 @@ def test_worker_aligns_cached_vocals_without_line_times(monkeypatch, tmp_path, s
     result = pipeline._run_fa_kara(
         original, "Hello", "en", [{"text": "Hello", "start_ms": 100}], separate
     )
-    assert result["diagnostics"]["separator"] == (None if separate is False else "roformer")
+    assert result["diagnostics"]["audio_source"] == source
+    assert result["diagnostics"]["separator"] == ("roformer" if separated else None)
 
 
 @pytest.mark.parametrize("cancel", [False, True])
 def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch, cancel):
     monkeypatch.setenv("DATABASE_URL", "unused-mocked")
+    monkeypatch.setenv("FA_KARA_AUDIO_INPUT", "vocals")
     get_settings.cache_clear()
     connection = MagicMock()
     monkeypatch.setattr(pipeline.psycopg, "connect", lambda _: connection)
@@ -316,6 +339,60 @@ def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch,
         # Later phases reread the batch's source cache rather than copy raw audio
         # into a second unbounded per-karaoke directory.
         assert client.audio_bytes.call_count == 5
+
+
+def test_backfill_aligns_the_original_mix_without_separating(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "unused-mocked")
+    get_settings.cache_clear()
+    connection = MagicMock()
+    monkeypatch.setattr(pipeline.psycopg, "connect", lambda _: connection)
+    connection.__enter__.return_value = connection
+    tracks = [(i, str(i), str(i), "Hello", "en", []) for i in range(3)]
+    connection.cursor.return_value.__enter__.return_value.fetchall.return_value = tracks
+    client = MagicMock()
+    client.__enter__.return_value = client
+
+    def audio(key):
+        if key == "1":
+            raise ValueError("bad audio")
+        return key.encode()
+
+    client.audio_bytes.side_effect = audio
+    monkeypatch.setattr(pipeline, "NavidromeClient", lambda *args: client)
+    monkeypatch.setattr(pipeline, "resolve_library_id", lambda *args: "library")
+    monkeypatch.setattr(
+        pipeline,
+        "plan_karaoke",
+        lambda *args, **kwargs: SimpleNamespace(karaoke_external_ids=["0", "1", "2"]),
+    )
+    monkeypatch.setattr(pipeline, "_stop_fa_kara_worker", lambda: None)
+    monkeypatch.setattr(pipeline, "current_remote", lambda: None)
+
+    def prepare(*args, **kwargs):
+        raise AssertionError("the original mix needs no separation")
+
+    monkeypatch.setattr(pipeline, "prepare_audio", prepare)
+    aligned = []
+
+    def align(data, *args):
+        aligned.append(data)
+        return {
+            "lines": [],
+            "diagnostics": {"audio_source": "original_mix", "separator_revision": None},
+            "model": "model",
+            "model_revision": "revision",
+            "ass": "",
+            "lrc": "",
+            "alignment_document": {},
+        }
+
+    monkeypatch.setattr(pipeline, "_run_fa_kara", align)
+    assert pipeline._backfill_karaoke("url", "user", "pass") == {
+        "total": 3,
+        "aligned": 2,
+        "failed": 1,
+    }
+    assert aligned == [b"0", b"2"]
 
 
 @pytest.mark.parametrize("mode", ["complete", "partial_cancel", "timeout"])
@@ -518,3 +595,32 @@ def test_overlap_between_lines_is_not_a_second_voice():
     ]
     mark_backing_voice(lines)
     assert all("voice" not in s for line in lines for s in line["syllables"])
+
+
+def test_worker_environment_carries_the_decoder_weights(monkeypatch, tmp_path):
+    get_settings.cache_clear()
+    seen = []
+
+    class Worker:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            seen.append("terminated")
+
+    def popen(command, **options):
+        seen.append(options["env"])
+        return Worker()
+
+    monkeypatch.setattr(pipeline.subprocess, "Popen", popen)
+    monkeypatch.setattr(pipeline, "_FA_KARA_WORKER", None)
+    monkeypatch.setattr(pipeline, "_FA_KARA_WORKER_KEY", None)
+    worker = pipeline._fa_kara_worker(tmp_path, "revision")
+    assert (seen[0]["FA_KARA_TEXT_BONUS"], seen[0]["FA_KARA_IN_LINE_GAP_COST"]) == ("0.4", "0.2")
+    assert pipeline._fa_kara_worker(tmp_path, "revision") is worker and len(seen) == 1
+    # A changed weight is a different decoder: the worker is replaced.
+    monkeypatch.setenv("FA_KARA_TEXT_BONUS", "0.1")
+    get_settings.cache_clear()
+    assert pipeline._fa_kara_worker(tmp_path, "revision") is not worker
+    assert seen[-1]["FA_KARA_TEXT_BONUS"] == "0.1" and "terminated" in seen
+    get_settings.cache_clear()

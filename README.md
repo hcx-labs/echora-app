@@ -104,7 +104,7 @@ Work runs in durable background batches. A failed track doesn't block the others
 | [Mel-Band RoFormer](https://github.com/KimberleyJensen/Mel-Band-Roformer-Vocal-Model) | Separating vocals from accompaniment |
 | Essentia MELODIA | Melody contours for hum search and the melody line |
 | [fastText LID-176](https://fasttext.cc/docs/en/language-identification.html) · [IndicLID](https://github.com/AI4Bharat/IndicLID) | Lyrics language, including romanized Indic text |
-| [Echora MMS-300M aligner](https://huggingface.co/hcX02/echora-mms-300m-multilingual-lyrics-forced-aligner) | Syllable timing for karaoke |
+| [Echora Kara 300M](https://huggingface.co/hcxlabs/echora-kara-300m) ([code](https://github.com/hcx-labs/echora-kara)) | Syllable timing for karaoke |
 | [Echora MOSS transcriber](https://huggingface.co/hcX02/echora-moss-0.9b-multilingual-lyrics-transcriber) | Writing lyrics for vocal tracks that have none (optional) |
 | [NMFP](https://github.com/raraz15/neural-music-fp) recording encoder | Identify song (opt-in) |
 | [LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) via ComfyUI | Motion artwork (optional, needs a 24 GB GPU) |
@@ -286,8 +286,8 @@ Echora includes no music, lyrics or artwork. Those in the screenshots are shown 
 Echora is built on the work of many people. Thank you to:
 
 - **[Navidrome](https://www.navidrome.org/)**, which hosts and streams the music Echora works with.
-- The model authors: Tencent AI Lab for **MuQ-MuLan**, the Multimodal Art Projection team for **MERT**, BAAI for **BGE-M3**, the Music Technology Group at Universitat Pompeu Fabra for **Essentia** and its models, Meta for **fastText** language identification and **MMS**, AI4Bharat for **IndicLID**, OpenMOSS for **MOSS-Transcribe-Diarize**, Lightricks for **LTX-2.5** and Google for **Gemma**.
-- **[FA-Kara](https://github.com/moriwx/FA-Kara)** by moriwx, the karaoke alignment pipeline Echora's aligner extends, and **NextFire**'s MMS karaoke forced aligner, which the Echora aligner was fine-tuned from.
+- The model authors: Tencent AI Lab for **MuQ-MuLan**, the Multimodal Art Projection team for **MERT**, BAAI for **BGE-M3**, the Music Technology Group at Universitat Pompeu Fabra for **Essentia** and its models, Meta for **fastText** language identification and **Omnilingual ASR**, AI4Bharat for **IndicLID**, OpenMOSS for **MOSS-Transcribe-Diarize**, Lightricks for **LTX-2.5** and Google for **Gemma**.
+- **[FA-Kara](https://github.com/moriwx/FA-Kara)** by moriwx, where Echora's karaoke alignment pipeline started, and **NextFire**'s MMS karaoke forced aligner, which Echora's earlier aligners were fine-tuned from.
 - Kimberley Jensen's **[Mel-Band RoFormer vocal model](https://github.com/KimberleyJensen/Mel-Band-Roformer-Vocal-Model)**, and the **[neural-music-fp](https://github.com/raraz15/neural-music-fp)** fingerprinting model.
 - **[AudioMuse-AI](https://github.com/NeptuneHub/AudioMuse-AI)**, whose recording search and Navidrome integration informed Echora's own.
 - **[Chromaprint](https://acoustid.org/chromaprint)**, **[pgvector](https://github.com/pgvector/pgvector)**, **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)**, **[Three.js](https://threejs.org/)** and **[Lucide](https://lucide.dev/)**, whose icon is part of the Echora logo.

@@ -545,9 +545,12 @@ def test_modal_batch_classifies_voice_remotely(monkeypatch):
     assert voice_pipeline._store_activation.call_args.args[1] == rows[0][0]
 
 
-def test_modal_batch_aligns_karaoke_remotely(monkeypatch):
+@pytest.mark.parametrize("audio_input", ["mix", "vocals"])
+def test_modal_batch_aligns_karaoke_remotely(monkeypatch, audio_input):
     from echora_analysis import karaoke_pipeline
 
+    monkeypatch.setenv("FA_KARA_AUDIO_INPUT", audio_input)
+    get_settings.cache_clear()
     rows = [
         (uuid4(), "a", "A", "lyrics a", "ja", [{"text": "a"}]),
         (uuid4(), "b", "B", "lyrics b", None, None),
@@ -596,9 +599,12 @@ def test_modal_batch_aligns_karaoke_remotely(monkeypatch):
         and lines == [[{"text": "a"}], []]
     )
     assert digests == [sha256(b"audio a").hexdigest(), sha256(b"audio b").hexdigest()]
-    # Separated first, for exactly the songs being aligned, with what alignment reads.
-    assert remote.prepare_vocals.call_args.args[0] == digests
-    assert remote.prepare_vocals.call_args.kwargs == {"vocals": True}
+    if audio_input == "mix":
+        remote.prepare_vocals.assert_not_called()
+    else:
+        # Separated first, for exactly the songs being aligned, with what alignment reads.
+        assert remote.prepare_vocals.call_args.args[0] == digests
+        assert remote.prepare_vocals.call_args.kwargs == {"vocals": True}
 
 
 # Motion artwork
