@@ -75,8 +75,15 @@ def current_model_revision() -> str:
     return f"local-{_checkpoint_digest(str(weights), stat.st_size, stat.st_mtime_ns)}"
 
 
+def _separates_vocals() -> bool:
+    return get_settings().fa_kara_audio_input == "vocals"
+
+
 def _stored_model_revision(model_revision: str) -> str:
-    return f"{FA_KARA_REVISION}:{model_revision}:roformer:{SEPARATION_REVISION}"
+    # The audio input is part of the identity, so switching it makes stored alignments stale.
+    if _separates_vocals():
+        return f"{FA_KARA_REVISION}:{model_revision}:roformer:{SEPARATION_REVISION}"
+    return f"{FA_KARA_REVISION}:{model_revision}:mix"
 
 
 def _ass_time_ms(value: str) -> int:
@@ -567,7 +574,9 @@ def _run_fa_kara(
     with tempfile.TemporaryDirectory(prefix="echora-fa-kara-") as directory:
         work = Path(directory)
         audio_path = work / "i.audio"
-        separate_vocals = separate_vocals is not False
+        # None follows FA_KARA_AUDIO_INPUT; a caller that brings its own audio passes False.
+        original_mix = separate_vocals is None and not _separates_vocals()
+        separate_vocals = _separates_vocals() if separate_vocals is None else separate_vocals
         if separate_vocals:
             # Keep the aligner resident on cache hits. If eviction caused a miss,
             # release it under the cache's producer lock before separator loading.
@@ -576,7 +585,7 @@ def _run_fa_kara(
             )
             audio_path.write_bytes(prepared)
         else:
-            # Timing repair supplies its own audio and must not separate it again.
+            # The song as stored, or timing repair's own audio, which must not be separated again.
             audio_path.write_bytes(audio)
         line_texts = _source_line_texts(source_lines or [])
         input_text = "\n".join(line_texts) if line_texts else lyrics_text.rstrip("\r\n")
@@ -645,7 +654,13 @@ def _run_fa_kara(
             json.loads((work / "o.alignment.json").read_text(encoding="utf-8"))
         )
         diagnostics = alignment_document.setdefault("diagnostics", {})
-        diagnostics["audio_source"] = "roformer_vocals" if separate_vocals else "provided_audio"
+        diagnostics["audio_source"] = (
+            "roformer_vocals"
+            if separate_vocals
+            else "original_mix"
+            if original_mix
+            else "provided_audio"
+        )
         diagnostics["separator"] = "roformer" if separate_vocals else None
         diagnostics["separator_revision"] = SEPARATION_REVISION if separate_vocals else None
         lines = build_lines_from_alignment_document(alignment_document)
@@ -735,7 +750,9 @@ def _backfill_karaoke(
         remote = current_remote()
         prepared_sources = set()
         digests: dict[object, str] = {}
+        separate = _separates_vocals()
         # Separation phase: one Roformer for every selected song, before the aligner loads.
+        # On the original mix this only fetches each song into the batch's source cache.
         with separation_phase():
             for index, (track_id, external_id, title, *_) in enumerate(tracks):
                 report(
@@ -750,11 +767,11 @@ def _backfill_karaoke(
                 get_check()()
                 try:
                     source = client.audio_bytes(external_id)
-                    if remote is None:
-                        prepare_audio(source, vocals=True, check=get_check())
-                    else:
+                    if remote is not None:
                         # Vocals are separated on Modal; only the source audio goes up.
                         digests[track_id] = remote.upload_audio(source)
+                    elif separate:
+                        prepare_audio(source, vocals=True, check=get_check())
                     prepared_sources.add(track_id)
                     del source
                 except Exception:
@@ -770,7 +787,7 @@ def _backfill_karaoke(
                         "summary": summary,
                     }
                 )
-        if remote is not None and prepared_sources:
+        if remote is not None and separate and prepared_sources:
             # Like local preparation: separate the vocals of exactly the songs selected for
             # alignment first, so the aligner then stays loaded on Modal instead of being
             # stopped and reloaded around each song's separation.

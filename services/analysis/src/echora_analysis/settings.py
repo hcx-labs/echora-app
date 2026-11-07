@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     fa_kara_text_bonus: float = Field(0.4, ge=0.0, le=5.0)
     # Cost per blank frame between two syllables of one line (0: off).
     fa_kara_in_line_gap_cost: float = Field(0.2, ge=0.0, le=20.0)
+    # What the aligner hears: "mix" (default) is the song as stored, which Echora Kara is trained
+    # and benchmarked on; "vocals" is the separated vocal stem.
+    fa_kara_audio_input: str = Field("mix")
     # Base image for analysis on Modal. Release images set it to the GPU image of
     # their own version, so remote dependencies match the worker's.
     modal_image: str = Field(
@@ -352,6 +355,8 @@ class Settings(BaseSettings):
             raise ValueError("FA_KARA_ALIGNER must be yohane or mms")
         if self.fa_kara_fusion not in {"off", "on", "gate0"}:
             raise ValueError("FA_KARA_FUSION must be off, on or gate0")
+        if self.fa_kara_audio_input not in {"mix", "vocals"}:
+            raise ValueError("FA_KARA_AUDIO_INPUT must be mix or vocals")
         if self.fa_kara_label_rules not in {
             "v1",
             "v2",
@@ -399,6 +404,7 @@ PROCESSING_FIELDS = (
     "fa_kara_background_decoding",
     "fa_kara_text_bonus",
     "fa_kara_in_line_gap_cost",
+    "fa_kara_audio_input",
 )
 
 

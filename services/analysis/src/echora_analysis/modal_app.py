@@ -308,7 +308,7 @@ class Analysis:
         source_lines,
         settings: dict[str, object],
     ):
-        """FA-Kara alignment of one track's lyrics (Roformer vocals, then the aligner)."""
+        """FA-Kara alignment of one track's lyrics, on the audio FA_KARA_AUDIO_INPUT names."""
         from echora_analysis.karaoke_pipeline import _run_fa_kara
 
         self._adopt(settings)
