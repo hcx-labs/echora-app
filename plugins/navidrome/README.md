@@ -101,7 +101,10 @@ sufficient, though a future cache or candidate index may improve performance.
 
 Lyrics requests use saved data only and never launch transcription, alignment or
 translation. TTML carries line/syllable timing plus translation tracks with their
-language and line mapping. Only completed translations with a matching source
+language and line mapping. Backing vocals the aligner placed on their own stream (an
+inline echo, or a whole line) are wrapped in `ttm:role="x-bg"`, the role Apple Music
+uses and Navidrome parses as a background agent, so clients can show them apart from
+the lead. Only completed translations with a matching source
 checksum and matching line IDs are served. Original line IDs are mapped to karaoke
 paragraphs, allowing blank stanza separators and trimmed line edges. Karaoke text
 differences do not suppress translations. If nonempty line counts differ, export

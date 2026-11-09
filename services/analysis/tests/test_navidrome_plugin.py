@@ -182,6 +182,73 @@ def lyric_example():
     return row, translation
 
 
+def backing_example():
+    """A lead line with an inline echo on the second voice, and a whole backing line."""
+    return {
+        "text": "Lonely (so lonely) tonight\n(One, two, three)",
+        "language": "en",
+        "provenance": {
+            "lines": [{"text": "Lonely (so lonely) tonight"}, {"text": "(One, two, three)"}]
+        },
+        "karaoke_lines": [
+            {
+                "text": "Lonely (so lonely) tonight",
+                "start_ms": 1000,
+                "end_ms": 3200,
+                "syllables": [
+                    {"text": "Lone", "start_ms": 1000, "end_ms": 1300},
+                    {"text": "ly (", "start_ms": 1300, "end_ms": 1600},
+                    {"text": "so ", "start_ms": 1500, "end_ms": 1800, "voice": 2},
+                    {"text": "lone", "start_ms": 1800, "end_ms": 2100, "voice": 2},
+                    {"text": "ly) ", "start_ms": 2100, "end_ms": 2400, "voice": 2},
+                    {"text": "tonight", "start_ms": 2600, "end_ms": 3200},
+                ],
+            },
+            {
+                "text": "(One, two, three)",
+                "start_ms": 4000,
+                "end_ms": 5500,
+                "voice": "background",
+                "syllables": [
+                    {"text": "(One, ", "start_ms": 4000, "end_ms": 4500},
+                    {"text": "two, ", "start_ms": 4500, "end_ms": 5000},
+                    {"text": "three)", "start_ms": 5000, "end_ms": 5500},
+                ],
+            },
+        ],
+    }
+
+
+def test_ttml_marks_backing_vocals_with_the_background_role():
+    root = ET.fromstring(lyrics.ttml(backing_example(), []))
+    role = f"{{{lyrics.TTM}}}role"
+    lead, backing_line = root.findall(f".//{{{lyrics.TT}}}p")
+    # The echo is one x-bg span, timed over its words, nested in the lead paragraph.
+    children = list(lead)
+    assert [child.get(role) for child in children] == [None, None, "x-bg", None]
+    echo = children[2]
+    assert (echo.get("begin"), echo.get("end")) == ("00:00:01.500", "00:00:02.400")
+    assert [span.text for span in echo] == ["so ", "lone", "ly) "]
+    assert echo[0].get("begin") == "00:00:01.500"
+    assert "".join(lead.itertext()) == "Lonely (so lonely) tonight"
+    # A whole backing line carries the role on its paragraph; its words are plain spans.
+    assert backing_line.get(role) == "x-bg"
+    assert [span.get(role) for span in backing_line] == [None, None, None]
+    assert "".join(backing_line.itertext()) == "(One, two, three)"
+    assert root.get(role) is None
+
+
+def test_backing_fixture_matches_current_export():
+    exported = lyrics.lyrics_response(backing_example(), [], auth.RankingProfile())["lyrics"][0][
+        "text"
+    ]
+    fixture = (
+        Path(__file__).resolve().parents[3]
+        / "plugins/navidrome/contract-tests/testdata/lyrics-backing.ttml"
+    )
+    assert exported == fixture.read_text(encoding="utf-8")
+
+
 def test_ttml_preserves_unicode_cues_translation_kind_and_line_mapping():
     row, translated = lyric_example()
     result = lyrics.lyrics_response(row, [translated], auth.RankingProfile())
