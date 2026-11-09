@@ -191,6 +191,24 @@ def main(argv=None):
         help="B0: decode whole bracketed lines on the checkpoint's background head (may overlap the lead)",
     )
     parser.add_argument(
+        "--inline_backing_anchor",
+        type=int,
+        default=3,
+        help="an inline bracket run may start this many lead words before the run",
+    )
+    parser.add_argument(
+        "--gap_onset_pull",
+        action="store_true",
+        help="after >=0.6 s of silence, pull a word that the lattice starts >=0.6 s late back to the "
+        "first frame with vocal energy (a lone sustained vowel the model barely hears)",
+    )
+    parser.add_argument(
+        "--inline_backing",
+        action="store_true",
+        help="inline bracketed words stay on the lead path for ordering, then are re-placed on the "
+        "background head inside their line's window (2026-11-09)",
+    )
+    parser.add_argument(
         "--optional_brackets",
         action="store_true",
         help="inline bracketed words may leave the lead path; the ones left out go on a second stream",
@@ -423,6 +441,13 @@ def main(argv=None):
                 # A line needs a lead word to stay on the path ("(oh) (yeah)" is kept whole).
                 optional_tokens.extend(flag and not all(flags) for flag in flags)
                 cursor += len(tokens)
+        inline_backing_tokens = None
+        if args.inline_backing:
+            inline_backing_tokens, cursor = [], 0
+            for i, tokens in enumerate(alignment_token_lines):
+                flags = bracketed[cursor : cursor + len(tokens)]
+                inline_backing_tokens.extend(flag and not all(flags) for flag in flags)
+                cursor += len(tokens)
         alignment_results = align_audio_with_timeline(
             y_processed,
             [tokens for tokens in alignment_token_lines if tokens],
@@ -444,6 +469,9 @@ def main(argv=None):
             blank_free_tokens=args.blank_free_tokens,
             background_lines=background_lines,
             optional_tokens=optional_tokens,
+            inline_backing_tokens=inline_backing_tokens,
+            inline_backing_anchor_words=args.inline_backing_anchor,
+            gap_onset_pull=args.gap_onset_pull,
             fusion=args.fusion,
             fusion_model=args.fusion_model,
         )

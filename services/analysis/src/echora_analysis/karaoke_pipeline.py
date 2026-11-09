@@ -36,7 +36,7 @@ FA_KARA_REVISION = "168ca5f01cecaa1290e31c0ce8dc44af8c7451bb"
 # v5: the Echora Kara model on the exact frame clock, with blank-free syllables, backing lines on
 # their own head, the in-line gap cost and the text head's bonus (v4: audio-only alignment with
 # minimum syllable durations and a +45 ms calibration).
-KARAOKE_PIPELINE_REVISION = "v5-echora-kara"
+KARAOKE_PIPELINE_REVISION = "v6-echora-kara-stem"
 DEFAULT_MODEL_ID = "hcxlabs/echora-kara-300m"
 DEFAULT_MODEL_REVISION = "64087e1078b1aaf39cc1e6a9fc93874ca2f60e22"
 _DIALOGUE = re.compile(r"^Dialogue: [^,]*,([^,]+),([^,]+),(?:[^,]*,){6}(.*)$")
@@ -252,11 +252,14 @@ def mark_backing_voice(lines: list[dict[str, object]]) -> list[dict[str, object]
     """Tag a line's second, simultaneous voice with ``"voice": 2`` so players can show it as a
     second line.
 
-    Decided by the aligner, never by parentheses (lyrics also parenthesize words the lead sings
-    alone) or by which word starts first. A phrase (consecutive words of a line) that the aligner
-    placed on its second stream (``"stream": 2``) is a second voice when it overlaps the line's
-    other words by at least ``BACKING_MIN_OVERLAP_MS``; otherwise it stays on the line. Overlaps
-    between lines are not marked: players already show those as two lines. Stale marks are cleared.
+    Decided by the aligner, never by parentheses alone (lyrics also parenthesize words the lead
+    sings alone) or by which word starts first. A phrase (consecutive words of a line) that the
+    aligner placed on its second stream (``"stream": 2``) is a second voice. With inline backing
+    placement on (``fa_kara_inline_backing``) every such phrase beside lead words is one, since the
+    aligner then puts each inline bracket phrase on that stream; otherwise only a phrase that
+    overlaps the line's other words by at least ``BACKING_MIN_OVERLAP_MS`` qualifies and the rest
+    stay on the line. A line entirely on the second stream, and overlaps between lines, are not
+    marked: players already show those as two lines. Stale marks are cleared.
     """
     for line in lines:
         words: list[list[dict[str, object]]] = []
@@ -286,7 +289,13 @@ def mark_backing_voice(lines: list[dict[str, object]]) -> list[dict[str, object]
         for phrase in phrases:
             start = int(phrase[0][0].get("start_ms", 0))
             end = max(int(word[-1].get("end_ms", 0)) for word in phrase)
-            if any(min(end, e) - max(start, s) >= BACKING_MIN_OVERLAP_MS for s, e in others):
+            # With inline backing placement every inline bracket phrase is on the second stream,
+            # so it is shown as the second voice whether or not it overlaps the lead; otherwise
+            # only a simultaneous phrase qualifies.
+            inline = bool(others) and get_settings().fa_kara_inline_backing
+            if inline or any(
+                min(end, e) - max(start, s) >= BACKING_MIN_OVERLAP_MS for s, e in others
+            ):
                 for word in phrase:
                     for syllable in word:
                         syllable["voice"] = BACKING_VOICE
@@ -625,6 +634,10 @@ def _run_fa_kara(
             command.append("--background_decoding")
         if get_settings().fa_kara_blank_free_tokens:
             command.append("--blank_free_tokens")
+        if get_settings().fa_kara_inline_backing:
+            command.append("--inline_backing")
+        if get_settings().fa_kara_gap_onset_pull:
+            command.append("--gap_onset_pull")
         if os.environ.get("FA_KARA_OPTIONAL_BRACKETS") == "1":
             # Experiment, off: inline bracketed words may leave the lead path. It did not help.
             command.append("--optional_brackets")

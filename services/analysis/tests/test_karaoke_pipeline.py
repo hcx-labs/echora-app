@@ -25,17 +25,17 @@ from echora_analysis.karaoke_pipeline import (
 def test_stored_model_revision_tracks_the_audio_input(monkeypatch):
     from echora_analysis.roformer import SEPARATION_REVISION
 
-    # The original mix by default; the legacy switches no longer decide it.
+    # The vocal stem by default; the legacy switches no longer decide it.
     for value in ("true", "false"):
         monkeypatch.setenv("FA_KARA_VOCAL_SEPARATION", value)
         monkeypatch.setenv("FA_KARA_DEMUCS_MODEL", "ignored")
         get_settings.cache_clear()
-        assert _stored_model_revision("model-revision").endswith(":model-revision:mix")
-    monkeypatch.setenv("FA_KARA_AUDIO_INPUT", "vocals")
+        assert _stored_model_revision("model-revision").endswith(
+            f":model-revision:roformer:{SEPARATION_REVISION}"
+        )
+    monkeypatch.setenv("FA_KARA_AUDIO_INPUT", "mix")
     get_settings.cache_clear()
-    assert _stored_model_revision("model-revision").endswith(
-        f":model-revision:roformer:{SEPARATION_REVISION}"
-    )
+    assert _stored_model_revision("model-revision").endswith(":model-revision:mix")
 
 
 def test_parse_ass_karaoke_preserves_line_and_syllable_timing():
@@ -232,7 +232,9 @@ def test_worker_aligns_the_configured_audio_without_line_times(
         assert {"--exact_frame_clock", "--blank_free_tokens", "--background_decoding"} <= set(argv)
         assert argv[argv.index("--label_rules") + 1] == "v3-sung"
         assert argv[argv.index("--fusion") + 1] == "on"
-        assert argv[argv.index("--timing_offset_ms") + 1] == "0"
+        # The stem recipe: calibrated offset, gap onset pull, inline backing placement.
+        assert argv[argv.index("--timing_offset_ms") + 1] == "-21"
+        assert {"--gap_onset_pull", "--inline_backing"} <= set(argv)
         assert "--optional_brackets" not in argv
         (work / "o.ass").write_text("")
         (work / "o_ruby.lrc").write_text("")
@@ -343,6 +345,7 @@ def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch,
 
 def test_backfill_aligns_the_original_mix_without_separating(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "unused-mocked")
+    monkeypatch.setenv("FA_KARA_AUDIO_INPUT", "mix")
     get_settings.cache_clear()
     connection = MagicMock()
     monkeypatch.setattr(pipeline.psycopg, "connect", lambda _: connection)
@@ -536,9 +539,12 @@ def test_replacing_a_local_checkpoint_changes_its_identity(monkeypatch, tmp_path
         get_settings.cache_clear()
 
 
-def test_second_stream_words_that_overlap_are_marked_as_a_second_voice():
+def test_second_stream_words_that_overlap_are_marked_as_a_second_voice(monkeypatch):
     from echora_analysis.karaoke_pipeline import mark_backing_voice
 
+    # Without inline backing placement only a simultaneous second-stream phrase is a second voice.
+    monkeypatch.setenv("FA_KARA_INLINE_BACKING", "false")
+    get_settings.cache_clear()
     lines = [
         {
             "text": "Lonely (so lonely) tonight",
@@ -581,6 +587,35 @@ def test_second_stream_words_that_overlap_are_marked_as_a_second_voice():
     assert [s.get("voice") for s in lines[1]["syllables"]] == [None, None, None]
     assert [s.get("voice") for s in lines[2]["syllables"]] == [None, None, None]
     assert [s.get("voice") for s in lines[3]["syllables"]] == [None, None]
+    get_settings.cache_clear()
+
+
+def test_inline_backing_marks_every_second_stream_phrase_as_a_second_voice():
+    from echora_analysis.karaoke_pipeline import mark_backing_voice
+
+    get_settings.cache_clear()  # inline backing placement is the default
+    lines = [
+        {
+            "text": "I want something stronger (I want it)",
+            "syllables": [  # the echo answers after the lead: no overlap, still the second voice
+                {"text": "stronger (", "start_ms": 1000, "end_ms": 1400},
+                {"text": "I ", "start_ms": 1420, "end_ms": 1500, "stream": 2},
+                {"text": "want ", "start_ms": 1500, "end_ms": 1700, "stream": 2},
+                {"text": "it)", "start_ms": 1700, "end_ms": 1900, "stream": 2},
+            ],
+        },
+        {
+            "text": "Oh (yeah) yeah",
+            "syllables": [  # parenthesized but left on the lead path by the aligner: lead
+                {"text": "Oh ", "start_ms": 4000, "end_ms": 4500},
+                {"text": "(yeah) ", "start_ms": 4500, "end_ms": 5000},
+                {"text": "yeah", "start_ms": 5000, "end_ms": 5500},
+            ],
+        },
+    ]
+    mark_backing_voice(lines)
+    assert [s.get("voice") for s in lines[0]["syllables"]] == [None, 2, 2, 2]
+    assert [s.get("voice") for s in lines[1]["syllables"]] == [None, None, None]
 
 
 def test_overlap_between_lines_is_not_a_second_voice():

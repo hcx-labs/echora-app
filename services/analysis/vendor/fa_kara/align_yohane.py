@@ -624,6 +624,9 @@ def _span_result(token, spans, frame_duration, offset=0.0, frame_times=None, fra
             + fraction * frame_duration
         )
         end = offset + _frame_time(frame_times, spans[-1].end, frame_duration)
+    # A negative calibration offset must not move a word before the song starts.
+    start = max(0.0, start)
+    end = max(start, end)
     score = sum(float(span.score) for span in spans) / len(spans)
     return {
         "token": token,
@@ -884,6 +887,129 @@ def _place_skipped_groups(
     return spans, placed
 
 
+def frame_rms(waveform, sample_rate, frame_count, frame_shift):
+    """Linear RMS of the decoded audio per decoder frame (window = one frame)."""
+    mono = waveform.flatten().float()
+    hop = max(1, int(round(sample_rate * frame_shift)))
+    padded = torch.nn.functional.pad(mono, (0, max(0, frame_count * hop - mono.numel())))
+    return padded[: frame_count * hop].view(frame_count, hop).square().mean(dim=1).sqrt()
+
+
+def pull_to_voice_onset(
+    spans, rms, *, frame_shift, min_pull_s=0.6, max_pull_s=1.5, silence_s=0.6, relative=0.08
+):
+    """Stem energy as a voice detector for words the model could not hear (2026-11-09).
+
+    A sustained lone vowel after a long instrumental ("Ohh" out of a 14 s break) gets ~2 % letter
+    probability, so the path squeezes it to the floor just before the next word. When the stem
+    is loud from an onset ``min_pull_s``..``max_pull_s`` before a group's start, that onset
+    follows ``silence_s`` of quiet, and no earlier group reaches into it, the group starts at the
+    onset. Shorter lead-ins are breaths and soft consonants and are left alone (pulling them was
+    worse 5/5 on the listening set). Returns the moved group indexes.
+    """
+    if rms.numel() == 0:
+        return []
+    top = torch.quantile(rms, 0.95).item() or 1.0
+    loud = (rms >= relative * top).tolist()
+    min_pull, max_pull, silence = (
+        max(1, round(x / frame_shift)) for x in (min_pull_s, max_pull_s, silence_s)
+    )
+    moved = []
+    for k, group in enumerate(spans):
+        if not group:
+            continue
+        start = group[0].start
+        if start >= len(loud) or not loud[start]:
+            continue
+        onset = start
+        while onset > 0 and loud[onset - 1] and start - (onset - 1) <= max_pull:
+            onset -= 1
+        if start - onset < min_pull:
+            continue
+        quiet = onset
+        while quiet > 0 and not loud[quiet - 1] and onset - (quiet - 1) <= silence:
+            quiet -= 1
+        if onset - quiet < silence - 1:
+            continue
+        previous_end = max((g[-1].end for g in spans[:k] if g), default=0)
+        if previous_end > onset:
+            continue
+        first = group[0]
+        spans[k] = [TokenSpan(first.token, onset, first.end, first.score), *group[1:]]
+        moved.append(k)
+    return moved
+
+
+def _place_inline_backing(
+    spans,
+    encoded,
+    flags,
+    line_ranges,
+    background,
+    blank,
+    frame_shift,
+    margin_seconds=0.25,
+    letter_frames=2,
+    lead_words_before=3,
+):
+    """Inline bracketed words ("I know ('til the day that I die)") re-placed on the background head.
+
+    The lead path keeps them for ordering, but an echo is sung inside or across the lead words, so
+    its lead-path time is only where the path could squeeze it. For each run of flagged groups in a
+    line, decode the run alone on the background head (letter floors, blank-free words) inside
+    [line start - margin, next line start + margin], free to overlap the lead; the lead groups stay.
+    2026-11-09: on 32 library songs with Apple timing this moved backing words >300 ms off from 63
+    to 51 of 313 and left the lead unchanged (13 songs better, 7 worse). Returns the moved groups."""
+    frames = background.shape[0]
+    margin = round(margin_seconds / frame_shift)
+    moved = []
+    stream_end = 0  # the re-placed words form one monotone stream across the song
+    for li, (start, end) in enumerate(line_ranges):
+        line_flags = flags[start:end]
+        if not any(line_flags) or all(line_flags):
+            continue
+        nxt = line_ranges[li + 1][0] if li + 1 < len(line_ranges) else None
+        hi = min(
+            frames, (spans[nxt][0].start if nxt is not None else spans[end - 1][-1].end) + margin
+        )
+        k = start
+        while k < end:
+            if not flags[k]:
+                k += 1
+                continue
+            last = k
+            while last + 1 < end and flags[last + 1]:
+                last += 1
+            groups = [encoded[i] for i in range(k, last + 1)]
+            need = sum(len(g) for g in groups) * letter_frames
+            # An echo answers the lead words just before it: open the window at the lead word
+            # ``lead_words_before`` back (reference echoes start ~0.6 s before the next lead word).
+            lead_before = [i for i in range(start, k) if not flags[i]]
+            anchor = (
+                lead_before[-lead_words_before] if len(lead_before) >= lead_words_before else start
+            )
+            lo = max(0, spans[anchor][0].start - margin, stream_end)
+            w_lo, w_hi = lo, max(hi, min(frames, lo + need + 2))
+            window = background[w_lo:w_hi].to(torch.float32)
+            try:
+                placed = align_with_minimum_durations(
+                    window,
+                    groups,
+                    blank=blank,
+                    minimum_frames=[letter_frames] * sum(map(len, groups)),
+                    blank_free_tokens=True,
+                )
+            except RuntimeError:
+                k = last + 1
+                continue
+            for i, g in zip(range(k, last + 1), placed):
+                spans[i] = [TokenSpan(t.token, t.start + w_lo, t.end + w_lo, t.score) for t in g]
+                moved.append(i)
+            stream_end = spans[last][-1].end
+            k = last + 1
+    return moved
+
+
 def _merge_background_results(
     lead_results,
     blocks,
@@ -963,6 +1089,9 @@ def align_audio_with_timeline(
     blank_free_tokens=False,
     background_lines=None,
     optional_tokens=None,
+    inline_backing_tokens=None,
+    inline_backing_anchor_words=3,
+    gap_onset_pull=False,
 ):
     """Align the complete song from the audio alone, in one global CTC pass.
 
@@ -1275,6 +1404,30 @@ def align_audio_with_timeline(
                 explained[group[0].start : group[-1].end, aligner_model.blank] = 0.0
         emission, scoring_emission, initial_spans, duration_floor, skipped = _decode_lead(explained)
 
+    inline_moved = []
+    if inline_backing_tokens is not None and any(inline_backing_tokens):
+        if background_plan is not None:
+            inline_backing_tokens = [inline_backing_tokens[i] for i in lead_indexes]
+        if len(inline_backing_tokens) != len(acoustic_tokens):
+            raise ValueError("inline_backing_tokens needs one flag per acoustic token")
+        if aligner_model.last_background_log_probs is None:
+            raise RuntimeError("inline_backing_tokens needs a checkpoint with a background head")
+        inline_moved = _place_inline_backing(
+            initial_spans,
+            encoded,
+            list(inline_backing_tokens),
+            line_acoustic_ranges,
+            aligner_model.last_background_log_probs,
+            aligner_model.blank,
+            frame_shift,
+            lead_words_before=inline_backing_anchor_words,
+        )
+
+    gap_pulled = []
+    if gap_onset_pull:
+        rms = frame_rms(waveform, sample_rate, emission.shape[0], frame_shift)
+        gap_pulled = pull_to_voice_onset(initial_spans, rms, frame_shift=frame_shift)
+
     frame_times = None
     if exact_frame_clock:
         if aligner_model.last_frame_times is None:
@@ -1303,6 +1456,10 @@ def align_audio_with_timeline(
         ),
         "timing_offset_ms": timing_offset_ms,
         "vocal_activity_weight": vocal_activity_weight,
+        "gap_onset_pull": bool(gap_onset_pull),
+        "gap_onset_pulled_groups": len(gap_pulled),
+        "inline_backing": inline_backing_tokens is not None,
+        "inline_backing_moved_groups": len(inline_moved),
         "ctc_blank_hold_assignment": "bounded_display_extension_not_silence_aware",
         "inference_audio_speed": speed,
     }
@@ -1332,10 +1489,14 @@ def align_audio_with_timeline(
         frame_times,
         fractions,
         token_offsets,
-        frozenset(skipped),
+        frozenset(skipped) | frozenset(inline_moved),  # second-stream tokens: holds skip over them
     )
     for index in skipped:
         results[index]["stream"] = 2
+    for index in inline_moved:
+        results[index]["stream"] = (
+            2  # re-placed echo: its own monotone stream, may overlap the lead
+        )
     if optional_groups:
         diagnostics["optional_brackets"] = {
             "optional_tokens": len(optional_groups),
