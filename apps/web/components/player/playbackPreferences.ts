@@ -1,4 +1,14 @@
-export type BackdropPreset = "waves" | "oscilloscope" | "void" | "curtain" | "ascii" | "roots" | "lightningfall" | "meshgrid" | "clouds" | "waterdrops";
+export type BackdropPreset =
+  | "waves"
+  | "oscilloscope"
+  | "void"
+  | "curtain"
+  | "ascii"
+  | "roots"
+  | "lightningfall"
+  | "meshgrid"
+  | "clouds"
+  | "waterdrops";
 export type PlaybackQuality = "original" | "320" | "120";
 export type PlaybackPreferences = {
   quality: PlaybackQuality;
@@ -34,8 +44,17 @@ export function readPlaybackPreferences(): PlaybackPreferences {
     const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
     if (stored.backdropPreset === "retrotrain") stored.backdropPreset = "lightningfall";
     const opacity = stored.backdropOpacity ?? stored.fullscreenBackdropOpacity;
-    return { ...defaultPlaybackPreferences, ...stored, backdropOpacity: typeof opacity === "number" && Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : defaultPlaybackPreferences.backdropOpacity };
-  } catch { return defaultPlaybackPreferences; }
+    return {
+      ...defaultPlaybackPreferences,
+      ...stored,
+      backdropOpacity:
+        typeof opacity === "number" && Number.isFinite(opacity)
+          ? Math.max(0, Math.min(1, opacity))
+          : defaultPlaybackPreferences.backdropOpacity,
+    };
+  } catch {
+    return defaultPlaybackPreferences;
+  }
 }
 
 export function writePlaybackPreferences(value: PlaybackPreferences) {
