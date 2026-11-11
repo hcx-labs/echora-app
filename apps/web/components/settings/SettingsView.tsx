@@ -858,8 +858,9 @@ export default function SettingsView() {
                       htmlFor="settings-field-8"
                       description={
                         <>
-                          Highlight each syllable at once or fill it with a moving liquid edge.
-                          Timing stays the same. Saved in this browser.
+                          Highlight each syllable at once, fill it with a moving liquid edge, bring
+                          words out of a blur (Bloom), or punch each word in like a combo hit
+                          (Strike). Timing stays the same. Saved in this browser.
                         </>
                       }
                     >
@@ -876,6 +877,8 @@ export default function SettingsView() {
                       >
                         <ChoiceItem value="syllable">Syllable highlight</ChoiceItem>
                         <ChoiceItem value="lava">Lava fill</ChoiceItem>
+                        <ChoiceItem value="bloom">Bloom</ChoiceItem>
+                        <ChoiceItem value="strike">Strike</ChoiceItem>
                       </Choice>
                     </SettingRow>
                     <section className="pt-6">

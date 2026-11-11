@@ -20,7 +20,7 @@ export type PlaybackPreferences = {
   trebleReactivity: number;
   animationSpeed: "slow" | "normal" | "fast";
   waveFrameRate: "30" | "60" | "uncapped";
-  karaokeHighlightStyle: "syllable" | "lava";
+  karaokeHighlightStyle: "syllable" | "lava" | "bloom" | "strike";
 };
 
 export const defaultPlaybackPreferences: PlaybackPreferences = {

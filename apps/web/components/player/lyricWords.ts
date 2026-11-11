@@ -84,26 +84,126 @@ export function fragmentProgress(now: number, { syllable, text, fragmentIndex }:
   );
 }
 
-/** Backing-vocal syllables (``voice: 2``) shown as their own line under the lead.
- *  The parentheses that marked the backing part are dropped: the separate line says it already.
- *  A line without backing syllables comes back unchanged, as the lead alone. */
+const BRACKETS = /[()（）]/g;
+
+/** Which of these texts are written inside round brackets (most of their letters are).
+ *  A bracket opened in one text stays open in the next: "(so ", "lone", "ly) ". */
+function bracketed(texts: string[]): boolean[] {
+  let depth = 0;
+  return texts.map((text) => {
+    let inside = 0,
+      outside = 0;
+    for (const character of text) {
+      if (character === "(" || character === "（") depth++;
+      else if (character === ")" || character === "）") depth = Math.max(0, depth - 1);
+      else if (/[\p{L}\p{N}]/u.test(character)) {
+        if (depth > 0) inside++;
+        else outside++;
+      }
+    }
+    return inside > 0 && inside >= outside;
+  });
+}
+
+/** Backing vocals shown as their own, smaller line under the lead: syllables marked
+ *  ``voice: 2`` and everything written in round brackets, which is always a backing vocal
+ *  (also in lyrics stored before they were marked). The brackets themselves are dropped: the
+ *  separate line says it already. A line that is bracketed as a whole has no lead part. */
 export function splitVoices(syllables: KaraokeSyllable[]): {
   lead: KaraokeSyllable[];
   backing: KaraokeSyllable[];
 } {
-  if (!syllables.some((syllable) => syllable.voice === 2)) return { lead: syllables, backing: [] };
+  const inBrackets = bracketed(syllables.map((syllable) => syllable.text));
+  const backing = syllables.map((syllable, index) => syllable.voice === 2 || inBrackets[index]);
+  if (!backing.some(Boolean)) return { lead: syllables, backing: [] };
   const clean = (part: KaraokeSyllable[]) => {
     const cleaned = part
-      .map((syllable) => ({ ...syllable, text: syllable.text.replace(/[()]/g, "") }))
+      .map((syllable) => ({ ...syllable, text: syllable.text.replace(BRACKETS, "") }))
       .filter((syllable) => syllable.text.trim());
     if (cleaned.length)
       cleaned[cleaned.length - 1] = { ...cleaned.at(-1)!, text: cleaned.at(-1)!.text.trimEnd() };
     return cleaned;
   };
   return {
-    lead: clean(syllables.filter((syllable) => syllable.voice !== 2)),
-    backing: clean(syllables.filter((syllable) => syllable.voice === 2)),
+    lead: clean(syllables.filter((_, index) => !backing[index])),
+    backing: clean(syllables.filter((_, index) => backing[index])),
   };
+}
+
+/** The same split for a line without syllables: its text outside and inside round brackets. */
+export function splitTextVoices(text: string): { lead: string; backing: string } {
+  if (!/[(（]/.test(text)) return { lead: text, backing: "" };
+  let depth = 0,
+    lead = "",
+    backing = "";
+  for (const character of text) {
+    if (character === "(" || character === "（") {
+      depth++;
+      if (depth === 1 && backing) backing += " ";
+    } else if (character === ")" || character === "）") depth = Math.max(0, depth - 1);
+    else if (depth > 0) backing += character;
+    else lead += character;
+  }
+  const tidy = (part: string) => part.replace(/\s+/g, " ").trim();
+  return { lead: tidy(lead), backing: tidy(backing) };
+}
+
+type TimedLine = {
+  start_ms: number | null;
+  end_ms?: number;
+  text: string;
+  syllables?: KaraokeSyllable[];
+};
+
+/** A line whose sung words are all backing vocals ("(One, two, three)"). */
+export function isBackingLine(line: TimedLine): boolean {
+  if (line.syllables?.length) {
+    const { lead, backing } = splitVoices(line.syllables);
+    return !lead.length && backing.length > 0;
+  }
+  const { lead, backing } = splitTextVoices(line.text);
+  return !lead && Boolean(backing);
+}
+
+function lineEnd(line: TimedLine): number {
+  return Math.max(
+    Number(line.end_ms) || 0,
+    ...(line.syllables || []).map((syllable) => syllable.end_ms),
+  );
+}
+
+/** How far a backing line must reach back into the lead line before it to be sung with it. */
+const FOLD_OVERLAP_MS = 150;
+
+/** A backing line sung over the lead line before it joins that line as its backing part, so the
+ *  two are shown (and highlighted) together. A backing line sung on its own keeps its own slot. */
+export function foldBackingLines<T extends TimedLine>(lines: T[]): T[] {
+  const folded: T[] = [];
+  for (const line of lines) {
+    const previous = folded.at(-1);
+    if (
+      previous?.syllables?.length &&
+      line.syllables?.length &&
+      Number.isFinite(line.start_ms) &&
+      isBackingLine(line) &&
+      !isBackingLine(previous) &&
+      Number(line.start_ms) < lineEnd(previous) - FOLD_OVERLAP_MS
+    ) {
+      const syllables = [...previous.syllables];
+      const last = syllables[syllables.length - 1];
+      // Keep a word break between the previous line's words and the joined ones.
+      if (!/\s$/u.test(last.text))
+        syllables[syllables.length - 1] = { ...last, text: `${last.text} ` };
+      folded[folded.length - 1] = {
+        ...previous,
+        end_ms: Math.max(lineEnd(previous), lineEnd(line)),
+        syllables: [...syllables, ...line.syllables.map((syllable) => ({ ...syllable, voice: 2 }))],
+      };
+      continue;
+    }
+    folded.push(line);
+  }
+  return folded;
 }
 
 /** A reading placed on a line: furigana over `text.slice(from, to)` of the joined fragments. */
