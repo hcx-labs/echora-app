@@ -232,7 +232,9 @@ def test_worker_aligns_the_configured_audio_without_line_times(
         assert {"--exact_frame_clock", "--blank_free_tokens", "--background_decoding"} <= set(argv)
         assert argv[argv.index("--label_rules") + 1] == "v3-sung"
         assert argv[argv.index("--fusion") + 1] == "on"
+        # The mix recipe: onset-true timing, no loudness-based gap pull, inline backing placement.
         assert argv[argv.index("--timing_offset_ms") + 1] == "0"
+        assert "--gap_onset_pull" not in argv and "--inline_backing" in argv
         assert "--optional_brackets" not in argv
         (work / "o.ass").write_text("")
         (work / "o_ruby.lrc").write_text("")
@@ -343,6 +345,7 @@ def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch,
 
 def test_backfill_aligns_the_original_mix_without_separating(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "unused-mocked")
+    monkeypatch.setenv("FA_KARA_AUDIO_INPUT", "mix")
     get_settings.cache_clear()
     connection = MagicMock()
     monkeypatch.setattr(pipeline.psycopg, "connect", lambda _: connection)
@@ -536,9 +539,13 @@ def test_replacing_a_local_checkpoint_changes_its_identity(monkeypatch, tmp_path
         get_settings.cache_clear()
 
 
-def test_second_stream_words_that_overlap_are_marked_as_a_second_voice():
+def test_second_stream_words_that_overlap_are_marked_as_a_second_voice(monkeypatch):
     from echora_analysis.karaoke_pipeline import mark_backing_voice
 
+    # Without inline backing placement an unbracketed second-stream phrase is a second voice only
+    # when it is simultaneous; bracketed words always are.
+    monkeypatch.setenv("FA_KARA_INLINE_BACKING", "false")
+    get_settings.cache_clear()
     lines = [
         {
             "text": "Lonely (so lonely) tonight",
@@ -553,17 +560,17 @@ def test_second_stream_words_that_overlap_are_marked_as_a_second_voice():
         },
         {
             "text": "Oh (yeah) yeah",
-            "syllables": [  # parenthesized, sung by the lead alone: stays on the line
+            "syllables": [  # bracketed on the lead path: backing all the same; stale mark cleared
                 {"text": "Oh ", "start_ms": 4000, "end_ms": 4500},
                 {"text": "(yeah) ", "start_ms": 4500, "end_ms": 5000},
                 {"text": "yeah", "start_ms": 5000, "end_ms": 5500, "voice": 2},
             ],
         },
         {
-            "text": "Call (me) now",
-            "syllables": [  # on the second stream but sung after the lead: stays on the line
+            "text": "Call me now",
+            "syllables": [  # unbracketed, on the second stream but after the lead: stays lead
                 {"text": "Call ", "start_ms": 6000, "end_ms": 6500},
-                {"text": "(me) ", "start_ms": 6520, "end_ms": 6900, "stream": 2},
+                {"text": "me ", "start_ms": 6520, "end_ms": 6900, "stream": 2},
                 {"text": "now", "start_ms": 6900, "end_ms": 7300},
             ],
         },
@@ -577,10 +584,74 @@ def test_second_stream_words_that_overlap_are_marked_as_a_second_voice():
     ]
     mark_backing_voice(lines)
     assert [s.get("voice") for s in lines[0]["syllables"]] == [None, None, 2, 2, 2, None]
-    # Stale mark cleared.
-    assert [s.get("voice") for s in lines[1]["syllables"]] == [None, None, None]
+    assert [s.get("voice") for s in lines[1]["syllables"]] == [None, 2, None]
     assert [s.get("voice") for s in lines[2]["syllables"]] == [None, None, None]
     assert [s.get("voice") for s in lines[3]["syllables"]] == [None, None]
+    assert all("voice" not in line for line in lines)
+    get_settings.cache_clear()
+
+
+def test_inline_backing_marks_every_second_stream_phrase_as_a_second_voice():
+    from echora_analysis.karaoke_pipeline import mark_backing_voice
+
+    get_settings.cache_clear()  # inline backing placement is the default
+    lines = [
+        {
+            "text": "I want something stronger (I want it)",
+            "syllables": [  # the echo answers after the lead: no overlap, still the second voice
+                {"text": "stronger (", "start_ms": 1000, "end_ms": 1400},
+                {"text": "I ", "start_ms": 1420, "end_ms": 1500, "stream": 2},
+                {"text": "want ", "start_ms": 1500, "end_ms": 1700, "stream": 2},
+                {"text": "it)", "start_ms": 1700, "end_ms": 1900, "stream": 2},
+            ],
+        },
+        {
+            "text": "Oh (yeah) yeah",
+            "syllables": [  # bracketed but left on the lead path by the aligner: still backing
+                {"text": "Oh ", "start_ms": 4000, "end_ms": 4500},
+                {"text": "(yeah) ", "start_ms": 4500, "end_ms": 5000},
+                {"text": "yeah", "start_ms": 5000, "end_ms": 5500},
+            ],
+        },
+    ]
+    mark_backing_voice(lines)
+    assert [s.get("voice") for s in lines[0]["syllables"]] == [None, 2, 2, 2]
+    assert [s.get("voice") for s in lines[1]["syllables"]] == [None, 2, None]
+
+
+def test_bracketed_words_and_lines_are_always_backing_vocals():
+    from echora_analysis.karaoke_pipeline import mark_backing_voice
+
+    lines = [
+        {
+            "text": "(One, two, three)",
+            "syllables": [  # a whole bracketed line: every word, and the line itself
+                {"text": "(One, ", "start_ms": 0, "end_ms": 400},
+                {"text": "two, ", "start_ms": 400, "end_ms": 800},
+                {"text": "three)", "start_ms": 800, "end_ms": 1200},
+            ],
+        },
+        {
+            "text": "Stay （ここに） with me",
+            "syllables": [  # full-width brackets; the bracket spans syllables
+                {"text": "Stay （", "start_ms": 2000, "end_ms": 2400},
+                {"text": "こ", "start_ms": 2400, "end_ms": 2500},
+                {"text": "こ", "start_ms": 2500, "end_ms": 2600},
+                {"text": "に） ", "start_ms": 2600, "end_ms": 2800},
+                {"text": "with ", "start_ms": 2800, "end_ms": 3000},
+                {"text": "me", "start_ms": 3000, "end_ms": 3300},
+            ],
+        },
+        {"text": "(Ooh)", "voice": None},  # no syllables: decided by the text
+        {"text": "Plain line", "voice": "background"},  # stale line mark cleared
+    ]
+    mark_backing_voice(lines)
+    assert [s.get("voice") for s in lines[0]["syllables"]] == [2, 2, 2]
+    assert lines[0]["voice"] == "background"
+    assert [s.get("voice") for s in lines[1]["syllables"]] == [None, 2, 2, 2, None, None]
+    assert "voice" not in lines[1]
+    assert lines[2]["voice"] == "background"
+    assert "voice" not in lines[3]
 
 
 def test_overlap_between_lines_is_not_a_second_voice():

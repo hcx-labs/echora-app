@@ -141,6 +141,8 @@ def align_with_minimum_durations(
     line_ranges: list[tuple[int, int]] | None = None,
     in_line_gap_cost: float = 0.0,
     optional_groups: set[int] | None = None,
+    in_line_gap_cap: float = 0.0,
+    in_line_gap_free_cost: float = 0.0,
 ) -> list[list[TokenSpan]]:
     """Global CTC Viterbi where target i occupies at least ``minimum_frames[i]`` frames.
 
@@ -165,6 +167,12 @@ def align_with_minimum_durations(
     frame between two tokens of the same line; blanks before a line's first token stay free. Apple
     timings put 95 % of in-line gaps at zero, so a long instrumental pause lands between lines
     rather than inside one ("See the sunset | And I'm gonna stay", not "... And | I'm gonna ...").
+    ``in_line_gap_cap`` (0: off; the aligner passes 1) bounds what one in-line gap can cost in total:
+    the gap's blank becomes a charged blank followed by a free one that costs the remainder of the
+    cap to enter, so a real pause inside a line ("Ooh, [0.7 s] ooh") is not crammed shut by a cost
+    that grows without limit. 0 (the default) keeps the cost linear. Ignored with ``optional_groups``.
+    ``in_line_gap_free_cost`` (with the cap) still charges this much per frame on the free blank, so
+    a word cannot jump seconds ahead to the next line for the fixed cap ("heart [4 s] beat").
 
     ``optional_groups`` (opt-in) are token groups the path may leave out at no cost: each run of
     consecutive optional groups gets a jump from the blank before it to the blank after it. Inline
@@ -192,6 +200,8 @@ def align_with_minimum_durations(
             for g in range(start, end - 1):
                 in_line_after.add(sum(len(group) for group in token_groups[: g + 1]) - 1)
     in_line_blank = [False]
+    capped = in_line_gap_cap > in_line_gap_cost > 0 and not optional_groups
+    free_blanks: list[int] = []
     labels = [blank]
     kinds = [0]  # 0 blank, 1 first sub-state, 2 inner, 3 last, 4 first and last
     owners = [-1]
@@ -213,6 +223,14 @@ def align_with_minimum_durations(
         owners.append(-1)
         entries.append(False)
         in_line_blank.append(index in in_line_after)
+        if capped and index in in_line_after:
+            # The free blank after the charged one; entering it costs the rest of the cap.
+            labels.append(blank)
+            kinds.append(0)
+            owners.append(-1)
+            entries.append(False)
+            in_line_blank.append(False)
+            free_blanks.append(len(labels) - 1)
         if index in group_last:
             blank_after.append(len(labels) - 1)
     # Optional runs: the blank before a run jumps straight into the next group's first letter (or
@@ -249,6 +267,15 @@ def align_with_minimum_durations(
             and acoustic_targets[owners[state - 2]] != acoustic_targets[owners[state]]
         ):
             can_skip[state] = True
+        if kind in (1, 4) and state >= 3 and kinds[state - 1] == 0 and kinds[state - 2] == 0:
+            # After a capped in-line gap (charged blank, free blank): the charged blank may step
+            # over the free one, and the previous letter over both (the plain skip above).
+            can_skip[state] = True
+            if (
+                kinds[state - 3] in (3, 4)
+                and acoustic_targets[owners[state - 3]] != acoustic_targets[owners[state]]
+            ):
+                letter_jump_from[state] = state - 3
     use_edges = edge_logits is not None and edge_weight > 0
     if use_edges:
         if edge_logits.shape[0] != emission.shape[0]:
@@ -264,6 +291,8 @@ def align_with_minimum_durations(
         for kind in kinds:
             flags.append(next(flag_iter) if kind == 0 else False)
         gap_penalty = torch.tensor(flags, device=device, dtype=emission.dtype) * in_line_gap_cost
+        if free_blanks and in_line_gap_free_cost > 0:
+            gap_penalty[free_blanks] = in_line_gap_free_cost
     scores = torch.full((len(labels),), float("-inf"), device=device)
     scores[0] = emission[0, blank]
     scores[1] = emission[0, labels[1]]
@@ -274,11 +303,17 @@ def align_with_minimum_durations(
     has_jump = jumps >= 0
     letter_jumps = torch.tensor(letter_jump_from, device=device)
     has_letter_jump = letter_jumps >= 0
-    use_jumps = bool(has_jump.any())
+    use_jumps = bool(has_jump.any()) or bool(has_letter_jump.any())
+    advance_cost = None
+    if free_blanks:
+        advance_cost = torch.zeros(len(labels), device=device, dtype=emission.dtype)
+        advance_cost[free_blanks] = in_line_gap_cap - in_line_gap_cost
     backpointers = torch.zeros((emission.shape[0], len(labels)), dtype=torch.uint8, device=device)
     for frame in range(1, emission.shape[0]):
         stay = torch.where(can_stay, scores, negative_inf)
         advance = torch.cat((negative_inf.reshape(1), scores[:-1]))
+        if advance_cost is not None:
+            advance = advance - advance_cost
         skip = torch.where(can_skip, torch.cat((negative_inf.repeat(2), scores[:-2])), negative_inf)
         moves = [stay, advance, skip]
         if use_jumps:

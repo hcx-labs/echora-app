@@ -191,6 +191,24 @@ def main(argv=None):
         help="B0: decode whole bracketed lines on the checkpoint's background head (may overlap the lead)",
     )
     parser.add_argument(
+        "--inline_backing_anchor",
+        type=int,
+        default=3,
+        help="an inline bracket run may start this many lead words before the run",
+    )
+    parser.add_argument(
+        "--gap_onset_pull",
+        action="store_true",
+        help="after >=0.6 s of silence, pull a word that the lattice starts >=0.6 s late back to the "
+        "first frame with vocal energy (a lone sustained vowel the model barely hears)",
+    )
+    parser.add_argument(
+        "--inline_backing",
+        action="store_true",
+        help="inline bracketed words stay on the lead path for ordering, then are re-placed on the "
+        "background head inside their line's window (2026-11-09)",
+    )
+    parser.add_argument(
         "--optional_brackets",
         action="store_true",
         help="inline bracketed words may leave the lead path; the ones left out go on a second stream",
@@ -423,30 +441,72 @@ def main(argv=None):
                 # A line needs a lead word to stay on the path ("(oh) (yeah)" is kept whole).
                 optional_tokens.extend(flag and not all(flags) for flag in flags)
                 cursor += len(tokens)
-        alignment_results = align_audio_with_timeline(
-            y_processed,
-            [tokens for tokens in alignment_token_lines if tokens],
-            sr=sr,
-            speed=audio_speed,
-            use_gpu=align_use_gpu,
-            hf_model_id=hf_model_path,
-            min_letter_ms=args.min_letter_ms,
-            min_token_ms=args.min_token_ms,
-            timing_offset_ms=args.timing_offset_ms,
-            duration_pace_ratio=args.duration_pace_ratio,
-            vocal_activity_weight=args.vocal_activity_weight,
-            exact_frame_clock=args.exact_frame_clock,
-            subframe_refinement=args.subframe_refinement,
-            onset_offsets_ms=json.loads(args.onset_offsets) if args.onset_offsets else None,
-            edge_weight=args.edge_weight,
-            vocal_activity_source=args.vocal_activity_source,
-            vocal_activity_file=args.vocal_activity_file,
-            blank_free_tokens=args.blank_free_tokens,
-            background_lines=background_lines,
-            optional_tokens=optional_tokens,
-            fusion=args.fusion,
-            fusion_model=args.fusion_model,
-        )
+        inline_backing_tokens = None
+        if args.inline_backing:
+            inline_backing_tokens, cursor = [], 0
+            for i, tokens in enumerate(alignment_token_lines):
+                flags = bracketed[cursor : cursor + len(tokens)]
+                inline_backing_tokens.extend(flag and not all(flags) for flag in flags)
+                cursor += len(tokens)
+
+        def run_alignment(background_lines):
+            return align_audio_with_timeline(
+                y_processed,
+                [tokens for tokens in alignment_token_lines if tokens],
+                sr=sr,
+                speed=audio_speed,
+                use_gpu=align_use_gpu,
+                hf_model_id=hf_model_path,
+                min_letter_ms=args.min_letter_ms,
+                min_token_ms=args.min_token_ms,
+                timing_offset_ms=args.timing_offset_ms,
+                duration_pace_ratio=args.duration_pace_ratio,
+                vocal_activity_weight=args.vocal_activity_weight,
+                exact_frame_clock=args.exact_frame_clock,
+                subframe_refinement=args.subframe_refinement,
+                onset_offsets_ms=json.loads(args.onset_offsets) if args.onset_offsets else None,
+                edge_weight=args.edge_weight,
+                vocal_activity_source=args.vocal_activity_source,
+                vocal_activity_file=args.vocal_activity_file,
+                blank_free_tokens=args.blank_free_tokens,
+                background_lines=background_lines,
+                optional_tokens=optional_tokens,
+                inline_backing_tokens=inline_backing_tokens,
+                inline_backing_anchor_words=args.inline_backing_anchor,
+                gap_onset_pull=args.gap_onset_pull,
+                fusion=args.fusion,
+                fusion_model=args.fusion_model,
+            )
+
+        alignment_results = run_alignment(background_lines)
+        # Default 120 ms (FA_KARA_CRAMMED_BACKGROUND_MS=0 turns it off): a line the lead path could
+        # only fit by cramming its words
+        # (mean word shorter than FA_KARA_CRAMMED_BACKGROUND_MS) is usually sung under the lead
+        # (Boy With Luv's later "Oh-whoa" chant, written between the lead lines). Decode it again as
+        # a background line, free to overlap its neighbours.
+        crammed_ms = float(os.environ.get("FA_KARA_CRAMMED_BACKGROUND_MS", "120"))
+        if crammed_ms > 0 and args.background_decoding:
+            flags = list(background_lines or [False] * sum(1 for t in alignment_token_lines if t))
+            sizes = [len(tokens) for tokens in alignment_token_lines if tokens]
+            cursor, crammed = 0, []
+            for index, size in enumerate(sizes):
+                words = alignment_results[cursor : cursor + size]
+                cursor += size
+                mean_ms = (
+                    1000
+                    * sum(
+                        float(w.get("original_end", 0)) - float(w.get("original_start", 0))
+                        for w in words
+                    )
+                    / max(1, size)
+                )
+                if not flags[index] and size >= 4 and mean_ms < crammed_ms:
+                    crammed.append(index)
+            if crammed and len(crammed) + sum(flags) < len(flags):
+                for index in crammed:
+                    flags[index] = True
+                print(f"Re-aligning {len(crammed)} crammed line(s) as background: {crammed}")
+                alignment_results = run_alignment(flags)
     else:
         alignment_results = align_func(
             y_processed, alignment_tokens, non_silent_ranges, sr, audio_speed, use_gpu=align_use_gpu

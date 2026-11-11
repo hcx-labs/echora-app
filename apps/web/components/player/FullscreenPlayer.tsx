@@ -57,10 +57,13 @@ import {
   groupSyllablesByWord,
   lineRubies,
   lyricWordIsRtl as isRtlText,
+  foldBackingLines,
+  splitTextVoices,
   splitVoices,
   type LyricFragment,
 } from "./lyricWords";
 import KaraokeLine, { RubyText } from "./KaraokeLine";
+import AnimatedKaraokeLine, { isAnimatedStyle } from "./AnimatedKaraokeLine";
 import LyricsScroller from "./LyricsScroller";
 import WaveformSeek from "./WaveformSeek";
 import { formatDuration } from "../ui/TrackRow";
@@ -159,7 +162,8 @@ export default function FullscreenPlayer() {
   const [backdropMoving, setBackdropMoving] = useState(defaultPlaybackPreferences.wavesEnabled);
   useEffect(() => {
     const accept = (value: PlaybackPreferences) => {
-      setHighlightStyle(value.karaokeHighlightStyle === "syllable" ? "syllable" : "lava");
+      const style = value.karaokeHighlightStyle;
+      setHighlightStyle(style === "syllable" || isAnimatedStyle(style) ? style : "lava");
       setBackdropMoving(value.wavesEnabled !== false);
     };
     const frame = requestAnimationFrame(() => accept(readPlaybackPreferences()));
@@ -319,7 +323,13 @@ export default function FullscreenPlayer() {
     videos.forEach((video) => delete video.dataset.resume);
   }, [player.playing, showMotion, currentMotion?.src, artworkVisible]);
   const currentLyrics = player.lyrics?.trackId === player.track?.id ? player.lyrics : null;
-  // Each line's lead fragments, and its backing-vocal fragments (voice 2) shown as a second line.
+  // Backing lines sung over the line before them are shown with it, as its backing part.
+  const karaokeLines = useMemo(
+    () => foldBackingLines(currentLyrics?.lines || []),
+    [currentLyrics?.lines],
+  );
+  // Each line's lead fragments, and its backing-vocal fragments (voice 2 or bracketed) shown as a
+  // second line; a line with no lead part is an echo line of its own.
   const lyricFragments = useMemo(
     () =>
       new Map<
@@ -327,20 +337,22 @@ export default function FullscreenPlayer() {
         {
           lead: ReturnType<typeof groupSyllablesByWord>[number];
           backing: ReturnType<typeof groupSyllablesByWord>[number];
+          echo: boolean;
         }
       >(
-        (currentLyrics?.lines || []).map((line) => {
+        karaokeLines.map((line) => {
           const { lead, backing } = splitVoices(line.syllables || []);
           return [
             line,
             {
               lead: groupSyllablesByWord(lead).flat(),
               backing: groupSyllablesByWord(backing).flat(),
+              echo: !lead.length && backing.length > 0,
             },
           ];
         }),
       ),
-    [currentLyrics?.lines],
+    [karaokeLines],
   );
   const translations = currentLyrics?.translations || [];
   const translation =
@@ -348,7 +360,6 @@ export default function FullscreenPlayer() {
   const translationVisible = showTranslation && Boolean(translation);
   const aiLyrics = currentLyrics?.provenance?.ai_generated === true;
   const karaokeAvailable = Boolean(currentLyrics?.karaoke && currentLyrics.lines?.length);
-  const karaokeLines = currentLyrics?.lines || [];
   // Drives the :lang font rules. Urdu shares the Arabic script, so when the
   // language is unknown, letters Arabic does not use identify it.
   const lyricsLanguage =
@@ -364,18 +375,43 @@ export default function FullscreenPlayer() {
   const position = useSyncExternalStore(
     subscribePlaybackTime,
     () => linePosition(timedLines, playbackTimeSnapshot() * 1000),
-    () => "-1:0",
+    () => "-1:0:0",
   );
   const activeLine = Number(position.split(":")[0]);
-  const lineSinging = position.endsWith(":1");
+  const [, singingFlag, previousFlag] = position.split(":");
+  const lineSinging = singingFlag === "1";
+  // The line before is still being sung (backing vocals running past this line's start).
+  const previousSinging = previousFlag === "1";
   if (!player.track) return null;
   const fullCover = player.track.coverUrl
     ? sizedPlayerCoverArtUrl(player.track.coverUrl, 1200)
     : "";
+  /** A line shown as plain text: bracketed words are backing vocals, on their own smaller line. */
+  function plainLine(text: string | undefined, empty: string) {
+    const { lead, backing } = splitTextVoices(text || "");
+    if (!backing) return text || empty;
+    if (!lead) return <span className={styles.echoLine}>{backing}</span>;
+    return (
+      <>
+        {lead}
+        <span className={styles.backingVoice}>{backing}</span>
+      </>
+    );
+  }
   function karaokeLine(line: LyricsLine, active: boolean) {
     if (!karaokeMode || !currentLyrics?.karaoke || !line.syllables?.length)
-      return line.text || "...";
+      return plainLine(line.text, "...");
     const parts = lyricFragments.get(line);
+    if (parts?.echo)
+      return (
+        <span className={styles.echoLine}>
+          <LiveKaraokeLine
+            fragments={parts.backing}
+            active={active}
+            highlightStyle={highlightStyle}
+          />
+        </span>
+      );
     return (
       <>
         <LiveKaraokeLine
@@ -384,13 +420,13 @@ export default function FullscreenPlayer() {
           highlightStyle={highlightStyle}
         />
         {parts?.backing.length ? (
-          <span className={styles.backingVoice}>
+          <BackingReveal fragments={parts.backing}>
             <LiveKaraokeLine
               fragments={parts.backing}
               active={active}
               highlightStyle={highlightStyle}
             />
-          </span>
+          </BackingReveal>
         ) : null}
       </>
     );
@@ -407,7 +443,8 @@ export default function FullscreenPlayer() {
       />
     );
     if (!parts?.backing.length)
-      return parts && lineRubies(parts.lead).length ? text(parts.lead) : line.text || "…";
+      return parts && lineRubies(parts.lead).length ? text(parts.lead) : plainLine(line.text, "…");
+    if (parts.echo) return <span className={styles.echoLine}>{text(parts.backing)}</span>;
     return (
       <>
         {text(parts.lead)}
@@ -630,6 +667,7 @@ export default function FullscreenPlayer() {
   const lyricsBody = hasLyrics ? (
     <div
       lang={lyricsLanguage}
+      data-lyric-style={karaokeMode && karaokeAvailable ? highlightStyle : undefined}
       className={`${styles.lyrics} ${karaokeMode && karaokeAvailable ? styles.karaoke : ""} ${lyricsSizeClasses[lyricsTextSize]} ${translationVisible ? styles.bilingual : ""}`}
     >
       {timedLines.length > 0 ? (
@@ -642,10 +680,8 @@ export default function FullscreenPlayer() {
           {timedLines.map((line, index) => {
             const current = index === activeLine && lineSinging;
             // Backing vocals can still be sung after the next line starts: keep painting the
-            // previous line while its timing runs past the current line's start.
-            const overlapping =
-              index === activeLine - 1 &&
-              Number(line.end_ms) > Number(timedLines[activeLine]?.start_ms);
+            // previous line until its own words are done, then let it recede like any past line.
+            const overlapping = index === activeLine - 1 && previousSinging;
             return (
               <button
                 key={`${line.start_ms}-${index}`}
@@ -953,9 +989,10 @@ export default function FullscreenPlayer() {
 }
 
 /**
- * "index:singing" for the given time. A line stops singing once its own timing
- * ends, even if the next line has not started (instrumental gaps); the scroller
- * still anchors on the index.
+ * "index:singing:previousSinging" for the given time. A line stops singing once its own timing
+ * ends, even if the next line has not started (instrumental gaps); the scroller still anchors on
+ * the index. The line before is still singing while one of its syllables (a backing vocal sung
+ * over this line) has not ended; its padded container end does not count.
  */
 function linePosition(lines: LyricsLine[], nowMs: number): string {
   const index = lines.reduce(
@@ -963,12 +1000,16 @@ function linePosition(lines: LyricsLine[], nowMs: number): string {
     -1,
   );
   const line = lines[index];
-  if (!line) return "-1:0";
+  if (!line) return "-1:0:0";
   const ends = [line.end_ms, ...(line.syllables || []).map((syllable) => syllable.end_ms)].filter(
     (value): value is number => Number.isFinite(value),
   );
   const end = ends.length ? Math.max(...ends) : Infinity;
-  return `${index}:${nowMs < end ? 1 : 0}`;
+  const previousEnd = Math.max(
+    -Infinity,
+    ...(lines[index - 1]?.syllables || []).map((syllable) => syllable.end_ms),
+  );
+  return `${index}:${nowMs < end ? 1 : 0}:${nowMs < previousEnd ? 1 : 0}`;
 }
 
 /**
@@ -983,7 +1024,63 @@ const playbackClock = {
   now: () => playbackTimeSnapshot() * 1000 + KARAOKE_LEAD_MS,
 };
 
+/** How long before its first word a backing part comes forward. */
+const BACKING_REVEAL_MS = 400;
+
+/**
+ * A playing line's backing part: held back until shortly before it is sung, then brought forward,
+ * and settled once it is done. Its space is always kept, so nothing moves when it appears; the
+ * state follows the clock through a data attribute, outside React rendering.
+ */
+function BackingReveal({
+  fragments,
+  children,
+}: {
+  fragments: LyricFragment[];
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const start = Math.min(...fragments.map((fragment) => fragment.syllable.start_ms));
+  const end = Math.max(...fragments.map((fragment) => fragment.syllable.end_ms));
+  useEffect(() => {
+    const update = () => {
+      const now = playbackClock.now();
+      const state = now < start - BACKING_REVEAL_MS ? "waiting" : now < end ? "singing" : "done";
+      if (ref.current && ref.current.dataset.reveal !== state) ref.current.dataset.reveal = state;
+    };
+    update();
+    return playbackClock.subscribe(update);
+  }, [start, end]);
+  return (
+    <span ref={ref} className={styles.backingVoice} data-reveal="waiting">
+      {children}
+    </span>
+  );
+}
+
 /** The only lyric element that follows the clock (every frame), outside React rendering. */
-function LiveKaraokeLine(props: Omit<ComponentProps<typeof KaraokeLine>, "now" | "clock">) {
-  return <KaraokeLine {...props} clock={playbackClock} />;
+function LiveKaraokeLine({
+  highlightStyle,
+  ...props
+}: Omit<ComponentProps<typeof KaraokeLine>, "now" | "clock" | "highlightStyle"> & {
+  highlightStyle: PlaybackPreferences["karaokeHighlightStyle"];
+}) {
+  // Word-by-word styles split text into letters, which furigana layout can't follow: keep the fill there.
+  const ruby = props.fragments.some((fragment) => fragment.syllable.ruby?.length);
+  if (isAnimatedStyle(highlightStyle) && !ruby)
+    return (
+      <AnimatedKaraokeLine
+        fragments={props.fragments}
+        active={props.active}
+        clock={playbackClock}
+        animation={highlightStyle}
+      />
+    );
+  return (
+    <KaraokeLine
+      {...props}
+      highlightStyle={highlightStyle === "syllable" ? "syllable" : "lava"}
+      clock={playbackClock}
+    />
+  );
 }

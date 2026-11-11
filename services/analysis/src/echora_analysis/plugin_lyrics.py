@@ -8,6 +8,7 @@ import math
 import re
 from xml.etree import ElementTree as ET
 
+from .backing_vocals import BACKING_VOICE, tag_bracketed_backing
 from .navidrome_integration import connect
 from .plugin_ranking import library_namespace
 from .navidrome_lyrics_sources import lyrics_paused
@@ -52,6 +53,35 @@ def timed_attributes(line):
     return attrs
 
 
+def _append_syllables(paragraph, syllables):
+    """Timed spans for a line's syllables. A run of second-voice syllables (``voice: 2``:
+    bracketed words, backing vocals) is wrapped in a ``ttm:role="x-bg"`` span,
+    the TTML form Apple Music uses and Navidrome's parser reads as a background agent, so clients
+    can show it as backing instead of lead."""
+    runs = []
+    for syllable in syllables:
+        backing = syllable.get("voice") == BACKING_VOICE
+        if runs and runs[-1][0] == backing:
+            runs[-1][1].append(syllable)
+        else:
+            runs.append((backing, [syllable]))
+    for backing, run in runs:
+        parent = paragraph
+        if backing:
+            starts = [s["start_ms"] for s in run if s.get("start_ms") is not None]
+            ends = [s["end_ms"] for s in run if s.get("end_ms") is not None]
+            bounds = {
+                "start_ms": min(starts) if starts else None,
+                "end_ms": max(ends) if ends else None,
+            }
+            parent = ET.SubElement(
+                paragraph, f"{{{TT}}}span", {f"{{{TTM}}}role": "x-bg", **timed_attributes(bounds)}
+            )
+        for syllable in run:
+            span = ET.SubElement(parent, f"{{{TT}}}span", timed_attributes(syllable))
+            span.text = syllable.get("text") or ""
+
+
 def export_lines(row):
     source = original_lines(row)
     karaoke = row.get("karaoke_lines") or []
@@ -60,11 +90,16 @@ def export_lines(row):
     # exported paragraphs explicitly instead of treating those changes as drift.
     if karaoke:
         source_nonempty = [(i, text.strip()) for i, text in enumerate(source) if text.strip()]
-        karaoke_nonempty = [(i, line.get("text", "").strip()) for i, line in enumerate(karaoke)
-                            if line.get("text", "").strip()]
+        karaoke_nonempty = [
+            (i, line.get("text", "").strip())
+            for i, line in enumerate(karaoke)
+            if line.get("text", "").strip()
+        ]
         if len(source_nonempty) == len(karaoke_nonempty):
-            return karaoke, {source_id: exported_id for (source_id, _), (exported_id, _)
-                             in zip(source_nonempty, karaoke_nonempty)}
+            return karaoke, {
+                source_id: exported_id
+                for (source_id, _), (exported_id, _) in zip(source_nonempty, karaoke_nonempty)
+            }
         # TTML metadata must reference a real main paragraph. When segmentation
         # differs, retain source paragraphs rather than discarding translations.
         # Reuse karaoke cues where a source paragraph can be matched in order.
@@ -72,8 +107,14 @@ def export_lines(row):
         next_karaoke = 0
         for index, text in enumerate(source):
             paragraph = {**(provenance[index] if index < len(provenance) else {}), "text": text}
-            match = next((i for i in range(next_karaoke, len(karaoke))
-                          if karaoke[i].get("text", "").strip() == text.strip() and text.strip()), None)
+            match = next(
+                (
+                    i
+                    for i in range(next_karaoke, len(karaoke))
+                    if karaoke[i].get("text", "").strip() == text.strip() and text.strip()
+                ),
+                None,
+            )
             if match is not None:
                 paragraph = {**karaoke[match], "text": text}
                 next_karaoke = match + 1
@@ -102,11 +143,15 @@ def safe_translations(row, translations, line_mapping):
         # Prefer provider translations over AI when both exist in one language.
         language = item["target_language"]
         if language not in selected or item["provenance"] == "provider":
-            selected[language] = {**item, "lines": [
-                {**line, "id": line_mapping[line["id"]]} for line in lines
-                if line["id"] in line_mapping
-                and line["text"].strip() != source[line["id"]].strip()
-            ]}
+            selected[language] = {
+                **item,
+                "lines": [
+                    {**line, "id": line_mapping[line["id"]]}
+                    for line in lines
+                    if line["id"] in line_mapping
+                    and line["text"].strip() != source[line["id"]].strip()
+                ],
+            }
     return [selected[key] for key in sorted(selected) if selected[key]["lines"]]
 
 
@@ -126,18 +171,32 @@ def ttml(row, translations):
                 )
                 element.text = translated["text"]
     div = ET.SubElement(ET.SubElement(root, f"{{{TT}}}body"), f"{{{TT}}}div")
+    # Bracketed words are backing vocals, also in rows stored before they were tagged.
+    lines = tag_bracketed_backing(
+        [
+            {**line, "syllables": [dict(s) for s in line.get("syllables") or []]}
+            if line.get("syllables")
+            else dict(line)
+            for line in lines
+        ]
+    )
     for index, line in enumerate(lines):
-        paragraph = ET.SubElement(
-            div, f"{{{TT}}}p", {"key": f"line-{index}", **timed_attributes(line)}
-        )
+        attributes = {"key": f"line-{index}", **timed_attributes(line)}
+        background = line.get("voice") == "background"
+        if background:
+            # A line that is backing vocals as a whole ("(One, two, three)"): the role sits on
+            # the paragraph, so its words are not wrapped again.
+            attributes[f"{{{TTM}}}role"] = "x-bg"
+        paragraph = ET.SubElement(div, f"{{{TT}}}p", attributes)
         syllables = line.get("syllables") or []
         # Never replace authoritative text with incomplete predicted tokens.
         if syllables and "".join(str(s.get("text") or "") for s in syllables) == line.get(
             "text", ""
         ):
-            for syllable in syllables:
-                span = ET.SubElement(paragraph, f"{{{TT}}}span", timed_attributes(syllable))
-                span.text = syllable.get("text") or ""
+            _append_syllables(
+                paragraph,
+                [{**s, "voice": None} for s in syllables] if background else syllables,
+            )
         else:
             paragraph.text = line.get("text") or ""
     return ET.tostring(root, encoding="unicode")

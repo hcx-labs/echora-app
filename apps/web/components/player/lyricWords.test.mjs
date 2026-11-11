@@ -1,52 +1,74 @@
-import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { stripTypeScriptTypes } from 'node:module';
-import test from 'node:test';
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { stripTypeScriptTypes } from "node:module";
+import test from "node:test";
 
-const source = stripTypeScriptTypes(readFileSync(new URL('./lyricWords.ts', import.meta.url), 'utf8'));
-const { groupSyllablesByWord, fragmentProgress, lyricWordIsRtl, splitVoices } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
-const syllable = text => ({ text, start_ms: 1000, end_ms: 2000 });
-const wordText = words => words.map(word => word.map(fragment => fragment.text).join(''));
+const source = stripTypeScriptTypes(
+  readFileSync(new URL("./lyricWords.ts", import.meta.url), "utf8"),
+);
+const {
+  groupSyllablesByWord,
+  fragmentProgress,
+  lyricWordIsRtl,
+  splitVoices,
+  splitTextVoices,
+  foldBackingLines,
+  isBackingLine,
+} = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+const syllable = (text) => ({ text, start_ms: 1000, end_ms: 2000 });
+const wordText = (words) => words.map((word) => word.map((fragment) => fragment.text).join(""));
 
 for (const text of [
-  '「危ないですから離れてください」そのセリフが集合の合図なのにな',
-  '这是没有空格的一行歌词需要自动换行',
-  'นี่คือเนื้อเพลงภาษาไทยที่ไม่มีช่องว่าง',
+  "「危ないですから離れてください」そのセリフが集合の合図なのにな",
+  "这是没有空格的一行歌词需要自动换行",
+  "นี่คือเนื้อเพลงภาษาไทยที่ไม่มีช่องว่าง",
 ]) {
   test(`finds wrap points without spaces: ${text}`, () => {
     const original = syllable(text);
     const words = groupSyllablesByWord([original]);
     assert.ok(words.length > 2);
-    assert.equal(wordText(words).join(''), text);
-    assert.ok(words.flat().every(fragment => fragment.syllable === original));
+    assert.equal(wordText(words).join(""), text);
+    assert.ok(words.flat().every((fragment) => fragment.syllable === original));
   });
 }
 
-test('keeps Latin words intact across original syllable boundaries', () => {
-  const syllables = ['Hel', 'lo ', 'beau', 'ti', 'ful ', 'world'].map(syllable);
+test("keeps Latin words intact across original syllable boundaries", () => {
+  const syllables = ["Hel", "lo ", "beau", "ti", "ful ", "world"].map(syllable);
   const words = groupSyllablesByWord(syllables);
-  assert.deepEqual(wordText(words), ['Hello ', 'beautiful ', 'world']);
-  assert.deepEqual(words[1].map(fragment => fragment.index), [2, 3, 4, 4]);
+  assert.deepEqual(wordText(words), ["Hello ", "beautiful ", "world"]);
+  assert.deepEqual(
+    words[1].map((fragment) => fragment.index),
+    [2, 3, 4, 4],
+  );
   for (const fragment of words.flat()) {
-    assert.equal(fragment.text, fragment.syllable.text.slice(fragment.fragmentIndex, fragment.fragmentIndex + fragment.text.length));
+    assert.equal(
+      fragment.text,
+      fragment.syllable.text.slice(
+        fragment.fragmentIndex,
+        fragment.fragmentIndex + fragment.text.length,
+      ),
+    );
   }
 });
 
-test('keeps Japanese brackets with their adjacent word', () => {
-  const words = wordText(groupSyllablesByWord([syllable('「離れてください」その合図')]));
-  assert.ok(words[0].startsWith('「'));
-  assert.ok(words.every(word => !word.startsWith('」') && !word.endsWith('「')));
+test("keeps Japanese brackets with their adjacent word", () => {
+  const words = wordText(groupSyllablesByWord([syllable("「離れてください」その合図")]));
+  assert.ok(words[0].startsWith("「"));
+  assert.ok(words.every((word) => !word.startsWith("」") && !word.endsWith("「")));
 });
 
-test('preserves RTL, combining marks, emoji, whitespace, and empty syllables', () => {
-  for (const text of ['مرحبا بالعالم', 'שָׁלוֹם עולם', 'cafe\u0301 👨‍👩‍👧‍👦', 'a  b\n c', '', '   ']) {
-    assert.equal(wordText(groupSyllablesByWord([syllable(''), syllable(text), syllable('')])).join(''), text);
+test("preserves RTL, combining marks, emoji, whitespace, and empty syllables", () => {
+  for (const text of ["مرحبا بالعالم", "שָׁלוֹם עולם", "cafe\u0301 👨‍👩‍👧‍👦", "a  b\n c", "", "   "]) {
+    assert.equal(
+      wordText(groupSyllablesByWord([syllable(""), syllable(text), syllable("")])).join(""),
+      text,
+    );
   }
   assert.deepEqual(groupSyllablesByWord([]), []);
 });
 
-test('lava fill continues across word fragments rather than restarting', () => {
-  const original = syllable('hello world');
+test("lava fill continues across word fragments rather than restarting", () => {
+  const original = syllable("hello world");
   const fragments = groupSyllablesByWord([original]).flat();
   assert.equal(fragmentProgress(1500, fragments[0]), 100);
   assert.equal(fragmentProgress(1500, fragments.at(-1)), 0);
@@ -54,39 +76,141 @@ test('lava fill continues across word fragments rather than restarting', () => {
   assert.equal(fragmentProgress(2500, fragments.at(-1)), 100);
 });
 
-
-test('mixed Urdu and English retains complete words across syllable boundaries', () => {
-  const syllables = ['او ', 'yel', 'low ', 'کو ', 'ار', 'دو ', 'میں ', 'بو', 'لتے ', 'ہیں'].map(syllable);
+test("mixed Urdu and English retains complete words across syllable boundaries", () => {
+  const syllables = ["او ", "yel", "low ", "کو ", "ار", "دو ", "میں ", "بو", "لتے ", "ہیں"].map(
+    syllable,
+  );
   const words = wordText(groupSyllablesByWord(syllables));
-  assert.deepEqual(words, ['او ', 'yellow ', 'کو ', 'اردو ', 'میں ', 'بولتے ', 'ہیں']);
+  assert.deepEqual(words, ["او ", "yellow ", "کو ", "اردو ", "میں ", "بولتے ", "ہیں"]);
   assert.equal(lyricWordIsRtl(words[0]), true);
   assert.equal(lyricWordIsRtl(words[1]), false);
   assert.equal(lyricWordIsRtl(words[3]), true);
 });
 
-test('word direction follows its first strong letter, not punctuation or surrounding script', () => {
-  assert.equal(lyricWordIsRtl('(yellow)'), false);
-  assert.equal(lyricWordIsRtl('123اردو'), true);
-  assert.equal(lyricWordIsRtl('「日本語」'), false);
-  assert.equal(lyricWordIsRtl('שלום'), true);
-  assert.equal(lyricWordIsRtl('123'), false);
+test("word direction follows its first strong letter, not punctuation or surrounding script", () => {
+  assert.equal(lyricWordIsRtl("(yellow)"), false);
+  assert.equal(lyricWordIsRtl("123اردو"), true);
+  assert.equal(lyricWordIsRtl("「日本語」"), false);
+  assert.equal(lyricWordIsRtl("שלום"), true);
+  assert.equal(lyricWordIsRtl("123"), false);
 });
 
-
-test('brackets and quotes survive fragment segmentation unchanged', () => {
-  for (const text of ["تو 'Googles' کر لے یار", 'یہ میرا فیشن (میں کتنا passion)', "I'm a popstar, ناں ٹوک مینوں"]) {
-    assert.equal(wordText(groupSyllablesByWord([syllable(text)])).join(''), text);
+test("brackets and quotes survive fragment segmentation unchanged", () => {
+  for (const text of [
+    "تو 'Googles' کر لے یار",
+    "یہ میرا فیشن (میں کتنا passion)",
+    "I'm a popstar, ناں ٹوک مینوں",
+  ]) {
+    assert.equal(wordText(groupSyllablesByWord([syllable(text)])).join(""), text);
   }
 });
 
-test('backing vocals become their own line without the parentheses', () => {
-  const at = (text, start, voice) => ({ text, start_ms: start, end_ms: start + 100, ...(voice ? { voice } : {}) });
-  const line = [at('Lone', 0), at('ly (', 100), at('so ', 50, 2), at('lone', 150, 2), at('ly)', 250, 2)];
+test("backing vocals become their own line without the parentheses", () => {
+  const at = (text, start, voice) => ({
+    text,
+    start_ms: start,
+    end_ms: start + 100,
+    ...(voice ? { voice } : {}),
+  });
+  const line = [
+    at("Lone", 0),
+    at("ly (", 100),
+    at("so ", 50, 2),
+    at("lone", 150, 2),
+    at("ly)", 250, 2),
+  ];
   const { lead, backing } = splitVoices(line);
-  assert.deepEqual(lead.map(s => s.text), ['Lone', 'ly']);
-  assert.deepEqual(backing.map(s => s.text), ['so ', 'lone', 'ly']);
-  assert.equal(backing[0].start_ms, 50);  // timing is kept, so both lines can fill at once
-  const plain = [at('No ', 0), at('backing', 100)];
-  assert.equal(splitVoices(plain).lead, plain);  // untouched when there is no second voice
+  assert.deepEqual(
+    lead.map((s) => s.text),
+    ["Lone", "ly"],
+  );
+  assert.deepEqual(
+    backing.map((s) => s.text),
+    ["so ", "lone", "ly"],
+  );
+  assert.equal(backing[0].start_ms, 50); // timing is kept, so both lines can fill at once
+  const plain = [at("No ", 0), at("backing", 100)];
+  assert.equal(splitVoices(plain).lead, plain); // untouched when there is no second voice
   assert.equal(splitVoices(plain).backing.length, 0);
+});
+
+test("bracketed words are backing vocals even without a voice mark", () => {
+  const at = (text, start) => ({ text, start_ms: start, end_ms: start + 100 });
+  const inline = splitVoices([
+    at("Lone", 0),
+    at("ly (", 100),
+    at("so ", 200),
+    at("lone", 300),
+    at("ly) ", 400),
+    at("tonight", 500),
+  ]);
+  assert.deepEqual(
+    inline.lead.map((s) => s.text),
+    ["Lone", "ly ", "tonight"],
+  );
+  assert.deepEqual(
+    inline.backing.map((s) => s.text),
+    ["so ", "lone", "ly"],
+  );
+  // A line bracketed as a whole is all backing: no lead part, brackets dropped.
+  const whole = splitVoices([at("(One, ", 0), at("two, ", 100), at("three)", 200)]);
+  assert.deepEqual(whole.lead, []);
+  assert.deepEqual(
+    whole.backing.map((s) => s.text),
+    ["One, ", "two, ", "three"],
+  );
+  const wide = splitVoices([at("Stay （", 0), at("ここに）", 100)]);
+  assert.deepEqual(
+    wide.backing.map((s) => s.text),
+    ["ここに"],
+  );
+});
+
+test("plain lines split their bracketed text into a backing part", () => {
+  assert.deepEqual(splitTextVoices("Lonely (so lonely) tonight (tonight)"), {
+    lead: "Lonely tonight",
+    backing: "so lonely tonight",
+  });
+  assert.deepEqual(splitTextVoices("(Ooh, ooh)"), { lead: "", backing: "Ooh, ooh" });
+  assert.deepEqual(splitTextVoices("No brackets here"), { lead: "No brackets here", backing: "" });
+});
+
+test("a backing line sung over the line before joins it; one sung on its own keeps its slot", () => {
+  const at = (text, start, end) => ({ text, start_ms: start, end_ms: end });
+  const lead = {
+    text: "Lonely tonight",
+    start_ms: 0,
+    end_ms: 2000,
+    syllables: [at("Lonely ", 0, 900), at("tonight", 900, 2000)],
+  };
+  const over = {
+    text: "(so lonely)",
+    start_ms: 1200,
+    end_ms: 2400,
+    syllables: [at("(so ", 1200, 1600), at("lonely)", 1600, 2400)],
+  };
+  const alone = {
+    text: "(Am I more?)",
+    start_ms: 3000,
+    end_ms: 4000,
+    syllables: [at("(Am ", 3000, 3300), at("I ", 3300, 3500), at("more?)", 3500, 4000)],
+  };
+  const folded = foldBackingLines([lead, over, alone]);
+  assert.equal(folded.length, 2);
+  assert.equal(folded[0].text, "Lonely tonight"); // the lead text stays (translations match on it)
+  assert.equal(folded[0].end_ms, 2400);
+  const { lead: sung, backing } = splitVoices(folded[0].syllables);
+  assert.deepEqual(
+    sung.map((s) => s.text),
+    ["Lonely ", "tonight"],
+  );
+  assert.deepEqual(
+    backing.map((s) => s.text),
+    ["so ", "lonely"],
+  );
+  assert.equal(folded[1], alone);
+  assert.ok(isBackingLine(alone) && !isBackingLine(lead));
+  assert.ok(isBackingLine({ text: "(Ooh, ooh)", start_ms: 0 }));
+  // Lines are never folded into a backing line, and plain lines stay untouched.
+  assert.deepEqual(foldBackingLines([alone, over]), [alone, over]);
 });

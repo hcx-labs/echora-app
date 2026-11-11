@@ -44,6 +44,45 @@ func TestEchoraTTML(t *testing.T) {
 	}
 }
 
+// Backing vocals: an inline echo wrapped in a ttm:role="x-bg" span and a whole x-bg line
+// parse as cues of a background agent, the lead as the main agent.
+func TestEchoraTTMLBackingVocals(t *testing.T) {
+	contents, err := os.ReadFile("testdata/lyrics-backing.ttml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracks, err := model.ParseLyrics(context.Background(), "", "en", contents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	main, ok := tracks.Main()
+	if !ok || len(main.Line) != 2 {
+		t.Fatalf("bad main track: %+v", main)
+	}
+	roles := map[string]string{}
+	for _, agent := range main.Agents {
+		roles[agent.ID] = agent.Role
+	}
+	lead := main.Line[0]
+	if lead.Value != "Lonely (so lonely) tonight" || len(lead.Cue) != 6 {
+		t.Fatalf("bad lead line: %+v", lead)
+	}
+	for i, cue := range lead.Cue {
+		backing := i >= 2 && i <= 4
+		if (roles[cue.AgentID] == "bg") != backing {
+			t.Fatalf("cue %d %q: agent %q role %q, backing expected %v", i, cue.Value, cue.AgentID, roles[cue.AgentID], backing)
+		}
+	}
+	if *lead.Cue[2].Start != 1500 || *lead.Cue[4].End != 2400 {
+		t.Fatalf("bad echo timing: %+v", lead.Cue[2:5])
+	}
+	for _, cue := range main.Line[1].Cue {
+		if roles[cue.AgentID] != "bg" {
+			t.Fatalf("whole backing line not background: %+v", main.Line[1])
+		}
+	}
+}
+
 func TestEchoraLRC(t *testing.T) {
 	contents, err := os.ReadFile("testdata/lyrics.lrc")
 	if err != nil {

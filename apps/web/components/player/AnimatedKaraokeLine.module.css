@@ -1,0 +1,37 @@
+/* Unsung text is dim like the fill styles; sung text takes the accent. Colour changes are near
+   instant: any easing here reads as the lyrics lagging the voice. */
+.line { display: inline; white-space: pre-wrap; overflow-wrap: anywhere; color: rgb(255 255 255 / .3); }
+.word { display: inline-block; white-space: nowrap; }
+.fragment { display: inline-block; position: relative; }
+.letter { display: inline-block; white-space: pre; transition: color .05s linear; }
+.letter[data-on="1"] { color: var(--accent); }
+
+/* Bloom: words wait slightly out of focus, snap into focus with a soft glow, then the glow cools. */
+[data-animation=bloom] .fragment { filter: blur(.05em); opacity: .6; transition: filter .3s ease-out, opacity .3s ease-out, text-shadow 1s ease-out; }
+[data-animation=bloom] .fragment[data-state=singing] { filter: none; opacity: 1; text-shadow: 0 0 .3em color-mix(in srgb, var(--accent) 70%, transparent); transition: filter .06s linear, opacity .06s linear, text-shadow .06s linear; }
+[data-animation=bloom] .fragment[data-state=sung] { filter: none; opacity: 1; text-shadow: none; }
+
+/* Strike: each word lands like a hit (oversized and flashing with a red/cyan split on its first
+   frame, settling fast) while a power bar charges beneath it with the singing. The whole view
+   leans via the player's strike theme, so words are not skewed here. */
+[data-animation=strike] .fragment { transform-origin: 50% 70%; }
+[data-animation=strike] .fragment[data-state=singing] { animation: strike .22s cubic-bezier(.2, 1.4, .4, 1) both; transform: scale(1.05); }
+[data-animation=strike] .fragment[data-state=sung] { transition: transform .12s ease-out; }
+[data-animation=strike] .fragment::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -.06em; height: .08em; border-radius: .04em;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 40%, transparent), var(--accent) 60%, #fff);
+  transform: scaleX(var(--p, 0)); transform-origin: left; opacity: 0;
+  box-shadow: 0 0 .3em var(--accent); transition: transform .06s linear, opacity .15s ease-out;
+}
+[data-animation=strike] .fragment[data-state=singing]::after { opacity: 1; }
+[data-animation=strike] .fragment[data-state=sung]::after { opacity: 0; transform: scaleX(1); }
+@keyframes strike {
+  0% { transform: scale(1.32) translateX(.06em); color: #fff; text-shadow: 0 0 .5em var(--accent), .05em 0 0 rgb(255 60 90 / .7), -.05em 0 0 rgb(60 200 255 / .7); }
+  45% { text-shadow: 0 0 .2em var(--accent), .02em 0 0 rgb(255 60 90 / .4), -.02em 0 0 rgb(60 200 255 / .4); }
+  100% { transform: scale(1.05); text-shadow: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fragment, .letter { animation: none !important; transform: none !important; filter: none !important; }
+  .fragment::after { display: none; }
+}
