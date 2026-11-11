@@ -8,6 +8,7 @@ import math
 import re
 from xml.etree import ElementTree as ET
 
+from .backing_vocals import BACKING_VOICE, tag_bracketed_backing
 from .navidrome_integration import connect
 from .plugin_ranking import library_namespace
 from .navidrome_lyrics_sources import lyrics_paused
@@ -52,12 +53,9 @@ def timed_attributes(line):
     return attrs
 
 
-BACKING_VOICE = 2  # karaoke_pipeline.mark_backing_voice
-
-
 def _append_syllables(paragraph, syllables):
-    """Timed spans for a line's syllables. A run of second-voice syllables (``voice: 2``, the
-    backing vocal the aligner placed on its own stream) is wrapped in a ``ttm:role="x-bg"`` span,
+    """Timed spans for a line's syllables. A run of second-voice syllables (``voice: 2``:
+    bracketed words, backing vocals) is wrapped in a ``ttm:role="x-bg"`` span,
     the TTML form Apple Music uses and Navidrome's parser reads as a background agent, so clients
     can show it as backing instead of lead."""
     runs = []
@@ -173,10 +171,21 @@ def ttml(row, translations):
                 )
                 element.text = translated["text"]
     div = ET.SubElement(ET.SubElement(root, f"{{{TT}}}body"), f"{{{TT}}}div")
+    # Bracketed words are backing vocals, also in rows stored before they were tagged.
+    lines = tag_bracketed_backing(
+        [
+            {**line, "syllables": [dict(s) for s in line.get("syllables") or []]}
+            if line.get("syllables")
+            else dict(line)
+            for line in lines
+        ]
+    )
     for index, line in enumerate(lines):
         attributes = {"key": f"line-{index}", **timed_attributes(line)}
-        if line.get("voice") == "background":
-            # A whole line the aligner decoded as backing vocals ("(One, two, three)").
+        background = line.get("voice") == "background"
+        if background:
+            # A line that is backing vocals as a whole ("(One, two, three)"): the role sits on
+            # the paragraph, so its words are not wrapped again.
             attributes[f"{{{TTM}}}role"] = "x-bg"
         paragraph = ET.SubElement(div, f"{{{TT}}}p", attributes)
         syllables = line.get("syllables") or []
@@ -184,7 +193,10 @@ def ttml(row, translations):
         if syllables and "".join(str(s.get("text") or "") for s in syllables) == line.get(
             "text", ""
         ):
-            _append_syllables(paragraph, syllables)
+            _append_syllables(
+                paragraph,
+                [{**s, "voice": None} for s in syllables] if background else syllables,
+            )
         else:
             paragraph.text = line.get("text") or ""
     return ET.tostring(root, encoding="unicode")

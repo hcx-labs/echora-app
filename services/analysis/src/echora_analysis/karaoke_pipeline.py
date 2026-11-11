@@ -27,6 +27,7 @@ from .remote_compute import current as current_remote
 from .roformer import separation_phase
 from .roformer import SEPARATION_REVISION
 from .navidrome import NavidromeClient
+from .backing_vocals import BACKING_VOICE, tag_bracketed_backing
 from .furigana import ruby_segments
 from .processing_plan import plan_karaoke, resolve_library_id
 
@@ -240,26 +241,22 @@ def build_lines_from_alignment_document(document: dict[str, object]) -> list[dic
     return lines
 
 
-BACKING_VOICE = 2
-
-
 BACKING_MIN_OVERLAP_MS = 80  # four aligner frames: shorter overlaps are boundary noise
 SECOND_STREAM = 2  # syllable["stream"]: the aligner placed it on its second (overlapping) stream
 WORD_END = re.compile(r"\s[(\[]*$")
 
 
 def mark_backing_voice(lines: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Tag a line's second, simultaneous voice with ``"voice": 2`` so players can show it as a
-    second line.
+    """Tag backing vocals: ``"voice": 2`` on syllables (players show them as a second, smaller
+    line) and ``"voice": "background"`` on a line that is backing as a whole.
 
-    Decided by the aligner, never by parentheses alone (lyrics also parenthesize words the lead
-    sings alone) or by which word starts first. A phrase (consecutive words of a line) that the
+    Bracketed words are always backing vocals (``tag_bracketed_backing``), inline or as a whole
+    line, wherever the aligner placed them. On top of that, a phrase (consecutive words of a line) that the
     aligner placed on its second stream (``"stream": 2``) is a second voice. With inline backing
     placement on (``fa_kara_inline_backing``) every such phrase beside lead words is one, since the
     aligner then puts each inline bracket phrase on that stream; otherwise only a phrase that
     overlaps the line's other words by at least ``BACKING_MIN_OVERLAP_MS`` qualifies and the rest
-    stay on the line. A line entirely on the second stream, and overlaps between lines, are not
-    marked: players already show those as two lines. Stale marks are cleared.
+    stay on the line. Overlaps between lines are not marked. Stale marks are cleared.
     """
     for line in lines:
         words: list[list[dict[str, object]]] = []
@@ -299,7 +296,7 @@ def mark_backing_voice(lines: list[dict[str, object]]) -> list[dict[str, object]
                 for word in phrase:
                     for syllable in word:
                         syllable["voice"] = BACKING_VOICE
-    return lines
+    return tag_bracketed_backing(lines)
 
 
 def apply_adaptive_line_padding(lines: list[dict[str, object]]) -> list[dict[str, object]]:

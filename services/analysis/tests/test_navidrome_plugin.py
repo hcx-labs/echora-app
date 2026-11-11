@@ -238,6 +238,15 @@ def test_ttml_marks_backing_vocals_with_the_background_role():
     assert root.get(role) is None
 
 
+def test_ttml_marks_bracketed_words_in_rows_stored_without_voice_marks():
+    row = backing_example()
+    for line in row["karaoke_lines"] if "karaoke_lines" in row else []:
+        line.pop("voice", None)
+        for syllable in line["syllables"]:
+            syllable.pop("voice", None)
+    assert lyrics.ttml(row, []) == lyrics.ttml(backing_example(), [])
+
+
 def test_backing_fixture_matches_current_export():
     exported = lyrics.lyrics_response(backing_example(), [], auth.RankingProfile())["lyrics"][0][
         "text"
