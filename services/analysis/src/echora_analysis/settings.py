@@ -54,10 +54,10 @@ class Settings(BaseSettings):
     # Minimum durations on the audio-only path (0 = off): stop the path cramming words.
     fa_kara_min_letter_ms: int = Field(40, ge=0)
     fa_kara_min_token_ms: int = Field(100, ge=0)
-    # Fixed shift of every karaoke time. On the vocal stem Echora Kara's word starts run 21 ms
-    # late against reference word timing (one global shift, no per-language or per-onset term
-    # helped); 0 on the original mix. Models before Echora Kara ran on the legacy clock at +45 ms.
-    fa_kara_timing_offset_ms: int = Field(-21, ge=-500, le=500)
+    # Fixed shift of every karaoke time. 0: words start at their sung onset. Apple's word timing
+    # runs ~20 ms earlier than that (Jamendo's onset annotation shows no such lead), so no shift
+    # chases it. Models before Echora Kara ran on the legacy clock at +45 ms.
+    fa_kara_timing_offset_ms: int = Field(0, ge=-500, le=500)
     # Minimum durations follow each line's sung pace (x this ratio, capped by the minimums above),
     # so fast rap isn't stretched; 0 applies the minimums as a fixed floor.
     fa_kara_duration_pace_ratio: float = Field(0.9, ge=0.0, le=5.0)
@@ -87,12 +87,14 @@ class Settings(BaseSettings):
     fa_kara_text_bonus: float = Field(0.4, ge=0.0, le=5.0)
     # Cost per blank frame between two syllables of one line (0: off).
     fa_kara_in_line_gap_cost: float = Field(0.2, ge=0.0, le=20.0)
-    # What the aligner hears: "vocals" (default) is the separated vocal stem, which beat the
-    # original mix on every reference-scored song; "mix" is the song as stored.
-    fa_kara_audio_input: str = Field("vocals")
+    # What the aligner hears: "mix" (default) is the song as stored; "vocals" is the separated
+    # vocal stem. The stem scores a little better against reference timing, but the separator can
+    # delete sung parts (soft intro "ooh"s), and no decoder recovers a vocal that is gone.
+    fa_kara_audio_input: str = Field("mix")
     # After >= 0.6 s of silence, a word the lattice starts >= 0.6 s late is pulled back to the
-    # first frame with vocal energy (a lone sustained vowel the model barely hears).
-    fa_kara_gap_onset_pull: bool = Field(True)
+    # first frame with vocal energy (a lone sustained vowel the model barely hears). It reads
+    # loudness, which only means the voice on the vocal stem, so it is off with the mix.
+    fa_kara_gap_onset_pull: bool = Field(False)
     # Inline bracketed words "(so lonely)" are re-placed on the background head inside their
     # line's window and shown as the second voice.
     fa_kara_inline_backing: bool = Field(True)

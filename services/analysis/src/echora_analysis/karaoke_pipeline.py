@@ -37,7 +37,7 @@ FA_KARA_REVISION = "168ca5f01cecaa1290e31c0ce8dc44af8c7451bb"
 # v5: the Echora Kara model on the exact frame clock, with blank-free syllables, backing lines on
 # their own head, the in-line gap cost and the text head's bonus (v4: audio-only alignment with
 # minimum syllable durations and a +45 ms calibration).
-KARAOKE_PIPELINE_REVISION = "v6-echora-kara-stem"
+KARAOKE_PIPELINE_REVISION = "v7-echora-kara-mix"
 DEFAULT_MODEL_ID = "hcxlabs/echora-kara-300m"
 DEFAULT_MODEL_REVISION = "64087e1078b1aaf39cc1e6a9fc93874ca2f60e22"
 _DIALOGUE = re.compile(r"^Dialogue: [^,]*,([^,]+),([^,]+),(?:[^,]*,){6}(.*)$")

@@ -25,17 +25,17 @@ from echora_analysis.karaoke_pipeline import (
 def test_stored_model_revision_tracks_the_audio_input(monkeypatch):
     from echora_analysis.roformer import SEPARATION_REVISION
 
-    # The vocal stem by default; the legacy switches no longer decide it.
+    # The original mix by default; the legacy switches no longer decide it.
     for value in ("true", "false"):
         monkeypatch.setenv("FA_KARA_VOCAL_SEPARATION", value)
         monkeypatch.setenv("FA_KARA_DEMUCS_MODEL", "ignored")
         get_settings.cache_clear()
-        assert _stored_model_revision("model-revision").endswith(
-            f":model-revision:roformer:{SEPARATION_REVISION}"
-        )
-    monkeypatch.setenv("FA_KARA_AUDIO_INPUT", "mix")
+        assert _stored_model_revision("model-revision").endswith(":model-revision:mix")
+    monkeypatch.setenv("FA_KARA_AUDIO_INPUT", "vocals")
     get_settings.cache_clear()
-    assert _stored_model_revision("model-revision").endswith(":model-revision:mix")
+    assert _stored_model_revision("model-revision").endswith(
+        f":model-revision:roformer:{SEPARATION_REVISION}"
+    )
 
 
 def test_parse_ass_karaoke_preserves_line_and_syllable_timing():
@@ -232,9 +232,9 @@ def test_worker_aligns_the_configured_audio_without_line_times(
         assert {"--exact_frame_clock", "--blank_free_tokens", "--background_decoding"} <= set(argv)
         assert argv[argv.index("--label_rules") + 1] == "v3-sung"
         assert argv[argv.index("--fusion") + 1] == "on"
-        # The stem recipe: calibrated offset, gap onset pull, inline backing placement.
-        assert argv[argv.index("--timing_offset_ms") + 1] == "-21"
-        assert {"--gap_onset_pull", "--inline_backing"} <= set(argv)
+        # The mix recipe: onset-true timing, no loudness-based gap pull, inline backing placement.
+        assert argv[argv.index("--timing_offset_ms") + 1] == "0"
+        assert "--gap_onset_pull" not in argv and "--inline_backing" in argv
         assert "--optional_brackets" not in argv
         (work / "o.ass").write_text("")
         (work / "o_ruby.lrc").write_text("")
