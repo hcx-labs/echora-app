@@ -138,6 +138,13 @@ def main(argv=None):
     parser.add_argument("--bpb", type=int, default=3, help="导唱指示灯的符号个数")
     parser.add_argument("--lang", default="auto", help="歌词语言")
     parser.add_argument(
+        "--detect_language",
+        default=None,
+        help="With --lang auto: comma-separated languages the lyrics may be identified as "
+        "(label_rules.document_language, lid.176.ftz). For songs stored without a language, "
+        "which would otherwise be spelled letter by letter",
+    )
+    parser.add_argument(
         "--label_rules",
         choices=("v1", "v2", "v2-orthographic", "v3", "v3-orthographic", "v3-sung"),
         default="v1",
@@ -327,6 +334,22 @@ def main(argv=None):
         lines = lrcfmt.utat_process(file.read()) if txt_format == "uta" else list(file)
     if txt_format == "moe":
         lines = [lrcfmt.moeg_process_line(line) for line in lines]
+    language_source = "given"
+    if args.detect_language and lrc_language == "auto":
+        import label_rules
+
+        language_source = "undetected"
+        try:
+            detected = label_rules.document_language(
+                [str(line) for line in lines],
+                frozenset(args.detect_language.split(",")) - {"auto"},
+            )
+        except RuntimeError as error:  # no lid.176.ftz / fasttext: keep the generic path
+            print(f"Language detection unavailable: {error}")
+            detected = None
+        if detected:
+            lrc_language, language_source = detected, "detected"
+            print(f"Lyrics stored without a language; identified as {detected}")
     result_list, source_texts = normalize_source_lines(
         lines, lrc_language, sokuon_split, hatsuon_split, args.label_rules
     )
@@ -620,6 +643,7 @@ def main(argv=None):
             if (align_use_gpu or not hf_model_path) and __import__("torch").cuda.is_available()
             else "cpu",
             "normalization_language": lrc_language,
+            "normalization_language_source": language_source,
             "audio_source": "demucs_vocals" if args.separate_vocals else "input_audio",
             "inference_config": vars(args),
         },

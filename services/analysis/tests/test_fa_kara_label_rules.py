@@ -189,3 +189,28 @@ def test_v3_training_and_inference_units_identical():
             assert [i["pron"] for i in items if i.get("pron")] == [
                 i["pron"] for t in training for i in t if i.get("pron")
             ]
+
+
+@needs_v3
+def test_document_language_identifies_lyrics_stored_without_a_language():
+    english = [
+        "I fell apart when I looked into your eyes",
+        "Cause I knew what you really felt inside",
+        "But it hurts sometimes",
+        "Oh",  # one word: no vote
+    ]
+    allowed = frozenset({"en", "ja", "ko"})
+    assert label_rules.document_language(english, allowed) == "en"
+    # A language the caller has no rules for is not returned: the generic path stays.
+    assert label_rules.document_language(english, frozenset({"ja", "ko"})) is None
+    assert (
+        label_rules.document_language(["君の名前を呼んでいた", "夜空に星が流れていく"], allowed)
+        == "ja"
+    )
+    # No clear majority, or nothing to vote on: unknown.
+    mixed = english[:1] + [
+        "君の名前を呼んでいた夜空に星が流れていく",
+        "あの日の約束を忘れないでいて",
+    ]
+    assert label_rules.document_language(mixed, allowed) is None
+    assert label_rules.document_language(["Oh", "La"], allowed) is None

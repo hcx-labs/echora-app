@@ -544,6 +544,10 @@ FA_KARA_LANGUAGES_V3 = FA_KARA_LANGUAGES_V2 | frozenset(
 )
 
 
+# Stored lyric languages that mean "not identified" (ISO 639 und; fastText's placeholder xxx).
+UNKNOWN_LANGUAGES = frozenset({"und", "xxx"})
+
+
 def fa_kara_languages(label_rules: str) -> frozenset[str]:
     return (
         FA_KARA_LANGUAGES_V1
@@ -613,6 +617,15 @@ def _run_fa_kara(
             if language in fa_kara_languages(get_settings().fa_kara_label_rules)
             else "auto",
         ]
+        if not language or language in UNKNOWN_LANGUAGES:
+            # Lyrics stored without a language (ingest-time detection failed or was unsure): the
+            # aligner identifies them itself rather than spell every word letter by letter.
+            command.extend(
+                [
+                    "--detect_language",
+                    ",".join(sorted(fa_kara_languages(get_settings().fa_kara_label_rules))),
+                ]
+            )
         if get_settings().fa_kara_label_rules != "v1":
             command.extend(["--label_rules", get_settings().fa_kara_label_rules])
         if aligner == "yohane":

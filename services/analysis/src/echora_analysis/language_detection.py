@@ -13,12 +13,23 @@ from __future__ import annotations
 
 from .settings import get_settings
 
+import hashlib
+import logging
 import os
 import re
 import urllib.request
 from collections import defaultdict
 
-MODEL_URL = "https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin"
+logger = logging.getLogger(__name__)
+
+# fastText lid.176.bin (CC BY-SA 3.0) from a Hugging Face mirror pinned to a commit; the file is
+# byte-identical to Meta's. Meta's own host (dl.fbaipublicfiles.com) served an expired certificate
+# from 2026-11-11, and every lyric ingested meanwhile was stored without a language.
+MODEL_URL = (
+    "https://huggingface.co/julien-c/fasttext-language-id/resolve/"
+    "9f2e94d2fd6b2615d26f5ec5b34cf7e2f38cb86e/lid.176.bin"
+)
+MODEL_SHA256 = "7e69ec5451bc261cc7844e49e4792a85d7f09c06789ec800fc4a44aec362764e"
 MODEL_PATH = get_settings().lid_model_path
 
 # IndicLID-FTR (AI4Bharat): fastText model trained on romanized Indic text.
@@ -28,11 +39,29 @@ INDICLID_FTR_URL = "https://github.com/AI4Bharat/IndicLID/releases/download/v1.0
 INDICLID_FTR_PATH = get_settings().indiclid_ftr_path
 INDICLID_FTR_THRESHOLD = 0.6
 INDIC_LABELS = {
-    "hin": "hi", "urd": "ur", "pan": "pa", "ben": "bn", "guj": "gu",
-    "mar": "mr", "tam": "ta", "tel": "te", "kan": "kn", "mal": "ml",
-    "ori": "or", "sin": "si", "nep": "ne", "snd": "sd", "asm": "as",
-    "kok": "kok", "mni": "mni", "doi": "doi", "kas": "ks", "san": "sa",
-    "bho": "bho", "brx": "brx", "mai": "mai",
+    "hin": "hi",
+    "urd": "ur",
+    "pan": "pa",
+    "ben": "bn",
+    "guj": "gu",
+    "mar": "mr",
+    "tam": "ta",
+    "tel": "te",
+    "kan": "kn",
+    "mal": "ml",
+    "ori": "or",
+    "sin": "si",
+    "nep": "ne",
+    "snd": "sd",
+    "asm": "as",
+    "kok": "kok",
+    "mni": "mni",
+    "doi": "doi",
+    "kas": "ks",
+    "san": "sa",
+    "bho": "bho",
+    "brx": "brx",
+    "mai": "mai",
 }
 
 # Predefined confidence thresholds. A line whose fastText probability falls
@@ -49,10 +78,22 @@ MIN_MEAN_CONFIDENCE = 0.5
 PRIMARY_SHARE = 0.5
 
 LANGUAGE_NAMES = {
-    "en": "English", "ja": "Japanese", "ko": "Korean", "zh": "Mandarin",
-    "es": "Spanish", "fr": "French", "de": "German", "pt": "Portuguese",
-    "it": "Italian", "ru": "Russian", "id": "Indonesian", "th": "Thai",
-    "vi": "Vietnamese", "ar": "Arabic", "hi": "Hindi", "ur": "Urdu",
+    "en": "English",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "zh": "Mandarin",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "pt": "Portuguese",
+    "it": "Italian",
+    "ru": "Russian",
+    "id": "Indonesian",
+    "th": "Thai",
+    "vi": "Vietnamese",
+    "ar": "Arabic",
+    "hi": "Hindi",
+    "ur": "Urdu",
     "tr": "Turkish",
 }
 
@@ -79,9 +120,14 @@ def _load_ftr():
         os.makedirs(os.path.dirname(INDICLID_FTR_PATH) or ".", exist_ok=True)
         try:
             import io, zipfile
-            request = urllib.request.Request(INDICLID_FTR_URL, headers={"User-Agent": "Mozilla/5.0"})
+
+            request = urllib.request.Request(
+                INDICLID_FTR_URL, headers={"User-Agent": "Mozilla/5.0"}
+            )
             archive = zipfile.ZipFile(io.BytesIO(urllib.request.urlopen(request).read()))
-            inner = next(name for name in archive.namelist() if name.endswith("model_baseline_roman.bin"))
+            inner = next(
+                name for name in archive.namelist() if name.endswith("model_baseline_roman.bin")
+            )
             with open(INDICLID_FTR_PATH, "wb") as handle:
                 handle.write(archive.read(inner))
         except Exception:
@@ -112,13 +158,25 @@ def _load_fasttext():
         return None
     if not os.path.exists(MODEL_PATH):
         os.makedirs(os.path.dirname(MODEL_PATH) or ".", exist_ok=True)
+        # Download beside the target, check it and rename: an interrupted or altered download is
+        # never loaded.
+        partial = f"{MODEL_PATH}.part"
         try:
-            urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
-        except Exception:
+            urllib.request.urlretrieve(MODEL_URL, partial)
+            with open(partial, "rb") as source:
+                digest = hashlib.file_digest(source, "sha256").hexdigest()
+            if digest != MODEL_SHA256:
+                os.remove(partial)
+                raise RuntimeError(f"lid.176.bin sha256 is {digest}")
+            os.replace(partial, MODEL_PATH)
+        except Exception as error:
+            # Lyrics are then stored without a language; say so rather than fail silently.
+            logger.warning("language model %s unavailable: %s", MODEL_PATH, error)
             return None
     try:
         model = fasttext.load_model(MODEL_PATH)
-    except Exception:
+    except Exception as error:
+        logger.warning("language model %s could not be loaded: %s", MODEL_PATH, error)
         return None
     model.get_labels  # touch to fail early on corrupt files
     _FASTTEXT_MODEL = model
@@ -232,8 +290,13 @@ def detect_distribution(text: str | None) -> dict[str, object]:
         weights[language] += weight
 
     if not confident_weight:
-        return {"languages": {}, "primary_language": None, "mean_confidence": 0.0,
-                "coverage": 0.0, "confident": False}
+        return {
+            "languages": {},
+            "primary_language": None,
+            "mean_confidence": 0.0,
+            "coverage": 0.0,
+            "confident": False,
+        }
 
     # Romanized Indic languages (Hindi/Punjabi/Maithili/...) are hard to tell
     # apart line by line, but a full song is decisive. When the track-level
@@ -251,7 +314,9 @@ def detect_distribution(text: str | None) -> dict[str, object]:
                 family = set(INDIC_LABELS.values())
                 family_weight = sum(weight for code, weight in weights.items() if code in family)
                 if family_weight:
-                    weights = {code: weight for code, weight in weights.items() if code not in family}
+                    weights = {
+                        code: weight for code, weight in weights.items() if code not in family
+                    }
                     weights[mapped] = weights.get(mapped, 0.0) + family_weight
 
     distribution = {code: round(weight / confident_weight, 4) for code, weight in weights.items()}

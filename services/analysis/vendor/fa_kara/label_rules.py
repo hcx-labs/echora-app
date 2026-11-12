@@ -1740,6 +1740,44 @@ def line_lid(text: str) -> tuple[str, float]:
     return label.replace("__label__", ""), float(score)
 
 
+DOCUMENT_LINE_CONFIDENCE = 0.5  # a line votes when fastText is at least this sure
+DOCUMENT_SHARE = 0.6  # of the voting weight the winner needs, and of all lines that must vote
+
+
+def document_language(lines: list[str], allowed: frozenset[str] | set[str]) -> str | None:
+    """The language of a song stored without one, from its lyric lines (lid.176.ftz).
+
+    Without a language the normalizer takes the generic path and spells Latin words letter by
+    letter ("eyes" → e y e s), which a model trained on pronunciation labels (aiz) cannot follow:
+    held words spelled unlike they sound end early. Each line with two or more words (or four
+    letters outside ASCII, for scripts written without spaces) votes with its letter count when
+    fastText is confident. A language is returned only when it is in ``allowed``, holds
+    ``DOCUMENT_SHARE`` of the confident weight and the confident lines are ``DOCUMENT_SHARE`` of
+    all voting lines; otherwise None and the caller keeps the generic path."""
+    votes: dict[str, float] = {}
+    total = 0.0
+    for line in lines:
+        words = [w.lower() for w in _LID_WORD.findall(line)]
+        letters = sum(len(w) for w in words)
+        if len(words) < 2 and sum(1 for w in words for c in w if not c.isascii()) < 4:
+            continue
+        total += letters
+        language, score = line_lid(" ".join(words))
+        if score >= DOCUMENT_LINE_CONFIDENCE:
+            votes[language] = votes.get(language, 0.0) + letters
+    if not votes:
+        return None
+    confident = sum(votes.values())
+    language, weight = max(votes.items(), key=lambda item: item[1])
+    if (
+        language in allowed
+        and weight >= DOCUMENT_SHARE * confident
+        and confident >= DOCUMENT_SHARE * total
+    ):
+        return language
+    return None
+
+
 @functools.lru_cache(maxsize=65536)
 def line_language(line: str, language: str) -> str:
     """The hint one line of an en/de/fr song is normalised with under v3.
