@@ -11,6 +11,9 @@
 }
 /* Unsung text: solid and dimmed as one layer, so overlapping glyphs (Nastaliq) don't double up. */
 .base {
+  /* A block, so the opacity groups everything inside it: on an inline box, furigana (ruby
+     annotations) escape it and show at full white. */
+  display: block;
   color: #fff;
   opacity: 0.3;
 }

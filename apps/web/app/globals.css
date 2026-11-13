@@ -1,6 +1,6 @@
 /* Manrope for Latin, then a Noto face per script. Google serves each in unicode-range
    slices, so a script's font downloads only when its characters appear on screen. */
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Naskh+Arabic:wght@400..700&family=Gulzar&family=Noto+Sans+Devanagari:wght@400..700&family=Noto+Sans+Bengali:wght@400..700&family=Noto+Sans+Tamil:wght@400..700&family=Noto+Sans+Thai:wght@400..700&family=Noto+Sans+Hebrew:wght@400..700&family=Noto+Sans+JP:wght@400..700&family=Noto+Sans+KR:wght@400..700&family=Noto+Sans+SC:wght@400..700&family=Noto+Sans+TC:wght@400..700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Naskh+Arabic:wght@400..700&family=Noto+Sans+Arabic:wght@400..700&family=Noto+Sans+Devanagari:wght@400..700&family=Noto+Sans+Bengali:wght@400..700&family=Noto+Sans+Tamil:wght@400..700&family=Noto+Sans+Thai:wght@400..700&family=Noto+Sans+Hebrew:wght@400..700&family=Noto+Sans+JP:wght@400..700&family=Noto+Sans+KR:wght@400..700&family=Noto+Sans+SC:wght@400..700&family=Noto+Sans+TC:wght@400..700&display=swap');
 @import 'tailwindcss';
 @plugin 'tailwindcss-animate';
 @custom-variant dark (&:is(.dark *));
@@ -176,8 +176,9 @@
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
 
 /* Language-specific faces where one script serves several languages. */
-/* Gulzar is a Nastaliq drawn for screens. It has one weight, so it is never faux-bolded. */
-:lang(ur) { font-family: 'Manrope', 'Gulzar', var(--script-fonts), sans-serif; font-synthesis-weight: none; line-height: 1.9; }
+/* Urdu in an even-height sans rather than Nastaliq: Nastaliq's strokes reach far above and past
+   their words, which no karaoke wipe can follow, and its tall rows crowd the lyrics. */
+:lang(ur) { font-family: 'Manrope', 'Noto Sans Arabic', var(--script-fonts), sans-serif; line-height: 1.6; }
 :lang(ko) { font-family: 'Manrope', 'Noto Sans KR', var(--script-fonts), sans-serif; }
 :lang(zh) { font-family: 'Manrope', 'Noto Sans SC', var(--script-fonts), sans-serif; }
 :lang(zh-TW), :lang(zh-HK), :lang(zh-Hant) { font-family: 'Manrope', 'Noto Sans TC', var(--script-fonts), sans-serif; }
