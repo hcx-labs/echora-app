@@ -9,11 +9,18 @@
   /* Unsung text stays dim, so even a near-white accent reads as the sung part. */
   color: rgb(255 255 255 / 0.3);
 }
+/* Unsung text: solid and dimmed as one layer, so overlapping glyphs (Nastaliq) don't double up. */
+.base {
+  color: #fff;
+  opacity: 0.3;
+}
 .paint {
   position: absolute;
   inset: 0;
   pointer-events: none;
   color: var(--accent);
+  /* The clip path cuts a shadow into boxes around the sung part. */
+  text-shadow: none;
 }
 /* Holds the clip path. Kept rendered (not display:none) so every engine resolves it. */
 .clipDefs {
