@@ -877,8 +877,6 @@ export default function SettingsView() {
                       >
                         <ChoiceItem value="syllable">Syllable highlight</ChoiceItem>
                         <ChoiceItem value="lava">Lava fill</ChoiceItem>
-                        <ChoiceItem value="bloom">Bloom</ChoiceItem>
-                        <ChoiceItem value="strike">Strike</ChoiceItem>
                       </Choice>
                     </SettingRow>
                     <section className="pt-6">

@@ -232,9 +232,3 @@
  * Strike: an arcade look: every line heavy, upper case and leaning forward, so the lean is the
  * same on sung, singing and upcoming words.
  */
-[data-lyric-style=bloom] .line:not([data-state=active]) { filter: blur(min(calc(var(--distance, 1) * .6px), 2.4px)); }
-[data-lyric-style=bloom] .line:not([data-state=active]):hover { filter: none; }
-[data-lyric-style=bloom] .line { transition: color .5s var(--ease-out-soft), opacity .6s var(--ease-out-soft), filter .5s var(--ease-out-soft); }
-[data-lyric-style=strike] .line { font-style: oblique 9deg; font-weight: 800; text-transform: uppercase; letter-spacing: .01em; }
-[data-lyric-style=strike] .line[data-state=active] { text-shadow: 0 2px 24px rgb(0 0 0 / .45); }
-@media (prefers-reduced-motion: reduce) { [data-lyric-style=bloom] .line { filter: none !important; } }

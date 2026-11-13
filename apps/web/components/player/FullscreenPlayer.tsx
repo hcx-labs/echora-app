@@ -63,7 +63,6 @@ import {
   type LyricFragment,
 } from "./lyricWords";
 import KaraokeLine, { RubyText } from "./KaraokeLine";
-import AnimatedKaraokeLine, { isAnimatedStyle } from "./AnimatedKaraokeLine";
 import LyricsScroller from "./LyricsScroller";
 import WaveformSeek from "./WaveformSeek";
 import { formatDuration } from "../ui/TrackRow";
@@ -163,7 +162,7 @@ export default function FullscreenPlayer() {
   useEffect(() => {
     const accept = (value: PlaybackPreferences) => {
       const style = value.karaokeHighlightStyle;
-      setHighlightStyle(style === "syllable" || isAnimatedStyle(style) ? style : "lava");
+      setHighlightStyle(style === "syllable" ? style : "lava");
       setBackdropMoving(value.wavesEnabled !== false);
     };
     const frame = requestAnimationFrame(() => accept(readPlaybackPreferences()));
@@ -1065,17 +1064,6 @@ function LiveKaraokeLine({
 }: Omit<ComponentProps<typeof KaraokeLine>, "now" | "clock" | "highlightStyle"> & {
   highlightStyle: PlaybackPreferences["karaokeHighlightStyle"];
 }) {
-  // Word-by-word styles split text into letters, which furigana layout can't follow: keep the fill there.
-  const ruby = props.fragments.some((fragment) => fragment.syllable.ruby?.length);
-  if (isAnimatedStyle(highlightStyle) && !ruby)
-    return (
-      <AnimatedKaraokeLine
-        fragments={props.fragments}
-        active={props.active}
-        clock={playbackClock}
-        animation={highlightStyle}
-      />
-    );
   return (
     <KaraokeLine
       {...props}
