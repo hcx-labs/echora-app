@@ -61,6 +61,12 @@ def _create_run(connection: psycopg.Connection, model: LyricsEmbeddingModel) -> 
         return cursor.fetchone()[0]
 
 
+def word_timing_digest(lines) -> str:
+    return hashlib.sha256(
+        json.dumps(lines, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()[:16]
+
+
 def _provenance(result: dict[str, object], language_distribution: dict) -> dict[str, object]:
     return {
         "provider": "moss" if result.get("ai_generated") else "navidrome",
@@ -70,6 +76,15 @@ def _provenance(result: dict[str, object], language_distribution: dict) -> dict[
         "synced": result.get("synced"),
         "lines": result.get("lines") or [],
         **({"languages": language_distribution} if language_distribution else {}),
+        # Word timing supplied with the lyrics: the karaoke step stores it instead of aligning.
+        **(
+            {
+                "word_timing": result["word_timing"],
+                "word_timing_digest": word_timing_digest(result["word_timing"]),
+            }
+            if result.get("word_timing") and not result.get("ai_generated")
+            else {}
+        ),
         **(
             {"instrumental_evidence": result["instrumental_evidence"]}
             if result.get("instrumental_evidence")

@@ -22,6 +22,8 @@ The same phases run on this server and on Modal ([modal-compute.md](modal-comput
 | Voice | decode (CPU) | voice classifiers | — |
 | Motion artwork | prompts (External AI, at the start of the batch; or Gemma) | LTX prompt encoding | LTX video |
 
+Karaoke skips all three phases for a song whose lyrics arrive from Navidrome with word timing for every line (a TTML file, or LRC with word cues): that timing is stored as the karaoke as is, lead singers on the line and `ttm:role="x-bg"` agents as the second voice, with the lyrics' `offset` applied. It is not AI-generated, so players show no AI disclosure for it. Partial word timing is ignored and the song is aligned. Navidrome does not say where a TTML file came from: a local stack syncing a Navidrome that another Echora's plugin serves would take that Echora's AI karaoke as supplied timing.
+
 ## Rules
 
 - **Only selected songs.** Each pipeline's planner selects the songs that need it (missing or stale results, feature switched on for the batch's location). A phase never processes, separates or loads a model for anything else. When no song is selected, the phase loads nothing.

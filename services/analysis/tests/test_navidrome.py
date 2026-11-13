@@ -167,3 +167,65 @@ def test_translation_only_response_does_not_become_original_main_lyrics():
     assert result["text"] is None
     assert result["status"] == "missing"
     assert result["structured_lyrics"] == [translation]
+
+
+def _cue_line(index, value, cues, agent=None):
+    data = value.encode()
+    out, cursor = [], 0
+    for word, start, end in cues:
+        position = data.index(word.encode(), cursor)
+        out.append(
+            {
+                "value": word,
+                "start": start,
+                "end": end,
+                "byteStart": position,
+                "byteEnd": position + len(word.encode()) - 1,
+            }
+        )
+        cursor = position + len(word.encode())
+    line = {"index": index, "value": value, "start": cues[0][1], "end": cues[-1][2], "cue": out}
+    return {**line, "agentId": agent} if agent else line
+
+
+def test_word_timed_lines_keep_spaces_backing_voice_and_offset():
+    from echora_analysis.navidrome import word_timed_lines
+
+    entry = {
+        "synced": True,
+        "offset": 100,
+        "agents": [{"id": "v1", "role": "main"}, {"id": "v1-bg", "role": "bg"}],
+        "line": [
+            {"value": "Hello dear world (oh)", "start": 1000},
+            {"value": ""},
+            {"value": "散らかった", "start": 5000},
+        ],
+        "cueLine": [
+            _cue_line(
+                0,
+                "Hello dear world",
+                [("Hello", 1000, 1400), ("dear", 1400, 1800), ("world", 1800, 2400)],
+                "v1",
+            ),
+            _cue_line(0, "(oh)", [("(oh)", 2000, 2600)], "v1-bg"),
+            _cue_line(2, "散らかった", [("散", 5000, 5300), ("らかった", 5300, 6000)]),
+        ],
+    }
+    lines = word_timed_lines(entry)
+    assert [s["text"] for s in lines[0]["syllables"]] == ["Hello ", "dear ", "world ", "(oh)"]
+    assert lines[0]["text"] == "Hello dear world (oh)"
+    assert lines[0]["syllables"][-1]["voice"] == 2 and "voice" not in lines[0]["syllables"][0]
+    assert lines[0]["start_ms"] == 900 and lines[0]["end_ms"] == 2500
+    assert lines[1]["text"] == "散らかった" and lines[1]["syllables"][1]["start_ms"] == 5200
+
+
+def test_word_timed_lines_need_every_line_timed():
+    from echora_analysis.navidrome import word_timed_lines
+
+    entry = {
+        "synced": True,
+        "line": [{"value": "One", "start": 0}, {"value": "Two", "start": 1000}],
+        "cueLine": [_cue_line(0, "One", [("One", 0, 500)])],
+    }
+    assert word_timed_lines(entry) is None
+    assert word_timed_lines({"line": [{"value": "One"}]}) is None

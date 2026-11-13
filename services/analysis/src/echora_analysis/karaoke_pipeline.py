@@ -727,6 +727,39 @@ def backfill_karaoke(
             _KARAOKE_LOCK.release()
 
 
+def _store_supplied_karaoke(connection, track_id, lines, digest) -> None:
+    """Word timing that came with the lyrics (TTML or enhanced LRC from Navidrome), stored as the
+    karaoke without alignment. Not AI-generated, so players show no AI disclosure for it."""
+    provenance = {
+        "alignment_mode": "supplied",
+        "source": "navidrome",
+        "source_digest": digest,
+        "pipeline_revision": KARAOKE_PIPELINE_REVISION,
+        "ai_generated": False,
+    }
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """INSERT INTO karaoke_lyrics_variants
+                 (track_id, bounded, lines, ass, lrc, model, model_revision, provenance,
+                  alignment_document, diagnostics, created_at)
+               VALUES (%s,false,%s,NULL,NULL,'navidrome','supplied',%s,NULL,'{}',now())
+               ON CONFLICT (track_id, bounded) DO UPDATE SET lines=EXCLUDED.lines,
+                 ass=NULL, lrc=NULL, model=EXCLUDED.model, model_revision=EXCLUDED.model_revision,
+                 provenance=EXCLUDED.provenance, alignment_document=NULL, diagnostics='{}',
+                 created_at=now()""",
+            (track_id, Jsonb(lines), Jsonb(provenance)),
+        )
+        cursor.execute(
+            """UPDATE lyrics SET karaoke_lines=%s, karaoke_ass=NULL, karaoke_lrc=NULL,
+                      karaoke_model='navidrome', karaoke_model_revision='supplied',
+                      karaoke_bounded=false, karaoke_created_at=now(),
+                      provenance=provenance || %s
+               WHERE track_id=%s""",
+            (Jsonb(lines), Jsonb({"karaoke": provenance}), track_id),
+        )
+    connection.commit()
+
+
 def _backfill_karaoke(
     url: str,
     username: str,
@@ -763,14 +796,31 @@ def _backfill_karaoke(
             return summary
         with connection.cursor() as cursor:
             cursor.execute(
-                f"""SELECT DISTINCT ON (ts.track_id) ts.track_id, ts.external_id, t.title, l.text, l.language, l.provenance->'lines'
+                f"""SELECT DISTINCT ON (ts.track_id) ts.track_id, ts.external_id, t.title, l.text, l.language, l.provenance->'lines',
+                           l.provenance->'word_timing', l.provenance->>'word_timing_digest'
                     FROM track_sources ts JOIN tracks t ON t.id=ts.track_id JOIN lyrics l ON l.track_id=ts.track_id
                     WHERE ts.source_type='subsonic' AND ts.external_id=ANY(%s) AND ts.library_id=%s
                     ORDER BY ts.track_id, ts.id""",
                 (list(planned), library_id),
             )
-            tracks = cursor.fetchall()
-        summary["total"] = len(tracks)
+            rows = cursor.fetchall()
+        summary["total"] = len(rows)
+        tracks = []
+        for row in rows:
+            track_id, external_id, title, text, language, lines = row[:6]
+            supplied, digest = (row[6], row[7]) if len(row) > 7 else (None, None)
+            if supplied and digest:
+                try:
+                    _store_supplied_karaoke(connection, track_id, supplied, digest)
+                    summary["supplied"] = summary.get("supplied", 0) + 1
+                except Exception:
+                    connection.rollback()
+                    summary["failed"] += 1
+                    logger.exception("Storing supplied word timing failed for %s", track_id)
+            else:
+                tracks.append((track_id, external_id, title, text, language, lines))
+        if not tracks:
+            return summary
         _stop_fa_kara_worker()
         remote = current_remote()
         prepared_sources = set()

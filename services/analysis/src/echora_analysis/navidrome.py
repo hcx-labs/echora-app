@@ -198,7 +198,9 @@ class NavidromeClient:
                     }
                 lines = entry.get("line", [])
                 text = "\n".join(str(line.get("value") or "") for line in lines).strip()
+                word_timing = word_timed_lines(entry) if text else None
                 return {
+                    **({"word_timing": word_timing} if word_timing else {}),
                     "status": "available" if text else "missing",
                     "text": text or None,
                     "language": entry.get("lang"),
@@ -431,3 +433,88 @@ class NavidromeClient:
 def media_navidrome_client(base_url: str, username: str, password: str) -> NavidromeClient:
     """Return a Navidrome client backed by the process-wide media connection pool."""
     return NavidromeClient(base_url, username, password, http_client=_media_http_client)
+
+
+# OpenSubsonic agent roles shown as a second, backing voice (TTML ttm:role="x-bg").
+BACKING_ROLES = frozenset({"bg", "background"})
+
+
+def _cue_syllables(cue_line: dict, backing: bool) -> list[dict[str, object]]:
+    """A cue line's cues as karaoke syllables whose texts join back into the cue line's value.
+
+    Cue byte ranges index the UTF-8 value; each syllable runs up to the next cue, so the spaces
+    between words stay on the syllable before them (Echora's karaoke line format).
+    """
+    value = str(cue_line.get("value") or "")
+    data = value.encode("utf-8")
+    cues = [c for c in cue_line.get("cue") or [] if isinstance(c.get("start"), int)]
+    if not cues:
+        return []
+    starts = [c.get("byteStart") for c in cues]
+    ordered = all(isinstance(b, int) for b in starts) and starts == sorted(starts)
+    if not ordered or starts[-1] >= len(data) or starts[0] < 0:
+        return []
+    bounds = [0, *starts[1:], len(data)]
+    syllables = []
+    for index, cue in enumerate(cues):
+        try:
+            text = data[bounds[index] : bounds[index + 1]].decode("utf-8")
+        except UnicodeDecodeError:
+            return []
+        end = cue.get("end")
+        if not isinstance(end, int):
+            following = cues[index + 1]["start"] if index + 1 < len(cues) else cue_line.get("end")
+            end = following if isinstance(following, int) else cue["start"]
+        syllable = {"text": text, "start_ms": cue["start"], "end_ms": max(end, cue["start"])}
+        if backing:
+            syllable["voice"] = 2
+        syllables.append(syllable)
+    return syllables
+
+
+def word_timed_lines(entry: dict) -> list[dict[str, object]] | None:
+    """Word timing supplied with the lyrics (TTML or enhanced LRC in Navidrome), as karaoke lines.
+
+    Each lyric line gets the syllables of all its cue lines: lead singers first, then backing
+    agents as ``voice: 2``. Used only when every non-empty line is timed word by word; partial
+    timing is left to the aligner. ``offset`` (positive shows lyrics sooner) is applied.
+    """
+    cue_lines = entry.get("cueLine") or []
+    if not cue_lines or not entry.get("synced", True):
+        return None
+    roles = {str(a.get("id")): str(a.get("role") or "") for a in entry.get("agents") or []}
+    offset = entry.get("offset") if isinstance(entry.get("offset"), int) else 0
+    by_index: dict[int, list[dict]] = {}
+    for cue_line in cue_lines:
+        if isinstance(cue_line.get("index"), int):
+            by_index.setdefault(cue_line["index"], []).append(cue_line)
+    result = []
+    for index, line in enumerate(entry.get("line") or []):
+        if not str(line.get("value") or "").strip():
+            continue
+        parts = by_index.get(index)
+        if not parts:
+            return None
+        lead = [c for c in parts if roles.get(str(c.get("agentId"))) not in BACKING_ROLES]
+        backing = [c for c in parts if roles.get(str(c.get("agentId"))) in BACKING_ROLES]
+        syllables = []
+        for cue_line, is_backing in [(c, False) for c in lead] + [(c, True) for c in backing]:
+            part = _cue_syllables(cue_line, is_backing)
+            if not part:
+                return None
+            if syllables and not syllables[-1]["text"].endswith((" ", "\u3000")):
+                syllables[-1]["text"] += " "
+            syllables.extend(part)
+        for syllable in syllables:
+            syllable["start_ms"] -= offset
+            syllable["end_ms"] -= offset
+        timed = {
+            "text": "".join(s["text"] for s in syllables),
+            "start_ms": min(s["start_ms"] for s in syllables),
+            "end_ms": max(s["end_ms"] for s in syllables),
+            "syllables": syllables,
+        }
+        if all(s.get("voice") == 2 for s in syllables):
+            timed["voice"] = "background"
+        result.append(timed)
+    return result or None
