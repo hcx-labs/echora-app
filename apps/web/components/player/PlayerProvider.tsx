@@ -63,6 +63,8 @@ export type PlayerLyrics = {
   trackId: string;
   available: boolean;
   karaoke?: boolean;
+  /** "fa_kara" when Echora's aligner timed the words; "navidrome" when they came with the lyrics. */
+  karaoke_model?: string | null;
   lines?: {
     start_ms: number | null;
     end_ms?: number;

@@ -557,6 +557,7 @@ export default function FullscreenPlayer() {
         transcribed={aiLyrics}
         translatedLanguages={translations.map((item) => item.target_language)}
         motionArtwork={Boolean(currentMotion)}
+        alignedKaraoke={karaokeAvailable && currentLyrics?.karaoke_model !== "navidrome"}
       />
       {karaokeAvailable && (
         <Tabs
