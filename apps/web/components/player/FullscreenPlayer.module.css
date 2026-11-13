@@ -267,4 +267,10 @@
 /* No glow: the karaoke wipe paints each word as a clipped piece, so a shadow shows as boxes. */
 .staged .line[data-state=active] { text-shadow: none; }
 .staged .lineList { padding: 0 clamp(24px, 6vw, 120px); }
-@media (prefers-reduced-motion: reduce) { .stageBackdrop, .stageBackdrop::before, .stageBackdrop::after { animation: none; } }
+/* Long instrumental stretches: the lyrics recede (smaller, fainter, soft) and return just before the next line. */
+.staged .lineList { transform-origin: 50% 50%; transition: transform 1.2s var(--ease-out-soft), opacity 1.2s var(--ease-out-soft), filter 1.2s var(--ease-out-soft); }
+.staged .lyrics[data-resting=true] .lineList { transform: scale(.8); opacity: .4; filter: blur(1.5px); }
+@media (prefers-reduced-motion: reduce) {
+  .stageBackdrop, .stageBackdrop::before, .stageBackdrop::after { animation: none; }
+  .staged .lyrics[data-resting=true] .lineList { transform: none; filter: none; }
+}
