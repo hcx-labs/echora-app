@@ -1,4 +1,8 @@
-"""Conservative evidence for declining retries, never for skipping first attempts."""
+"""Conservative evidence for declining retries, never for skipping first attempts.
+
+`instrumental_song` is separate: a whole-song verdict that keeps a clearly instrumental track
+away from transcription, where the separated stem is near-silent noise and MOSS invents text.
+"""
 
 import math
 
@@ -65,3 +69,48 @@ def retry_evidence(activity, start, end, duration, vocal_rms_dbfs):
         }
     except (KeyError, TypeError, ValueError, ZeroDivisionError):
         return None
+
+
+INSTRUMENTAL_ACTIVE = 0.5
+INSTRUMENTAL_SHARE_MAX = 0.05
+INSTRUMENTAL_MEAN_MAX = 0.15
+INSTRUMENTAL_MIN_WINDOWS = 20
+
+
+def instrumental_song(activity):
+    """Evidence that a whole song has no sung vocals, or None.
+
+    Under 5% of the classifier windows clearly vocal (activation > .5) and a mean activation
+    under .15. On the library this was measured on, no song with supplied or transcribed
+    lyrics came close (the lowest vocal share among 1,036 such songs was above 5%).
+    Missing or malformed evidence never marks a song instrumental.
+    """
+    if (
+        not isinstance(activity, dict)
+        or activity.get("method") != "discogs-effnet_voice_instrumental"
+    ):
+        return None
+    try:
+        values = [float(w["vocal_activation"]) for w in activity["windows"]]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if len(values) < INSTRUMENTAL_MIN_WINDOWS or not all(
+        math.isfinite(v) and 0 <= v <= 1 for v in values
+    ):
+        return None
+    share = sum(v > INSTRUMENTAL_ACTIVE for v in values) / len(values)
+    mean = sum(values) / len(values)
+    if share >= INSTRUMENTAL_SHARE_MAX or mean >= INSTRUMENTAL_MEAN_MAX:
+        return None
+    return {
+        "decision": "instrumental",
+        "reason": "low_vocal_evidence",
+        "vocal_window_share": round(share, 4),
+        "mean_vocal_activation": round(mean, 4),
+        "windows": len(values),
+        "thresholds": {
+            "active": INSTRUMENTAL_ACTIVE,
+            "share_max": INSTRUMENTAL_SHARE_MAX,
+            "mean_max": INSTRUMENTAL_MEAN_MAX,
+        },
+    }

@@ -70,7 +70,27 @@ def _provenance(result: dict[str, object], language_distribution: dict) -> dict[
         "synced": result.get("synced"),
         "lines": result.get("lines") or [],
         **({"languages": language_distribution} if language_distribution else {}),
+        **(
+            {"instrumental_evidence": result["instrumental_evidence"]}
+            if result.get("instrumental_evidence")
+            else {}
+        ),
     }
+
+
+def _instrumental_evidence(connection, track_id) -> dict | None:
+    from .transcription_evidence import instrumental_song
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """SELECT a.activity FROM track_vocal_activity a
+               JOIN current_embeddings e ON e.track_id=a.track_id AND e.run_id=a.run_id
+               WHERE a.track_id=%s AND e.embedding_type='voice-gender'
+               ORDER BY a.created_at DESC LIMIT 1""",
+            (track_id,),
+        )
+        row = cursor.fetchone()
+    return instrumental_song(row[0]) if row else None
 
 
 def _language(language_distribution: dict, result: dict[str, object]) -> str | None:
@@ -342,6 +362,16 @@ def backfill_lyrics(
                             stored = cursor.fetchone()
                         if stored:
                             lyrics = {"text": stored[0], "status": stored[2], **(stored[1] or {})}
+                        elif lyrics.get("status") != "instrumental" and (
+                            evidence := _instrumental_evidence(connection, track_id)
+                        ):
+                            # Clearly no sung vocals: transcribing the near-silent stem only
+                            # yields invented text. Stored as instrumental, so later syncs skip it.
+                            lyrics = {
+                                "text": None,
+                                "status": "instrumental",
+                                "instrumental_evidence": evidence,
+                            }
                         elif lyrics.get("status") != "instrumental":
                             from .transcription_config import (
                                 transcription_model,

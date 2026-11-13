@@ -40,6 +40,10 @@ Provider misses do not erase existing lyrics. AI candidates cannot overwrite exi
 The job batch default is 128 tracks, not a GPU inference batch of 128. Inference remains sequential and cancellation is checked between windows and phases. Failed tracks remain eligible for retry. Transcription is disabled when the model configuration is empty.
 
 
+## Instrumental songs
+
+A song without supplied lyrics is not transcribed when its vocal-activity analysis shows almost no singing: under 5% of the classifier windows clearly vocal (activation above 0.5) and a mean activation under 0.15. Its separated stem is then near-silent noise, on which MOSS invents short or repeated text. The song is stored as instrumental, with the evidence in `provenance.instrumental_evidence`, and later syncs skip it. A forced transcription still runs.
+
 ## External AI refinement
 
 When External AI is enabled, each new AI transcript gets a second pass during the same sync, after transcription releases its models and before lyrics are embedded, translated and aligned for karaoke. The configured model reads the whole song (title, artist, detected languages and the timed lines) and corrects mis-heard words so each line makes sense on its own and within the song. Line count, order and timing stay the transcript's; a line the model leaves empty or returns invalid keeps its transcribed text, and any failure keeps the whole transcript.

@@ -60,3 +60,26 @@ def test_success_does_not_consult_evidence():
         raise AssertionError("Should not run")
 
     assert recover_window(lambda a, b: ["lyrics"], 0, 60, retry_policy=policy) == ["lyrics"]
+
+
+def _activity(values):
+    return {
+        "method": "discogs-effnet_voice_instrumental",
+        "windows": [
+            {"start_seconds": i * 2.0, "end_seconds": i * 2.0 + 2.064, "vocal_activation": v}
+            for i, v in enumerate(values)
+        ],
+    }
+
+
+def test_instrumental_song_needs_few_vocal_windows_and_low_mean():
+    from echora_analysis.transcription_evidence import instrumental_song
+
+    quiet = [0.02] * 95 + [0.8] * 2 + [0.3] * 3
+    assert instrumental_song(_activity(quiet))["decision"] == "instrumental"
+    assert instrumental_song(_activity([0.02] * 90 + [0.9] * 10)) is None  # 10% clearly vocal
+    assert instrumental_song(_activity([0.2] * 100)) is None  # mean too high
+    assert instrumental_song(_activity([0.01] * 10)) is None  # too little evidence
+    assert instrumental_song(_activity([0.01] * 50 + [float("nan")])) is None
+    assert instrumental_song({"method": "other", "windows": []}) is None
+    assert instrumental_song(None) is None
