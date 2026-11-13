@@ -105,7 +105,7 @@ Work runs in durable background batches. A failed track doesn't block the others
 | Essentia MELODIA | Melody contours for hum search and the melody line |
 | [fastText LID-176](https://fasttext.cc/docs/en/language-identification.html) · [IndicLID](https://github.com/AI4Bharat/IndicLID) | Lyrics language, including romanized Indic text |
 | [Echora Kara 300M](https://huggingface.co/hcxlabs/echora-kara-300m) ([code](https://github.com/hcx-labs/echora-kara)) | Syllable timing for karaoke |
-| [Echora MOSS transcriber](https://huggingface.co/hcX02/echora-moss-0.9b-multilingual-lyrics-transcriber) | Writing lyrics for vocal tracks that have none (optional) |
+| [Echora Kiki](https://huggingface.co/hcxlabs/echora-kiki) | Writing lyrics for vocal tracks that have none (optional) |
 | [NMFP](https://github.com/raraz15/neural-music-fp) recording encoder | Identify song (opt-in) |
 | [LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) via ComfyUI | Motion artwork (optional, needs a 24 GB GPU) |
 

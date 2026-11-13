@@ -7,8 +7,8 @@ The analysis package can recover lyrics with shared Mel-Band Roformer vocals at 
 Compose defaults to the published checkpoint:
 
 ```dotenv
-MOSS_MODEL_ID=hcX02/echora-moss-0.9b-multilingual-lyrics-transcriber
-MOSS_REVISION=1cf9dc6d910a6c90c82d8ddc86b83e1533f39f4e
+MOSS_MODEL_ID=hcxlabs/echora-kiki
+MOSS_REVISION=b35a2d893c8c287c6f77da7c2931ac17df0b90df
 ECHORA_BATCH_SIZE=128
 ```
 
@@ -38,6 +38,13 @@ Library import/sync and lyrics backfill retrieve source lyrics first. For tracks
 Provider misses do not erase existing lyrics. AI candidates cannot overwrite existing nonempty lyrics. The karaoke stage merges its own provenance and retains the AI flag. The fullscreen player shows a notice in both synced and karaoke views, on desktop and mobile.
 
 The job batch default is 128 tracks, not a GPU inference batch of 128. Inference remains sequential and cancellation is checked between windows and phases. Failed tracks remain eligible for retry. Transcription is disabled when the model configuration is empty.
+
+
+## External AI refinement
+
+When External AI is enabled, each new AI transcript gets a second pass during the same sync, after transcription releases its models and before lyrics are embedded, translated and aligned for karaoke. The configured model reads the whole song (title, artist, detected languages and the timed lines) and corrects mis-heard words so each line makes sense on its own and within the song. Line count, order and timing stay the transcript's; a line the model leaves empty or returns invalid keeps its transcribed text, and any failure keeps the whole transcript.
+
+The switch and the prompt are under Settings → External AI → Transcription refinement. It is on by default and acts only while External AI is enabled; the response format is appended in code, so an edited prompt cannot break it. The lyrics record keeps the original transcript lines, the model's song summary and the prompt revision under `transcription.refinement`.
 
 ## Limitations
 

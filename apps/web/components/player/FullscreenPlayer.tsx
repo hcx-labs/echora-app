@@ -13,6 +13,7 @@ import {
   Play,
   SkipBack,
   SkipForward,
+  TextQuote,
 } from "lucide-react";
 import { sizedPlayerCoverArtUrl } from "../media/coverArt";
 import LoadingImage from "../media/LoadingImage";
@@ -129,6 +130,8 @@ type LyricsLine = {
 };
 type LyricsTextSize = "small" | "normal" | "large";
 const lyricsSizeStorageKey = "echora:lyrics-text-size";
+const STAGE_STORAGE_KEY = "echora:fullscreen-stage";
+
 const lyricsSizeClasses: Record<LyricsTextSize, string> = {
   small: styles.lyricsSmall,
   normal: styles.lyricsNormal,
@@ -151,6 +154,22 @@ export default function FullscreenPlayer() {
     };
   }, [compact]);
   const [panel, setPanel] = useState<"lyrics" | "queue" | null>(null);
+  // Stage view: the cover melts into the background and the lyrics take the whole stage.
+  // Remembered per browser; storage can be unavailable (private windows), so it is optional.
+  const [stageMode, setStageMode] = useState(() => {
+    try {
+      return typeof window !== "undefined" && localStorage.getItem(STAGE_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleStage = () =>
+    setStageMode((current) => {
+      try {
+        localStorage.setItem(STAGE_STORAGE_KEY, current ? "0" : "1");
+      } catch {}
+      return !current;
+    });
   const [showTranslation, setShowTranslation] = useState(false);
   const [translationLanguage, setTranslationLanguage] = useState("");
   const [karaokeMode, setKaraokeMode] = useState(true);
@@ -381,6 +400,27 @@ export default function FullscreenPlayer() {
   const lineSinging = singingFlag === "1";
   // The line before is still being sung (backing vocals running past this line's start).
   const previousSinging = previousFlag === "1";
+  const stageCover =
+    stageMode && !compact && player.track?.coverUrl
+      ? sizedPlayerCoverArtUrl(player.track.coverUrl, 1200)
+      : "";
+  // The cover fades in once it has actually loaded (cached or fetched), never pops in half-drawn.
+  const [stageCoverLoaded, setStageCoverLoaded] = useState("");
+  useEffect(() => {
+    if (!stageCover) return;
+    let current = true;
+    const image = new Image();
+    image.src = stageCover;
+    image
+      .decode()
+      .catch(() => undefined)
+      .then(() => {
+        if (current) setStageCoverLoaded(stageCover);
+      });
+    return () => {
+      current = false;
+    };
+  }, [stageCover]);
   if (!player.track) return null;
   const fullCover = player.track.coverUrl
     ? sizedPlayerCoverArtUrl(player.track.coverUrl, 1200)
@@ -505,6 +545,8 @@ export default function FullscreenPlayer() {
     : [];
   // Lyrics lead when there are any; otherwise the panel opens on the queue.
   const activePanel = panel ?? (hasLyrics || player.lyricsLoading ? "lyrics" : "queue");
+  // Desktop only, and only while lyrics are on screen: Up next keeps the normal layout.
+  const staged = stageMode && !compact && activePanel === "lyrics" && hasLyrics;
   const upcoming = Math.max(0, player.queue.length - player.queueIndex - 1);
   const lyricsControls = (
     <>
@@ -530,6 +572,27 @@ export default function FullscreenPlayer() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
+      )}
+      {hasLyrics && !compact && (
+        // An on/off view beside Karaoke / Lines (it works with either), in the same frame.
+        <div
+          data-slot="tabs-list"
+          data-variant="segmented"
+          className={`${tabsListVariants({ variant: "segmented" })} ${styles.segmented}`}
+        >
+          <button
+            type="button"
+            data-slot="tabs-trigger"
+            data-state={staged ? "active" : "inactive"}
+            className={styles.stageTrigger}
+            aria-pressed={staged}
+            title={staged ? "Show artwork" : "Stage view: lyrics take centre stage"}
+            onClick={toggleStage}
+          >
+            <TextQuote />
+            <span className={styles.optionLabel}>Stage</span>
+          </button>
+        </div>
       )}
       {hasLyrics && (
         // Built from the same frame and trigger styles as the Karaoke / Lines group beside it.
@@ -915,10 +978,20 @@ export default function FullscreenPlayer() {
         <main
           ref={dialogRef}
           tabIndex={-1}
-          className={`${styles.player} ${compact ? styles.mobile : ""} ${motionStyles.surface} ${closing ? `${styles.closing} ${motionStyles.closing}` : ""}`}
+          className={`${styles.player} ${compact ? styles.mobile : ""} ${staged ? styles.staged : ""} ${motionStyles.surface} ${closing ? `${styles.closing} ${motionStyles.closing}` : ""}`}
           aria-label="Now playing"
         >
           <DialogTitle className="sr-only">Now playing</DialogTitle>
+          {staged && fullCover && (
+            <div
+              key={`stage-${player.track.id}`}
+              className={styles.stageBackdrop}
+              style={{ "--stage-cover": `url("${fullCover}")` } as CSSProperties}
+              data-playing={player.playing}
+              data-loaded={stageCoverLoaded === fullCover}
+              aria-hidden="true"
+            />
+          )}
           {karaokeMode && karaokeAvailable && (
             <LyricsGlow container={dialogRef} playing={player.playing} />
           )}

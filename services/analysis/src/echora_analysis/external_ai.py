@@ -5,6 +5,7 @@ Use network policy to restrict it where needed. HTTP exposes keys/lyrics on the
 network; prefer HTTPS off-host. Never log request bodies or authorization headers.
 URL is the API base (e.g. http://localhost:8000/v1), not a completion URL.
 """
+
 from __future__ import annotations
 
 import re
@@ -15,7 +16,15 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
-DEFAULT_PROMPT = 'Translate the song into natural, expressive lyrics that feel at home in the target language. Use the whole song for context. Aim to carry its meaning, emotion, imagery, voice, and energy rather than translating word for word. You may reshape phrasing, rhythm, rhyme, slang, and punctuation to make each line flow and sing naturally. Preserve recurring hooks in a recognizable way, but adapt them when the context calls for it.\n\nThe one structural constraint: each source line must produce exactly one translated line, in the same order. Do not merge, split, skip, or add lines. Preserve any supplied line IDs and follow the requested output format. Return only the translation.'
+DEFAULT_PROMPT = "Translate the song into natural, expressive lyrics that feel at home in the target language. Use the whole song for context. Aim to carry its meaning, emotion, imagery, voice, and energy rather than translating word for word. You may reshape phrasing, rhythm, rhyme, slang, and punctuation to make each line flow and sing naturally. Preserve recurring hooks in a recognizable way, but adapt them when the context calls for it.\n\nThe one structural constraint: each source line must produce exactly one translated line, in the same order. Do not merge, split, skip, or add lines. Preserve any supplied line IDs and follow the requested output format. Return only the translation."
+
+# Second pass over AI lyric transcriptions. The response contract is appended in code
+# (transcription_refinement.py), so an edited prompt cannot break the output format.
+DEFAULT_TRANSCRIPTION_PROMPT = """You proofread automatic lyric transcriptions of songs. The transcript was produced by a speech model listening to the song. It is mostly right, but some words are mis-heard.
+
+Work in two steps. First read the whole transcript and work out what the song is about: its story or theme, who is speaking to whom, recurring images and phrases, the chorus. Write this as a short summary. Then go line by line. A line must make sense on its own and in the context of the whole song. Where it does not, fix the mis-heard words with words that sound alike and fit the line, the neighbouring lines and the song (its theme, who is addressed, tense and person, recurring phrases). Fix as much of a line as that needs, but no more.
+
+Keep the words that are right; never rephrase a line that already makes sense, and never translate. Spell repeated lines (choruses, hooks) identically each time they are sung the same way. Write every line in the song's main script, keeping the same words. If you know this song's lyrics, they can help you choose between sound-alike words; never replace a line with what you remember when it does not sound like the transcript. Keep backing vocals in parentheses. Leave casing and punctuation as they are unless a fix needs it. If a line is right or you are unsure, return it unchanged."""
 
 
 class LanguagePair(BaseModel):
@@ -45,6 +54,11 @@ class ExternalAISettings(BaseModel):
     model: str = Field(default="", max_length=200)
     prompt: str = Field(default=DEFAULT_PROMPT, min_length=1, max_length=8000)
     language_pairs: list[LanguagePair] = Field(default_factory=list, max_length=64)
+    # On by default, but only acts while External AI itself is enabled.
+    transcription_refinement: bool = True
+    transcription_prompt: str = Field(
+        default=DEFAULT_TRANSCRIPTION_PROMPT, min_length=1, max_length=8000
+    )
 
     @field_validator("url")
     @classmethod
@@ -53,17 +67,25 @@ class ExternalAISettings(BaseModel):
             return value
         try:
             parsed = urlsplit(value)
-            if (any(c.isspace() or ord(c) < 32 for c in value) or "\\" in value
-                    or parsed.scheme not in {"http", "https"} or not parsed.hostname
-                    or parsed.username is not None or parsed.password is not None
-                    or "?" in value or "#" in value):
+            if (
+                any(c.isspace() or ord(c) < 32 for c in value)
+                or "\\" in value
+                or parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or "?" in value
+                or "#" in value
+            ):
                 raise ValueError()
             _ = parsed.port
         except ValueError:
-            raise ValueError("Expected an HTTP(S) base URL without userinfo, query or fragment") from None
+            raise ValueError(
+                "Expected an HTTP(S) base URL without userinfo, query or fragment"
+            ) from None
         return value.rstrip("/")
 
-    @field_validator("model", "prompt")
+    @field_validator("model", "prompt", "transcription_prompt")
     @classmethod
     def trim(cls, value):
         return value.strip()
@@ -73,8 +95,8 @@ class ExternalAISettings(BaseModel):
         pairs = [(p.source, p.target) for p in self.language_pairs]
         if len(set(pairs)) != len(pairs):
             raise ValueError("Duplicate language pair")
-        if not self.prompt or (self.enabled and not self.url):
-            raise ValueError("Enabled API requires a URL; prompt cannot be blank")
+        if not self.prompt or not self.transcription_prompt or (self.enabled and not self.url):
+            raise ValueError("Enabled API requires a URL; prompts cannot be blank")
         return self
 
 
@@ -114,6 +136,19 @@ class TranslationUpdate(BaseModel):
         return self
 
 
+class TranscriptionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    transcription_refinement: bool = True
+    transcription_prompt: str = Field(
+        default=DEFAULT_TRANSCRIPTION_PROMPT, min_length=1, max_length=8000
+    )
+
+    @model_validator(mode="after")
+    def coherent(self):
+        self.transcription_prompt = ExternalAISettings(**self.model_dump()).transcription_prompt
+        return self
+
+
 class RedactedSettingsRoute(APIRoute):
     def get_route_handler(self):
         handler = super().get_route_handler()
@@ -131,7 +166,9 @@ class RedactedSettingsRoute(APIRoute):
 def router(require_user, cipher):
     from . import translation_storage as storage
 
-    api = APIRouter(prefix="/settings/external-ai", tags=["settings"], route_class=RedactedSettingsRoute)
+    api = APIRouter(
+        prefix="/settings/external-ai", tags=["settings"], route_class=RedactedSettingsRoute
+    )
 
     def admin(user=Depends(require_user)):
         if not user.get("is_admin"):
@@ -160,6 +197,16 @@ def router(require_user, cipher):
     def translation_response(value):
         return {key: value[key] for key in ("model", "prompt", "language_pairs")}
 
+    def transcription_response(value):
+        # `enabled` is read-only here: the section only acts while External AI is on.
+        return {
+            **{
+                key: value[key]
+                for key in ("enabled", "transcription_refinement", "transcription_prompt")
+            },
+            "default_transcription_prompt": DEFAULT_TRANSCRIPTION_PROMPT,
+        }
+
     @api.get("/endpoint")
     def read_endpoint(user=Depends(admin)):
         return endpoint_response(read_settings(user))
@@ -168,11 +215,21 @@ def router(require_user, cipher):
     def read_translation(user=Depends(admin)):
         return translation_response(read_settings(user))
 
+    @api.get("/transcription")
+    def read_transcription(user=Depends(admin)):
+        return transcription_response(read_settings(user))
+
+    @api.put("/transcription")
+    def write_transcription(body: TranscriptionUpdate, user=Depends(admin)):
+        return transcription_response(storage.save_section(body.model_dump()))
+
     @api.put("/endpoint")
     def write_endpoint(body: EndpointUpdate, user=Depends(admin)):
         secret = body.api_key.get_secret_value() if body.api_key is not None else None
         encrypted = cipher().encrypt(secret.encode()) if secret else None
-        return endpoint_response(storage.save_section(body.model_dump(), encrypted, replace_key=secret is not None))
+        return endpoint_response(
+            storage.save_section(body.model_dump(), encrypted, replace_key=secret is not None)
+        )
 
     @api.put("/translation")
     def write_translation(body: TranslationUpdate, user=Depends(admin)):
@@ -183,7 +240,9 @@ def router(require_user, cipher):
         try:
             count = storage.clear_translations()
         except RuntimeError:
-            raise HTTPException(409, "Wait for active sync and lyrics jobs to stop before clearing translations") from None
+            raise HTTPException(
+                409, "Wait for active sync and lyrics jobs to stop before clearing translations"
+            ) from None
         return {"deleted": count}
 
     return api

@@ -61,6 +61,87 @@ def _create_run(connection: psycopg.Connection, model: LyricsEmbeddingModel) -> 
         return cursor.fetchone()[0]
 
 
+def _provenance(result: dict[str, object], language_distribution: dict) -> dict[str, object]:
+    return {
+        "provider": "moss" if result.get("ai_generated") else "navidrome",
+        "endpoint": result.get("source"),
+        "ai_generated": bool(result.get("ai_generated")),
+        **({"transcription": result["transcription"]} if result.get("transcription") else {}),
+        "synced": result.get("synced"),
+        "lines": result.get("lines") or [],
+        **({"languages": language_distribution} if language_distribution else {}),
+    }
+
+
+def _language(language_distribution: dict, result: dict[str, object]) -> str | None:
+    language = language_distribution.get("primary_language") or result.get("language")
+    return None if language == "xxx" else language
+
+
+def _refine_transcripts(connection, items, summary, report) -> None:
+    """External AI second pass over this run's new AI transcripts, in place in `items`.
+
+    Runs after transcription has released its models and before embedding, so search,
+    translations and karaoke all use the corrected text. A failure keeps the transcript.
+    """
+    from . import main
+    from .transcription_refinement import RefinementError, enabled, refine
+    from .translation_storage import load_settings
+
+    try:
+        settings, encrypted = load_settings()
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Could not load External AI settings; transcripts stay unrefined"
+        )
+        return
+    if not items or not enabled(settings):
+        return
+    key = main._cipher().decrypt(bytes(encrypted)).decode() if encrypted else None
+    for index, (position, track_id, title, lyrics) in enumerate(items):
+        report(
+            {
+                "phase": "lyrics",
+                "message": f"Refining transcript for {title}",
+                "completed": index,
+                "total": len(items),
+                "unit": "tracks",
+            }
+        )
+        artist = connection.execute("SELECT artist FROM tracks WHERE id=%s", (track_id,)).fetchone()
+        try:
+            refined = refine(
+                settings,
+                key,
+                lyrics,
+                title=title,
+                artist=(artist[0] if artist else "") or "",
+                languages=(detect_distribution(str(lyrics["text"])).get("languages") or {}),
+            )
+        except RefinementError as error:
+            summary["refinement_failed"] = summary.get("refinement_failed", 0) + 1
+            logging.getLogger(__name__).warning(
+                "Transcript refinement failed for %s: %s", track_id, error
+            )
+            continue
+        distribution = detect_distribution(str(refined["text"]))
+        updated = connection.execute(
+            """UPDATE lyrics SET text=%s, language=%s, provenance=%s
+               WHERE track_id=%s AND source='transcribed' AND text=%s""",
+            (
+                refined["text"],
+                _language(distribution, refined),
+                Jsonb(_provenance(refined, distribution)),
+                track_id,
+                lyrics["text"],
+            ),
+        ).rowcount
+        connection.commit()
+        if updated:
+            summary["refined"] = summary.get("refined", 0) + 1
+            items[index] = (position, track_id, title, refined)
+
+
 def _store_lyrics(
     connection: psycopg.Connection, track_id: uuid.UUID, result: dict[str, object]
 ) -> uuid.UUID | None:
@@ -68,9 +149,7 @@ def _store_lyrics(
     status = str(result.get("status") or "unavailable")
     source = "transcribed" if result.get("ai_generated") else "embedded" if text else "none"
     language_distribution = detect_distribution(str(text) if text else None)
-    language = language_distribution.get("primary_language") or result.get("language")
-    if language == "xxx":
-        language = None
+    language = _language(language_distribution, result)
     with connection.cursor() as cursor:
         cursor.execute(
             """INSERT INTO lyrics (track_id, source, text, language, provenance, availability_status)
@@ -86,21 +165,7 @@ def _store_lyrics(
                 source,
                 text,
                 language,
-                Jsonb(
-                    {
-                        "provider": "moss" if result.get("ai_generated") else "navidrome",
-                        "endpoint": result.get("source"),
-                        "ai_generated": bool(result.get("ai_generated")),
-                        **(
-                            {"transcription": result["transcription"]}
-                            if result.get("transcription")
-                            else {}
-                        ),
-                        "synced": result.get("synced"),
-                        "lines": result.get("lines") or [],
-                        **({"languages": language_distribution} if language_distribution else {}),
-                    }
-                ),
+                Jsonb(_provenance(result, language_distribution)),
                 status,
             ),
         )
@@ -194,6 +259,7 @@ def backfill_lyrics(
             tracks = cursor.fetchall()
         summary["total"] = len(tracks)
         embeddable: list[tuple[uuid.UUID, str, dict[str, object]]] = []
+        fresh_transcripts: set[uuid.UUID] = set()
         transcriptions = []
 
         def accept_lyrics(track_id, title, lyrics, stored=False):
@@ -207,6 +273,8 @@ def backfill_lyrics(
             summary[status] = summary.get(status, 0) + 1
             if lyrics.get("text"):
                 embeddable.append((track_id, title, lyrics))
+                if not stored and lyrics.get("ai_generated") and lyrics.get("lines"):
+                    fresh_transcripts.add(track_id)
             connection.commit()
 
         for index, (track_id, external_id, title) in enumerate(tracks):
@@ -488,6 +556,11 @@ def backfill_lyrics(
 
                     _stop_fa_kara_worker()
 
+        fresh = [(i, *item) for i, item in enumerate(embeddable) if item[0] in fresh_transcripts]
+        if fresh:
+            _refine_transcripts(connection, fresh, summary, report)
+            for position, track_id, title, lyrics in fresh:
+                embeddable[position] = (track_id, title, lyrics)
         if not embeddable:
             return summary
         device = "cuda" if torch.cuda.is_available() else "cpu"

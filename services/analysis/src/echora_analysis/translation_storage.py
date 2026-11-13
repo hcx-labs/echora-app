@@ -1,4 +1,5 @@
 """PostgreSQL persistence. Original lyrics are never written by this module."""
+
 import hashlib
 
 import psycopg
@@ -15,31 +16,56 @@ def load_settings():
         row = db.execute("SELECT * FROM external_ai_settings WHERE singleton").fetchone()
     if row is None:
         return ExternalAISettings(), None
-    return ExternalAISettings.model_validate({k: row[k] for k in ExternalAISettings.model_fields}), row["api_key_encrypted"]
+    return ExternalAISettings.model_validate(
+        {k: row[k] for k in ExternalAISettings.model_fields}
+    ), row["api_key_encrypted"]
 
 
 def save_settings(settings, encrypted_key, *, replace_key):
     with psycopg.connect(require_database_url()) as db:
-        row = db.execute("""
-            INSERT INTO external_ai_settings (singleton, enabled, url, model, prompt, language_pairs, api_key_encrypted)
-            VALUES (true, %s, %s, %s, %s, %s, %s)
+        row = db.execute(
+            """
+            INSERT INTO external_ai_settings (singleton, enabled, url, model, prompt, language_pairs,
+                transcription_refinement, transcription_prompt, api_key_encrypted)
+            VALUES (true, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (singleton) DO UPDATE SET enabled=EXCLUDED.enabled,
                 url=EXCLUDED.url, model=EXCLUDED.model, prompt=EXCLUDED.prompt,
-                language_pairs=EXCLUDED.language_pairs, updated_at=now(),
+                language_pairs=EXCLUDED.language_pairs, transcription_refinement=EXCLUDED.transcription_refinement,
+                transcription_prompt=EXCLUDED.transcription_prompt, updated_at=now(),
                 api_key_encrypted=CASE WHEN %s THEN EXCLUDED.api_key_encrypted ELSE external_ai_settings.api_key_encrypted END
             RETURNING api_key_encrypted IS NOT NULL
-        """, (settings.enabled, settings.url, settings.model, settings.prompt,
-              Jsonb([p.model_dump() for p in settings.language_pairs]), encrypted_key, replace_key)).fetchone()
+        """,
+            (
+                settings.enabled,
+                settings.url,
+                settings.model,
+                settings.prompt,
+                Jsonb([p.model_dump() for p in settings.language_pairs]),
+                settings.transcription_refinement,
+                settings.transcription_prompt,
+                encrypted_key,
+                replace_key,
+            ),
+        ).fetchone()
     return row[0]
 
 
-def save_translation(track_id, pair: LanguagePair, source_lines: list[str], translated_lines,
-                     *, model: str, prompt: str, provenance: str = "ai"):
+def save_translation(
+    track_id,
+    pair: LanguagePair,
+    source_lines: list[str],
+    translated_lines,
+    *,
+    model: str,
+    prompt: str,
+    provenance: str = "ai",
+):
     if provenance not in {"ai", "provider"}:
         raise ValueError("Invalid provenance")
     lines = validate_lines(translated_lines, len(source_lines))
     with psycopg.connect(require_database_url()) as db:
-        db.execute("""
+        db.execute(
+            """
             INSERT INTO lyric_translations
                 (track_id, source_language, target_language, provenance, lines, source_checksum, prompt_revision, model)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
@@ -47,24 +73,49 @@ def save_translation(track_id, pair: LanguagePair, source_lines: list[str], tran
                 lines=EXCLUDED.lines, source_checksum=EXCLUDED.source_checksum,
                 prompt_revision=EXCLUDED.prompt_revision, model=EXCLUDED.model,
                 status='ready', error_code=NULL, failed_at=NULL, updated_at=now()
-        """, (track_id, pair.source, pair.target, provenance, Jsonb(lines), source_checksum(source_lines),
-              hashlib.sha256(prompt.encode()).hexdigest(), model))
+        """,
+            (
+                track_id,
+                pair.source,
+                pair.target,
+                provenance,
+                Jsonb(lines),
+                source_checksum(source_lines),
+                hashlib.sha256(prompt.encode()).hexdigest(),
+                model,
+            ),
+        )
 
 
 def load_translations(track_id, source_lines: list[str]):
     """Refresh staleness against resolved source text before exposing translations."""
     checksum = source_checksum(source_lines)
     with psycopg.connect(require_database_url(), row_factory=dict_row) as db:
-        db.execute("""UPDATE lyric_translations SET status='stale', updated_at=now()
-                      WHERE track_id=%s AND source_checksum<>%s AND status='ready'""", (track_id, checksum))
-        return db.execute("SELECT * FROM lyric_translations WHERE track_id=%s ORDER BY source_language, target_language, provenance", (track_id,)).fetchall()
+        db.execute(
+            """UPDATE lyric_translations SET status='stale', updated_at=now()
+                      WHERE track_id=%s AND source_checksum<>%s AND status='ready'""",
+            (track_id, checksum),
+        )
+        return db.execute(
+            "SELECT * FROM lyric_translations WHERE track_id=%s ORDER BY source_language, target_language, provenance",
+            (track_id,),
+        ).fetchall()
 
 
 def save_section(values, encrypted_key=None, *, replace_key=False):
     """Update only submitted section columns, inside one transaction."""
     from psycopg import sql
     from .external_ai import DEFAULT_PROMPT
-    allowed = {"enabled", "url", "model", "prompt", "language_pairs"}
+
+    allowed = {
+        "enabled",
+        "url",
+        "model",
+        "prompt",
+        "language_pairs",
+        "transcription_refinement",
+        "transcription_prompt",
+    }
     if not values or not set(values) <= allowed:
         raise ValueError("Invalid settings fields")
     values = dict(values)
@@ -73,10 +124,20 @@ def save_section(values, encrypted_key=None, *, replace_key=False):
     if replace_key:
         values["api_key_encrypted"] = encrypted_key
     with psycopg.connect(require_database_url(), row_factory=dict_row) as db:
-        db.execute("INSERT INTO external_ai_settings (prompt) VALUES (%s) ON CONFLICT DO NOTHING", (DEFAULT_PROMPT,))
+        db.execute(
+            "INSERT INTO external_ai_settings (prompt) VALUES (%s) ON CONFLICT DO NOTHING",
+            (DEFAULT_PROMPT,),
+        )
         assignments = sql.SQL(", ").join(sql.SQL("{}=%s").format(sql.Identifier(k)) for k in values)
-        row = db.execute(sql.SQL("UPDATE external_ai_settings SET {}, updated_at=now() WHERE singleton RETURNING *").format(assignments), list(values.values())).fetchone()
-    settings = ExternalAISettings.model_validate({k: row[k] for k in ExternalAISettings.model_fields})
+        row = db.execute(
+            sql.SQL(
+                "UPDATE external_ai_settings SET {}, updated_at=now() WHERE singleton RETURNING *"
+            ).format(assignments),
+            list(values.values()),
+        ).fetchone()
+    settings = ExternalAISettings.model_validate(
+        {k: row[k] for k in ExternalAISettings.model_fields}
+    )
     return {**settings.model_dump(), "has_key": bool(row["api_key_encrypted"])}
 
 
@@ -90,5 +151,5 @@ def clear_translations():
                  OR (kind='analysis_batch' AND payload->>'operation' IN ('navidrome_sync','import','lyrics_backfill')))
             LIMIT 1""").fetchone()
         if active:
-            raise RuntimeError('translation_jobs_active')
+            raise RuntimeError("translation_jobs_active")
         return db.execute("DELETE FROM lyric_translations").rowcount

@@ -112,8 +112,9 @@ function fillPaths(boxes: Box[], amount: number, rtl: boolean, now: number, inde
     const fill = Math.max(0, Math.min(box.width, remaining));
     remaining -= box.width;
     if (fill <= 0) return "";
-    const top = box.y - 2,
-      bottom = box.y + box.height + 2;
+    // Right-to-left scripts (Nastaliq especially) draw well above and below their line box.
+    const top = box.y - (rtl ? box.height * 0.45 : 2),
+      bottom = box.y + box.height + (rtl ? box.height * 0.35 : 2);
     const side = rtl ? box.x + box.width : box.x;
     const edge = side + (rtl ? -fill : fill);
     const amplitude = Math.min(5, fill * 0.15, (box.width - fill) * 0.15);
@@ -293,7 +294,7 @@ export default function KaraokeLine({ fragments, now = 0, clock, active, highlig
 
   return (
     <span ref={root} dir="auto" className={styles.line}>
-      <span ref={base}>
+      <span ref={base} className={styles.base}>
         <RubyText text={text} rubies={rubies} />
       </span>
       <span ref={paintLayer} className={styles.paint} aria-hidden="true" style={paint}>

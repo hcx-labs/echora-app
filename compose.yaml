@@ -80,8 +80,8 @@ services:
       ECHORA_PREPROCESS_DIR: /data/preprocessed
       ECHORA_PREPROCESS_MAX_BYTES: ${ECHORA_PREPROCESS_MAX_BYTES:-21474836480}
       ECHORA_PREPROCESS_TTL_SECONDS: ${ECHORA_PREPROCESS_TTL_SECONDS:-604800}
-      MOSS_MODEL_ID: ${MOSS_MODEL_ID-hcX02/echora-moss-0.9b-multilingual-lyrics-transcriber}
-      MOSS_REVISION: ${MOSS_REVISION-1cf9dc6d910a6c90c82d8ddc86b83e1533f39f4e}
+      MOSS_MODEL_ID: ${MOSS_MODEL_ID-hcxlabs/echora-kiki}
+      MOSS_REVISION: ${MOSS_REVISION-b35a2d893c8c287c6f77da7c2931ac17df0b90df}
       HF_HOME: /models/huggingface
       HF_HUB_OFFLINE: "1"
       # Generated motion artwork videos, kept apart from model storage.
