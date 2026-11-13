@@ -695,3 +695,50 @@ def test_worker_environment_carries_the_decoder_weights(monkeypatch, tmp_path):
     assert pipeline._fa_kara_worker(tmp_path, "revision") is not worker
     assert seen[-1]["FA_KARA_TEXT_BONUS"] == "0.1" and "terminated" in seen
     get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    "language, detects", [(None, True), ("", True), ("und", True), ("en", False), ("es", False)]
+)
+def test_lyrics_without_a_language_ask_the_aligner_to_identify_them(
+    monkeypatch, tmp_path, language, detects
+):
+    """A known language the normalizer has no rules for ("es") stays on the generic path; only a
+    missing one is identified by the aligner, which would otherwise spell English letter by letter."""
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    get_settings.cache_clear()
+    snapshot = (
+        tmp_path
+        / "hub"
+        / f"models--{pipeline.DEFAULT_MODEL_ID.replace('/', '--')}"
+        / "snapshots"
+        / pipeline.DEFAULT_MODEL_REVISION
+    )
+    snapshot.mkdir(parents=True)
+    monkeypatch.setattr(pipeline, "_fa_kara_worker", lambda *args: object())
+    seen = []
+
+    def job(worker, argv):
+        seen.append(argv)
+        work = Path(argv[argv.index("--path_io") + 1])
+        (work / "o.ass").write_text("")
+        (work / "o_ruby.lrc").write_text("")
+        line = {
+            "source_index": 0,
+            "text": "Hello",
+            "tokens": [{"text": "Hello", "start_ms": 100, "end_ms": 200, "ctc_score": 0.9}],
+        }
+        (work / "o.alignment.json").write_text(
+            json.dumps({"schema_version": 1, "alignment": {"lines": [line]}})
+        )
+        return {"ok": True}
+
+    monkeypatch.setattr(pipeline, "_run_worker_job", job)
+    pipeline._run_fa_kara(b"audio", "Hello", language, [], False)
+    argv = seen[0]
+    assert ("--detect_language" in argv) is detects
+    if detects:
+        assert argv[argv.index("--lang") + 1] == "auto"
+        allowed = argv[argv.index("--detect_language") + 1].split(",")
+        assert {"en", "ja", "ko"} <= set(allowed)
+    get_settings.cache_clear()

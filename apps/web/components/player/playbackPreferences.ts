@@ -20,7 +20,7 @@ export type PlaybackPreferences = {
   trebleReactivity: number;
   animationSpeed: "slow" | "normal" | "fast";
   waveFrameRate: "30" | "60" | "uncapped";
-  karaokeHighlightStyle: "syllable" | "lava" | "bloom" | "strike";
+  karaokeHighlightStyle: "syllable" | "lava";
 };
 
 export const defaultPlaybackPreferences: PlaybackPreferences = {
@@ -43,6 +43,8 @@ export function readPlaybackPreferences(): PlaybackPreferences {
   try {
     const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
     if (stored.backdropPreset === "retrotrain") stored.backdropPreset = "lightningfall";
+    // Bloom and Strike were removed; anyone who picked one gets the default fill.
+    if (stored.karaokeHighlightStyle !== "syllable") delete stored.karaokeHighlightStyle;
     const opacity = stored.backdropOpacity ?? stored.fullscreenBackdropOpacity;
     return {
       ...defaultPlaybackPreferences,

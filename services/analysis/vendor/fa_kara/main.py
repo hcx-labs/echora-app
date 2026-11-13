@@ -138,6 +138,13 @@ def main(argv=None):
     parser.add_argument("--bpb", type=int, default=3, help="导唱指示灯的符号个数")
     parser.add_argument("--lang", default="auto", help="歌词语言")
     parser.add_argument(
+        "--detect_language",
+        default=None,
+        help="With --lang auto: comma-separated languages the lyrics may be identified as "
+        "(label_rules.document_language, lid.176.ftz). For songs stored without a language, "
+        "which would otherwise be spelled letter by letter",
+    )
+    parser.add_argument(
         "--label_rules",
         choices=("v1", "v2", "v2-orthographic", "v3", "v3-orthographic", "v3-sung"),
         default="v1",
@@ -327,6 +334,22 @@ def main(argv=None):
         lines = lrcfmt.utat_process(file.read()) if txt_format == "uta" else list(file)
     if txt_format == "moe":
         lines = [lrcfmt.moeg_process_line(line) for line in lines]
+    language_source = "given"
+    if args.detect_language and lrc_language == "auto":
+        import label_rules
+
+        language_source = "undetected"
+        try:
+            detected = label_rules.document_language(
+                [str(line) for line in lines],
+                frozenset(args.detect_language.split(",")) - {"auto"},
+            )
+        except RuntimeError as error:  # no lid.176.ftz / fasttext: keep the generic path
+            print(f"Language detection unavailable: {error}")
+            detected = None
+        if detected:
+            lrc_language, language_source = detected, "detected"
+            print(f"Lyrics stored without a language; identified as {detected}")
     result_list, source_texts = normalize_source_lines(
         lines, lrc_language, sokuon_split, hatsuon_split, args.label_rules
     )
@@ -417,6 +440,7 @@ def main(argv=None):
 
     y_processed = time_stretch_audio(audio_file, audio_speed)
     print("Aligning...")
+    opening_backing_lines = set()
     if fa_model_select == "yohane_hf":
         # One global CTC pass over the whole song, from the audio alone; the lyric lines
         # give line ranges and each line's pace.
@@ -431,6 +455,20 @@ def main(argv=None):
                 for i, tokens in enumerate(alignment_token_lines)
                 if tokens
             ]
+            # Backing lines written before the first lead line are sung alone, so the lead head
+            # hears them and the background head does not ("Ah-ah" over an intro): placed on the
+            # background head they were squeezed against the first lead line, whose first word took
+            # the intro instead. Keep them on the lead path, in order; they stay backing lines for
+            # display. FA_KARA_B0_OPENING_ON_LEAD=0 puts them back on the background head.
+            if os.environ.get("FA_KARA_B0_OPENING_ON_LEAD", "1") == "1" and not all(
+                background_lines
+            ):
+                with_tokens = [i for i, tokens in enumerate(alignment_token_lines) if tokens]
+                for position, flag in enumerate(background_lines):
+                    if not flag:
+                        break
+                    background_lines[position] = False
+                    opening_backing_lines.add(with_tokens[position])
         optional_tokens = None
         if args.optional_brackets:
             # Inline brackets ("I know ('til the day that I die)") are backing vocals the lead path
@@ -479,12 +517,13 @@ def main(argv=None):
             )
 
         alignment_results = run_alignment(background_lines)
-        # Default 120 ms (FA_KARA_CRAMMED_BACKGROUND_MS=0 turns it off): a line the lead path could
-        # only fit by cramming its words
-        # (mean word shorter than FA_KARA_CRAMMED_BACKGROUND_MS) is usually sung under the lead
-        # (Boy With Luv's later "Oh-whoa" chant, written between the lead lines). Decode it again as
-        # a background line, free to overlap its neighbours.
-        crammed_ms = float(os.environ.get("FA_KARA_CRAMMED_BACKGROUND_MS", "120"))
+        # Off by default (FA_KARA_CRAMMED_BACKGROUND_MS=120 restores it). The rule took a line the
+        # lead path could only fit by cramming its words (mean word shorter than the threshold) for
+        # a chant sung under the lead (Boy With Luv's later "Oh-whoa") and decoded it again as a
+        # background line, free to overlap its neighbours. Fast rap is naturally that quick, so the
+        # rule pulled real lead lines out of order and showed two lead lines at once: with it on,
+        # 175 of 1,078 library songs had overlapping lead lines (591 pairs; 42 with it off).
+        crammed_ms = float(os.environ.get("FA_KARA_CRAMMED_BACKGROUND_MS", "0"))
         if crammed_ms > 0 and args.background_decoding:
             flags = list(background_lines or [False] * sum(1 for t in alignment_token_lines if t))
             sizes = [len(tokens) for tokens in alignment_token_lines if tokens]
@@ -562,7 +601,7 @@ def main(argv=None):
                     ),
                 }
             )
-        line_is_background = any(
+        line_is_background = line_index in opening_backing_lines or any(
             alignment_results[token_offset + i].get("voice") == "background"
             for i in range(len(line_tokens))
         )
@@ -620,6 +659,8 @@ def main(argv=None):
             if (align_use_gpu or not hf_model_path) and __import__("torch").cuda.is_available()
             else "cpu",
             "normalization_language": lrc_language,
+            "normalization_language_source": language_source,
+            "opening_backing_lines_on_lead": len(opening_backing_lines),
             "audio_source": "demucs_vocals" if args.separate_vocals else "input_audio",
             "inference_config": vars(args),
         },

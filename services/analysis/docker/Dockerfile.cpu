@@ -17,7 +17,7 @@ RUN mkdir -p src/echora_analysis \
 # Label rules v3 (vendor/fa_kara/label_rules.py, FA_KARA_LABEL_RULES=v3 only): per-line language with
 # fastText lid.176.ftz (CC BY-SA 3.0), pinned by hash to the model the v3 manifest was built with.
 RUN mkdir -p /opt/fa_kara_models \
-    && /opt/venv/bin/python -c "import hashlib, urllib.request; data = urllib.request.urlopen('https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.ftz').read(); assert hashlib.sha256(data).hexdigest() == '8f3472cfe8738a7b6099e8e999c3cbfae0dcd15696aac7d7738a8039db603e83', 'lid.176.ftz hash'; open('/opt/fa_kara_models/lid.176.ftz', 'wb').write(data)"
+    && /opt/venv/bin/python -c "import hashlib, urllib.request; data = urllib.request.urlopen('https://huggingface.co/julien-c/fasttext-language-id/resolve/9f2e94d2fd6b2615d26f5ec5b34cf7e2f38cb86e/lid.176.ftz').read(); assert hashlib.sha256(data).hexdigest() == '8f3472cfe8738a7b6099e8e999c3cbfae0dcd15696aac7d7738a8039db603e83', 'lid.176.ftz hash'; open('/opt/fa_kara_models/lid.176.ftz', 'wb').write(data)"
 COPY services/analysis/src ./src
 COPY services/analysis/vendor ./vendor
 COPY services/analysis/alembic.ini ./alembic.ini

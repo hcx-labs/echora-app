@@ -37,7 +37,9 @@ FA_KARA_REVISION = "168ca5f01cecaa1290e31c0ce8dc44af8c7451bb"
 # v5: the Echora Kara model on the exact frame clock, with blank-free syllables, backing lines on
 # their own head, the in-line gap cost and the text head's bonus (v4: audio-only alignment with
 # minimum syllable durations and a +45 ms calibration).
-KARAOKE_PIPELINE_REVISION = "v7-echora-kara-mix"
+# v8: fast lead lines are no longer re-placed as backing lines (they overlapped their neighbours),
+# and backing lines before the first lead line are placed on the lead path.
+KARAOKE_PIPELINE_REVISION = "v8-echora-kara-mix"
 DEFAULT_MODEL_ID = "hcxlabs/echora-kara-300m"
 DEFAULT_MODEL_REVISION = "64087e1078b1aaf39cc1e6a9fc93874ca2f60e22"
 _DIALOGUE = re.compile(r"^Dialogue: [^,]*,([^,]+),([^,]+),(?:[^,]*,){6}(.*)$")
@@ -544,6 +546,10 @@ FA_KARA_LANGUAGES_V3 = FA_KARA_LANGUAGES_V2 | frozenset(
 )
 
 
+# Stored lyric languages that mean "not identified" (ISO 639 und; fastText's placeholder xxx).
+UNKNOWN_LANGUAGES = frozenset({"und", "xxx"})
+
+
 def fa_kara_languages(label_rules: str) -> frozenset[str]:
     return (
         FA_KARA_LANGUAGES_V1
@@ -613,6 +619,15 @@ def _run_fa_kara(
             if language in fa_kara_languages(get_settings().fa_kara_label_rules)
             else "auto",
         ]
+        if not language or language in UNKNOWN_LANGUAGES:
+            # Lyrics stored without a language (ingest-time detection failed or was unsure): the
+            # aligner identifies them itself rather than spell every word letter by letter.
+            command.extend(
+                [
+                    "--detect_language",
+                    ",".join(sorted(fa_kara_languages(get_settings().fa_kara_label_rules))),
+                ]
+            )
         if get_settings().fa_kara_label_rules != "v1":
             command.extend(["--label_rules", get_settings().fa_kara_label_rules])
         if aligner == "yohane":
