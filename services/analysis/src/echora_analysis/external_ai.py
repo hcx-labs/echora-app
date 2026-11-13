@@ -5,6 +5,7 @@ Use network policy to restrict it where needed. HTTP exposes keys/lyrics on the
 network; prefer HTTPS off-host. Never log request bodies or authorization headers.
 URL is the API base (e.g. http://localhost:8000/v1), not a completion URL.
 """
+
 from __future__ import annotations
 
 import re
@@ -15,7 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
-DEFAULT_PROMPT = 'Translate the song into natural, expressive lyrics that feel at home in the target language. Use the whole song for context. Aim to carry its meaning, emotion, imagery, voice, and energy rather than translating word for word. You may reshape phrasing, rhythm, rhyme, slang, and punctuation to make each line flow and sing naturally. Preserve recurring hooks in a recognizable way, but adapt them when the context calls for it.\n\nThe one structural constraint: each source line must produce exactly one translated line, in the same order. Do not merge, split, skip, or add lines. Preserve any supplied line IDs and follow the requested output format. Return only the translation.'
+DEFAULT_PROMPT = "Translate the song into natural, expressive lyrics that feel at home in the target language. Use the whole song for context. Aim to carry its meaning, emotion, imagery, voice, and energy rather than translating word for word. You may reshape phrasing, rhythm, rhyme, slang, and punctuation to make each line flow and sing naturally. Preserve recurring hooks in a recognizable way, but adapt them when the context calls for it.\n\nThe one structural constraint: each source line must produce exactly one translated line, in the same order. Do not merge, split, skip, or add lines. Preserve any supplied line IDs and follow the requested output format. Return only the translation."
 
 
 class LanguagePair(BaseModel):
@@ -53,14 +54,22 @@ class ExternalAISettings(BaseModel):
             return value
         try:
             parsed = urlsplit(value)
-            if (any(c.isspace() or ord(c) < 32 for c in value) or "\\" in value
-                    or parsed.scheme not in {"http", "https"} or not parsed.hostname
-                    or parsed.username is not None or parsed.password is not None
-                    or "?" in value or "#" in value):
+            if (
+                any(c.isspace() or ord(c) < 32 for c in value)
+                or "\\" in value
+                or parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or "?" in value
+                or "#" in value
+            ):
                 raise ValueError()
             _ = parsed.port
         except ValueError:
-            raise ValueError("Expected an HTTP(S) base URL without userinfo, query or fragment") from None
+            raise ValueError(
+                "Expected an HTTP(S) base URL without userinfo, query or fragment"
+            ) from None
         return value.rstrip("/")
 
     @field_validator("model", "prompt")
@@ -131,7 +140,9 @@ class RedactedSettingsRoute(APIRoute):
 def router(require_user, cipher):
     from . import translation_storage as storage
 
-    api = APIRouter(prefix="/settings/external-ai", tags=["settings"], route_class=RedactedSettingsRoute)
+    api = APIRouter(
+        prefix="/settings/external-ai", tags=["settings"], route_class=RedactedSettingsRoute
+    )
 
     def admin(user=Depends(require_user)):
         if not user.get("is_admin"):
@@ -172,7 +183,9 @@ def router(require_user, cipher):
     def write_endpoint(body: EndpointUpdate, user=Depends(admin)):
         secret = body.api_key.get_secret_value() if body.api_key is not None else None
         encrypted = cipher().encrypt(secret.encode()) if secret else None
-        return endpoint_response(storage.save_section(body.model_dump(), encrypted, replace_key=secret is not None))
+        return endpoint_response(
+            storage.save_section(body.model_dump(), encrypted, replace_key=secret is not None)
+        )
 
     @api.put("/translation")
     def write_translation(body: TranslationUpdate, user=Depends(admin)):
@@ -183,7 +196,9 @@ def router(require_user, cipher):
         try:
             count = storage.clear_translations()
         except RuntimeError:
-            raise HTTPException(409, "Wait for active sync and lyrics jobs to stop before clearing translations") from None
+            raise HTTPException(
+                409, "Wait for active sync and lyrics jobs to stop before clearing translations"
+            ) from None
         return {"deleted": count}
 
     return api
