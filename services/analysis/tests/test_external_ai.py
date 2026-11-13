@@ -264,6 +264,15 @@ def test_transport_failure_and_empty_translation():
     [
         ("endpoint", {"enabled", "url", "has_key"}),
         ("translation", {"model", "prompt", "language_pairs"}),
+        (
+            "transcription",
+            {
+                "enabled",
+                "transcription_refinement",
+                "transcription_prompt",
+                "default_transcription_prompt",
+            },
+        ),
     ],
 )
 def test_section_contracts(api, monkeypatch, section, keys):

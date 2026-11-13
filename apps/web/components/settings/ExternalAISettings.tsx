@@ -24,11 +24,17 @@ type Configuration = {
   prompt: string;
   language_pairs: LanguagePair[];
   has_key: boolean;
+  transcription_refinement: boolean;
+  transcription_prompt: string;
+  default_transcription_prompt?: string;
 };
+type Section = "endpoint" | "translation" | "transcription";
 const endpoint = "/analysis/settings/external-ai";
 const normalizeTag = (value: string) => value.trim().replaceAll("_", "-").toLowerCase();
 
-function validate(value: Configuration, section: "endpoint" | "translation"): string {
+function validate(value: Configuration, section: Section): string {
+  if (section === "transcription")
+    return value.transcription_prompt.trim() ? "" : "Enter a transcription refinement prompt.";
   if (section === "endpoint" && value.url) {
     try {
       const url = new URL(value.url);
@@ -64,7 +70,7 @@ function validate(value: Configuration, section: "endpoint" | "translation"): st
 
 async function request(
   options: RequestInit | undefined,
-  section: "/endpoint" | "/translation",
+  section: `/${Section}`,
 ): Promise<Partial<Configuration>> {
   const response = await fetch(endpoint + section, {
     ...options,
@@ -80,9 +86,16 @@ async function request(
     throw new Error("Could not access External AI settings. Try again.");
   }
   const body = await response.json();
-  return section === "/endpoint"
-    ? { enabled: body.enabled, url: body.url, has_key: body.has_key }
-    : { model: body.model, prompt: body.prompt, language_pairs: body.language_pairs };
+  if (section === "/endpoint")
+    return { enabled: body.enabled, url: body.url, has_key: body.has_key };
+  if (section === "/transcription")
+    return {
+      enabled: body.enabled,
+      transcription_refinement: body.transcription_refinement,
+      transcription_prompt: body.transcription_prompt,
+      default_transcription_prompt: body.default_transcription_prompt,
+    };
+  return { model: body.model, prompt: body.prompt, language_pairs: body.language_pairs };
 }
 
 export default function ExternalAISettings() {
@@ -90,11 +103,12 @@ export default function ExternalAISettings() {
     <div className={styles.sections}>
       <SettingsSection section="endpoint" />
       <SettingsSection section="translation" />
+      <SettingsSection section="transcription" />
     </div>
   );
 }
 
-function SettingsSection({ section }: { section: "endpoint" | "translation" }) {
+function SettingsSection({ section }: { section: Section }) {
   const [value, setValue] = useState<Configuration | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [apiKey, setApiKey] = useState("");
@@ -117,6 +131,8 @@ function SettingsSection({ section }: { section: "endpoint" | "translation" }) {
             model: "",
             prompt: "",
             language_pairs: [],
+            transcription_refinement: true,
+            transcription_prompt: "",
             ...result,
           });
       })
@@ -129,6 +145,13 @@ function SettingsSection({ section }: { section: "endpoint" | "translation" }) {
       });
     return () => controller.abort();
   }, [attempt, section]);
+
+  useEffect(() => {
+    if (section !== "transcription") return;
+    const follow = (event: Event) => update({ enabled: (event as CustomEvent<boolean>).detail });
+    window.addEventListener("echora:external-ai-enabled", follow);
+    return () => window.removeEventListener("echora:external-ai-enabled", follow);
+  }, [section]);
 
   function update(patch: Partial<Configuration>) {
     setValue((current) => (current ? { ...current, ...patch } : current));
@@ -149,14 +172,19 @@ function SettingsSection({ section }: { section: "endpoint" | "translation" }) {
             url: value.url,
             ...(clearKey ? { api_key: "" } : apiKey ? { api_key: apiKey } : {}),
           }
-        : {
-            model: value.model.trim(),
-            prompt: value.prompt.trim(),
-            language_pairs: value.language_pairs.map((pair) => ({
-              source: normalizeTag(pair.source),
-              target: normalizeTag(pair.target),
-            })),
-          };
+        : section === "transcription"
+          ? {
+              transcription_refinement: value.transcription_refinement,
+              transcription_prompt: value.transcription_prompt.trim(),
+            }
+          : {
+              model: value.model.trim(),
+              prompt: value.prompt.trim(),
+              language_pairs: value.language_pairs.map((pair) => ({
+                source: normalizeTag(pair.source),
+                target: normalizeTag(pair.target),
+              })),
+            };
     try {
       const result = await request(
         {
@@ -169,6 +197,10 @@ function SettingsSection({ section }: { section: "endpoint" | "translation" }) {
       setValue((current) => (current ? { ...current, ...result } : current));
       setApiKey("");
       setClearKey(false);
+      if (section === "endpoint")
+        window.dispatchEvent(
+          new CustomEvent("echora:external-ai-enabled", { detail: Boolean(result.enabled) }),
+        );
       toast.success("External AI settings saved");
     } catch (reason) {
       toast.error("Could not save External AI settings", {
@@ -209,7 +241,7 @@ function SettingsSection({ section }: { section: "endpoint" | "translation" }) {
     <form className={styles.form} onSubmit={save} aria-busy={loading || saving}>
       {loading ? (
         <LoadingState
-          label={`Loading ${section === "endpoint" ? "API endpoint" : "lyrics translation"} settings…`}
+          label={`Loading ${section === "endpoint" ? "API endpoint" : section === "translation" ? "lyrics translation" : "transcription refinement"} settings…`}
         />
       ) : (
         value && (
@@ -397,13 +429,69 @@ function SettingsSection({ section }: { section: "endpoint" | "translation" }) {
                   </SettingRow>
                 </section>
               )}
+              {section === "transcription" && (
+                <section aria-labelledby="external-ai-transcription-title">
+                  <SectionHeading
+                    id="external-ai-transcription-title"
+                    title="Transcription refinement"
+                    description="During sync, AI-transcribed lyrics get a second pass that fixes mis-heard words using the whole song as context. Line timing is kept. Uses the model set under Lyrics translation."
+                  />
+                  {!value.enabled && (
+                    <SettingsNotice tone="info" title="External AI is off">
+                      Refinement runs only while External AI is enabled.
+                    </SettingsNotice>
+                  )}
+                  <Toggle
+                    label="Refine AI transcriptions"
+                    checked={value.enabled && value.transcription_refinement}
+                    onChange={(transcription_refinement) => update({ transcription_refinement })}
+                    disabled={saving || !value.enabled}
+                  />
+                  <SettingRow
+                    label="Refinement prompt"
+                    htmlFor="external-ai-transcription-prompt"
+                    description={
+                      <span id="external-ai-transcription-prompt-help">
+                        Instructions for the second pass. The response format is added
+                        automatically.{" "}
+                        {value.default_transcription_prompt &&
+                          value.transcription_prompt.trim() !==
+                            value.default_transcription_prompt && (
+                            <button
+                              type="button"
+                              className="underline"
+                              onClick={() =>
+                                update({ transcription_prompt: value.default_transcription_prompt })
+                              }
+                            >
+                              Restore default
+                            </button>
+                          )}
+                      </span>
+                    }
+                  >
+                    <Textarea
+                      className={styles.prompt}
+                      id="external-ai-transcription-prompt"
+                      required
+                      maxLength={8000}
+                      rows={8}
+                      value={value.transcription_prompt}
+                      onChange={(event) => update({ transcription_prompt: event.target.value })}
+                      aria-describedby="external-ai-transcription-prompt-help"
+                    />
+                  </SettingRow>
+                </section>
+              )}
               <div className={layout.actions}>
                 <Button type="submit" loading={saving}>
                   {saving
                     ? "Saving…"
                     : section === "endpoint"
                       ? "Save API settings"
-                      : "Save translation settings"}
+                      : section === "translation"
+                        ? "Save translation settings"
+                        : "Save refinement settings"}
                 </Button>
               </div>
               {section === "translation" && (
