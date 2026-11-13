@@ -393,10 +393,12 @@ export default function FullscreenPlayer() {
   const position = useSyncExternalStore(
     subscribePlaybackTime,
     () => linePosition(timedLines, playbackTimeSnapshot() * 1000),
-    () => "-1:0:0",
+    () => "-1:0:0:0",
   );
   const activeLine = Number(position.split(":")[0]);
-  const [, singingFlag, previousFlag] = position.split(":");
+  const [, singingFlag, previousFlag, restingFlag] = position.split(":");
+  // A long instrumental stretch: Stage view lets the lyrics recede until just before the next line.
+  const resting = restingFlag === "1";
   const lineSinging = singingFlag === "1";
   // The line before is still being sung (backing vocals running past this line's start).
   const previousSinging = previousFlag === "1";
@@ -555,6 +557,7 @@ export default function FullscreenPlayer() {
         transcribed={aiLyrics}
         translatedLanguages={translations.map((item) => item.target_language)}
         motionArtwork={Boolean(currentMotion)}
+        alignedKaraoke={karaokeAvailable && currentLyrics?.karaoke_model !== "navidrome"}
       />
       {karaokeAvailable && (
         <Tabs
@@ -730,6 +733,7 @@ export default function FullscreenPlayer() {
     <div
       lang={lyricsLanguage}
       data-lyric-style={karaokeMode && karaokeAvailable ? highlightStyle : undefined}
+      data-resting={staged && resting ? "true" : undefined}
       className={`${styles.lyrics} ${karaokeMode && karaokeAvailable ? styles.karaoke : ""} ${lyricsSizeClasses[lyricsTextSize]} ${translationVisible ? styles.bilingual : ""}`}
     >
       {timedLines.length > 0 ? (
@@ -1072,7 +1076,11 @@ function linePosition(lines: LyricsLine[], nowMs: number): string {
     -1,
   );
   const line = lines[index];
-  if (!line) return "-1:0:0";
+  if (!line) {
+    const first = Number(lines[0]?.start_ms);
+    const intro = first >= REST_GAP_MS && first - nowMs > REST_REFOCUS_MS;
+    return `-1:0:0:${intro ? 1 : 0}`;
+  }
   const ends = [line.end_ms, ...(line.syllables || []).map((syllable) => syllable.end_ms)].filter(
     (value): value is number => Number.isFinite(value),
   );
@@ -1081,8 +1089,21 @@ function linePosition(lines: LyricsLine[], nowMs: number): string {
     -Infinity,
     ...(lines[index - 1]?.syllables || []).map((syllable) => syllable.end_ms),
   );
-  return `${index}:${nowMs < end ? 1 : 0}:${nowMs < previousEnd ? 1 : 0}`;
+  const next = Number(lines[index + 1]?.start_ms);
+  const resting =
+    Number.isFinite(end) &&
+    nowMs >= end + REST_SETTLE_MS &&
+    nowMs >= previousEnd &&
+    (!Number.isFinite(next) || (next - end > REST_GAP_MS && next - nowMs > REST_REFOCUS_MS));
+  return `${index}:${nowMs < end ? 1 : 0}:${nowMs < previousEnd ? 1 : 0}:${resting ? 1 : 0}`;
 }
+
+/** Stage view rests the lyrics in gaps longer than this between sung lines (and in intros/outros). */
+const REST_GAP_MS = 5000;
+/** How long after a line's last word before the lyrics start to recede. */
+const REST_SETTLE_MS = 700;
+/** How long before the next line the lyrics come back into focus. */
+const REST_REFOCUS_MS = 1200;
 
 /**
  * The clock is read at the start of a display frame, but the wipe it paints appears on screen a

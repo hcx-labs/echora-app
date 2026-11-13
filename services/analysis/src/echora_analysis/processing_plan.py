@@ -170,8 +170,14 @@ def plan_karaoke(
                   AND NOT EXISTS (
                     SELECT 1 FROM karaoke_lyrics_variants kv
                     WHERE kv.track_id=l.track_id AND kv.bounded=false
-                      AND kv.provenance->>'pipeline_revision'=%s
-                      AND (%s::text IS NULL OR kv.model_revision=%s::text)
+                      AND CASE WHEN l.provenance ? 'word_timing_digest'
+                        -- Word timing supplied with the lyrics is stored as is, never aligned.
+                        THEN kv.model='navidrome'
+                          AND kv.provenance->>'source_digest'=l.provenance->>'word_timing_digest'
+                        ELSE kv.model<>'navidrome'
+                          AND kv.provenance->>'pipeline_revision'=%s
+                          AND (%s::text IS NULL OR kv.model_revision=%s::text)
+                      END
                   ) ORDER BY ts.external_id""",
             [*parameters, pipeline_revision, model_revision, model_revision],
         )
