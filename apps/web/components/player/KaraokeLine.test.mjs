@@ -67,5 +67,15 @@ test('Japanese kanji carry furigana as native ruby in both text layers', () => {
   assert.deepEqual(lyrics.lineRubies(fragments), [{ from: 1, to: 3, text: 'かのじょ', morae }]);
   const html = renderToStaticMarkup(createElement(KaraokeLine, { fragments, now: 150, active: true, highlightStyle: 'lava' }));
   const ruby = '「<ruby>彼女<rt data-ruby="0">かのじょ</rt></ruby>は」';
-  assert.equal(html.split(ruby).length - 1, 2);
+  // Base, character glow (lava only) and sung colour layers each carry the same ruby.
+  assert.equal(html.split(ruby).length - 1, 3);
+  const syllableHtml = renderToStaticMarkup(createElement(KaraokeLine, { fragments, now: 150, active: true, highlightStyle: 'syllable' }));
+  assert.equal(syllableHtml.split(ruby).length - 1, 2);
+});
+
+test('lava fill glows the characters at its edge instead of placing a light spot', () => {
+  const syllables = [{ text: 'Hello ', start_ms: 0, end_ms: 1000 }, { text: 'world', start_ms: 1000, end_ms: 2000 }];
+  const fragments = lyrics.groupSyllablesByWord(syllables).flat();
+  const html = renderToStaticMarkup(createElement(KaraokeLine, { fragments, now: 500, active: true, highlightStyle: 'lava' }));
+  assert.ok(!html.includes('data-lyric-singing'));
 });

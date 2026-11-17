@@ -13,7 +13,6 @@ import {
   Play,
   SkipBack,
   SkipForward,
-  TextQuote,
 } from "lucide-react";
 import { sizedPlayerCoverArtUrl } from "../media/coverArt";
 import LoadingImage from "../media/LoadingImage";
@@ -37,6 +36,7 @@ import Artwork from "../ui/Artwork";
 import { Spinner } from "../ui/spinner";
 import AiLyricsIndicator from "./AiLyricsIndicator";
 import LyricsGlow from "./LyricsGlow";
+import { StageBackdrop } from "./StageBackdrop";
 import {
   defaultPlaybackPreferences,
   readPlaybackPreferences,
@@ -64,6 +64,7 @@ import {
   type LyricFragment,
 } from "./lyricWords";
 import KaraokeLine, { RubyText } from "./KaraokeLine";
+import SongInfo from "./SongInfo";
 import LyricsScroller from "./LyricsScroller";
 import WaveformSeek from "./WaveformSeek";
 import { formatDuration } from "../ui/TrackRow";
@@ -129,8 +130,9 @@ type LyricsLine = {
   syllables?: { start_ms: number; end_ms: number; text: string; voice?: number }[];
 };
 type LyricsTextSize = "small" | "normal" | "large";
+type Panel = "lyrics" | "queue" | "info";
+
 const lyricsSizeStorageKey = "echora:lyrics-text-size";
-const STAGE_STORAGE_KEY = "echora:fullscreen-stage";
 
 const lyricsSizeClasses: Record<LyricsTextSize, string> = {
   small: styles.lyricsSmall,
@@ -144,7 +146,6 @@ export default function FullscreenPlayer() {
   const compact = useCompactLayout();
   // Phone layout: the cover (or its motion loop), the lyrics, or the queue fill the middle.
   const [mobileView, setMobileView] = useState<"artwork" | "lyrics" | "queue">("artwork");
-  const artworkVisible = !compact || mobileView === "artwork";
   // On phones the player takes the whole screen and has its own controls: hide the player bar.
   useEffect(() => {
     if (!compact) return;
@@ -153,23 +154,13 @@ export default function FullscreenPlayer() {
       delete document.body.dataset.playerFullscreen;
     };
   }, [compact]);
-  const [panel, setPanel] = useState<"lyrics" | "queue" | null>(null);
-  // Stage view: the cover melts into the background and the lyrics take the whole stage.
-  // Remembered per browser; storage can be unavailable (private windows), so it is optional.
-  const [stageMode, setStageMode] = useState(() => {
-    try {
-      return typeof window !== "undefined" && localStorage.getItem(STAGE_STORAGE_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
-  const toggleStage = () =>
-    setStageMode((current) => {
-      try {
-        localStorage.setItem(STAGE_STORAGE_KEY, current ? "0" : "1");
-      } catch {}
-      return !current;
-    });
+  const [panel, setPanel] = useState<Panel | null>(null);
+  // Desktop is always Stage: the cover melts into the background and the panel takes the whole
+  // screen; the cover itself is shown only in the Song info tab.
+  const staged = !compact;
+  // Where the cover is on screen: phones show it in their artwork view, desktop in Song info.
+  // The motion loop restarts when it remounts.
+  const artworkVisible = compact ? mobileView === "artwork" : panel === "info";
   const [showTranslation, setShowTranslation] = useState(false);
   const [translationLanguage, setTranslationLanguage] = useState("");
   const [karaokeMode, setKaraokeMode] = useState(true);
@@ -403,9 +394,7 @@ export default function FullscreenPlayer() {
   // The line before is still being sung (backing vocals running past this line's start).
   const previousSinging = previousFlag === "1";
   const stageCover =
-    stageMode && !compact && player.track?.coverUrl
-      ? sizedPlayerCoverArtUrl(player.track.coverUrl, 1200)
-      : "";
+    staged && player.track?.coverUrl ? sizedPlayerCoverArtUrl(player.track.coverUrl, 1200) : "";
   // The cover fades in once it has actually loaded (cached or fetched), never pops in half-drawn.
   const [stageCoverLoaded, setStageCoverLoaded] = useState("");
   useEffect(() => {
@@ -547,8 +536,6 @@ export default function FullscreenPlayer() {
     : [];
   // Lyrics lead when there are any; otherwise the panel opens on the queue.
   const activePanel = panel ?? (hasLyrics || player.lyricsLoading ? "lyrics" : "queue");
-  // Desktop only, and only while lyrics are on screen: Up next keeps the normal layout.
-  const staged = stageMode && !compact && activePanel === "lyrics" && hasLyrics;
   const upcoming = Math.max(0, player.queue.length - player.queueIndex - 1);
   const lyricsControls = (
     <>
@@ -575,27 +562,6 @@ export default function FullscreenPlayer() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
-      )}
-      {hasLyrics && !compact && (
-        // An on/off view beside Karaoke / Lines (it works with either), in the same frame.
-        <div
-          data-slot="tabs-list"
-          data-variant="segmented"
-          className={`${tabsListVariants({ variant: "segmented" })} ${styles.segmented}`}
-        >
-          <button
-            type="button"
-            data-slot="tabs-trigger"
-            data-state={staged ? "active" : "inactive"}
-            className={styles.stageTrigger}
-            aria-pressed={staged}
-            title={staged ? "Show artwork" : "Stage view: lyrics take centre stage"}
-            onClick={toggleStage}
-          >
-            <TextQuote />
-            <span className={styles.optionLabel}>Stage</span>
-          </button>
-        </div>
       )}
       {hasLyrics && (
         // Built from the same frame and trigger styles as the Karaoke / Lines group beside it.
@@ -987,13 +953,11 @@ export default function FullscreenPlayer() {
         >
           <DialogTitle className="sr-only">Now playing</DialogTitle>
           {staged && fullCover && (
-            <div
-              key={`stage-${player.track.id}`}
-              className={styles.stageBackdrop}
-              style={{ "--stage-cover": `url("${fullCover}")` } as CSSProperties}
-              data-playing={player.playing}
-              data-loaded={stageCoverLoaded === fullCover}
-              aria-hidden="true"
+            // Not keyed by track: the renderer crossfades from one cover to the next.
+            <StageBackdrop
+              cover={fullCover}
+              playing={player.playing}
+              coverLoaded={stageCoverLoaded === fullCover}
             />
           )}
           {karaokeMode && karaokeAvailable && (
@@ -1003,42 +967,14 @@ export default function FullscreenPlayer() {
             mobileLayout
           ) : (
             <div className={`${styles.stage} ${motionStyles.content}`}>
-              <section className={styles.nowPlaying} aria-label="Track">
-                {renderArtwork(true)}
-                <div className={`motion-fade ${styles.meta}`} key={`meta-${player.track.id}`}>
-                  <h1 className={styles.title}>
-                    <FullscreenMarquee>{player.track.title}</FullscreenMarquee>
-                  </h1>
-                  <p className={styles.artist}>{player.track.artist || "Unknown artist"}</p>
-                  <p className={styles.album}>{player.track.album || "Unknown album"}</p>
-                  {(qualityParts.length > 0 || aiLyrics) && (
-                    <p className={styles.tags} aria-label="Audio quality">
-                      {qualityParts.map((part) => (
-                        <span key={part} className={styles.tag}>
-                          {part}
-                        </span>
-                      ))}
-                      {aiLyrics && (
-                        <span
-                          className={styles.tag}
-                          title="Lyrics were generated by AI and may be inaccurate"
-                        >
-                          AI lyrics
-                        </span>
-                      )}
-                    </p>
-                  )}
-                </div>
-              </section>
-
               <section
                 className={`${styles.panel} ${backdropMoving ? "" : styles.panelFlat}`}
-                aria-label="Lyrics and queue"
+                aria-label="Lyrics, queue and song info"
               >
                 <header className={styles.panelHeader}>
                   <Tabs
                     value={activePanel}
-                    onValueChange={(value) => setPanel(value as "lyrics" | "queue")}
+                    onValueChange={(value) => setPanel(value as Panel)}
                     className="gap-0"
                   >
                     <TabsList variant="line" aria-label="Panel" className={styles.panelTabs}>
@@ -1046,6 +982,7 @@ export default function FullscreenPlayer() {
                       <TabsTrigger value="queue">
                         Up next{upcoming > 0 && <span className={styles.count}>{upcoming}</span>}
                       </TabsTrigger>
+                      <TabsTrigger value="info">Song info</TabsTrigger>
                     </TabsList>
                   </Tabs>
                   {activePanel === "lyrics" && (
@@ -1053,7 +990,14 @@ export default function FullscreenPlayer() {
                   )}
                 </header>
                 <div className={`motion-fade ${styles.panelBody}`} key={activePanel}>
-                  {activePanel === "lyrics" ? lyricsBody : queueBody}
+                  {activePanel === "lyrics" ? (
+                    lyricsBody
+                  ) : activePanel === "queue" ? (
+                    queueBody
+                  ) : (
+                    // The cover (and its motion loop) lives here on desktop.
+                    <SongInfo track={player.track} artwork={renderArtwork(true)} />
+                  )}
                 </div>
               </section>
             </div>

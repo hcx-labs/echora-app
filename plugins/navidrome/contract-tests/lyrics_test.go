@@ -3,6 +3,7 @@ package contracttests
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/navidrome/navidrome/model"
@@ -44,8 +45,8 @@ func TestEchoraTTML(t *testing.T) {
 	}
 }
 
-// Backing vocals: an inline echo wrapped in a ttm:role="x-bg" span and a whole x-bg line
-// parse as cues of a background agent, the lead as the main agent.
+// Backing vocals: the lead words, then one ttm:role="x-bg" span, parse as cues of a background
+// agent after the main agent's; a whole x-bg line is all background. Echora drops the brackets.
 func TestEchoraTTMLBackingVocals(t *testing.T) {
 	contents, err := os.ReadFile("testdata/lyrics-backing.ttml")
 	if err != nil {
@@ -64,17 +65,22 @@ func TestEchoraTTMLBackingVocals(t *testing.T) {
 		roles[agent.ID] = agent.Role
 	}
 	lead := main.Line[0]
-	if lead.Value != "Lonely (so lonely) tonight" || len(lead.Cue) != 6 {
+	if lead.Value != "Lonely tonight so lonely" || len(lead.Cue) != 6 {
 		t.Fatalf("bad lead line: %+v", lead)
 	}
 	for i, cue := range lead.Cue {
-		backing := i >= 2 && i <= 4
+		backing := i >= 3
 		if (roles[cue.AgentID] == "bg") != backing {
 			t.Fatalf("cue %d %q: agent %q role %q, backing expected %v", i, cue.Value, cue.AgentID, roles[cue.AgentID], backing)
 		}
 	}
-	if *lead.Cue[2].Start != 1500 || *lead.Cue[4].End != 2400 {
-		t.Fatalf("bad echo timing: %+v", lead.Cue[2:5])
+	if *lead.Cue[3].Start != 1500 || *lead.Cue[5].End != 2400 {
+		t.Fatalf("bad echo timing: %+v", lead.Cue[3:6])
+	}
+	for _, cue := range append(lead.Cue, main.Line[1].Cue...) {
+		if strings.ContainsAny(cue.Value, "()（）") {
+			t.Fatalf("bracket in cue %q", cue.Value)
+		}
 	}
 	for _, cue := range main.Line[1].Cue {
 		if roles[cue.AgentID] != "bg" {

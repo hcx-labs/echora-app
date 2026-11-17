@@ -42,7 +42,9 @@ type Props = {
   highlightStyle: "lava" | "syllable";
 };
 
-type Paint = { path: string; glows: Box[] };
+/** The lava edge on its visual line: x of the edge, that line box's top and height. */
+type Edge = { x: number; top: number; height: number; rtl: boolean };
+type Paint = { path: string; glows: Box[]; edge: Edge | null };
 
 /** The sung part of each fragment as one clip path, and where the glow should sit. */
 function paintAt(
@@ -52,8 +54,9 @@ function paintAt(
   active: boolean,
   highlightStyle: "lava" | "syllable",
 ): Paint {
-  if (!geometry || geometry.source !== fragments) return { path: "", glows: [] };
+  if (!geometry || geometry.source !== fragments) return { path: "", glows: [], edge: null };
   const glows: Box[] = [];
+  let edge: Edge | null = null;
   const path = geometry.fragments
     .flatMap((boxes, index) => {
       const fragment = fragments[index];
@@ -75,8 +78,13 @@ function paintAt(
           let left = (total * fragmentProgress(now, fragment)) / 100;
           for (const box of boxes) {
             if (left <= box.width) {
-              const edge = fragmentRtl ? box.x + box.width - left : box.x + left;
-              glows.push({ x: edge, y: box.y + box.height / 2, width: 1, height: 1 });
+              // The sung letters just behind the edge glow; no light spot is placed (it read as a dot).
+              edge = {
+                x: fragmentRtl ? box.x + box.width - left : box.x + left,
+                top: box.y,
+                height: box.height,
+                rtl: fragmentRtl,
+              };
               break;
             }
             left -= box.width;
@@ -102,7 +110,26 @@ function paintAt(
     )
     .filter(Boolean)
     .join(" ");
-  return { path, glows };
+  return { path, glows, edge };
+}
+
+/** The glow is seen through one band: the edge's own line box (plus room for the glow above and
+ *  below), fading in over the last ~1.5 line heights of sung text and out at the edge, so
+ *  unsung letters and other lines never glow. */
+function glowBand(edge: Edge): Record<string, string> {
+  // Ends a little past the edge so the fade-out lands on it; the glyphs there are transparent.
+  const width = edge.height * 1.8;
+  const past = edge.height * 0.15;
+  // Barely taller than the line box: with tight line spacing anything more reaches the letters
+  // of the next or previous line (they would glow too). The mask also fades top and bottom.
+  const pad = edge.height * 0.08;
+  return {
+    "--glow-left": `${(edge.rtl ? edge.x - past : edge.x - width + past).toFixed(1)}px`,
+    "--glow-top": `${(edge.top - pad).toFixed(1)}px`,
+    "--glow-width": `${width.toFixed(1)}px`,
+    "--glow-height": `${(edge.height + pad * 2).toFixed(1)}px`,
+    "--glow-direction": edge.rtl ? "to left" : "to right",
+  };
 }
 
 /** Clip-path pieces covering the first `amount` pixels of `boxes`, with a gently moving edge. */
@@ -171,6 +198,7 @@ export default function KaraokeLine({ fragments, now = 0, clock, active, highlig
   const paintLayer = useRef<HTMLSpanElement>(null);
   const clipPath = useRef<SVGPathElement>(null);
   const glowLayer = useRef<HTMLSpanElement>(null);
+  const glowText = useRef<HTMLSpanElement>(null);
   const [geometry, setGeometry] = useState<Geometry | null>(null);
   const clipId = `karaoke-clip-${useId().replace(/[^\w-]/g, "")}`;
   const text = fragments.map((fragment) => fragment.text).join("");
@@ -241,8 +269,24 @@ export default function KaraokeLine({ fragments, now = 0, clock, active, highlig
     if (!clock) return;
     let lastPath: string | null = null;
     let lastGlows = "";
+    let lastEdge = "";
     const update = () => {
-      const { path, glows } = paintAt(geometry, fragments, clock.now(), active, highlightStyle);
+      const { path, glows, edge } = paintAt(
+        geometry,
+        fragments,
+        clock.now(),
+        active,
+        highlightStyle,
+      );
+      const edgeKey = edge ? `${edge.x.toFixed(1)},${edge.top},${edge.height}` : "";
+      const glowing = glowText.current;
+      if (edgeKey !== lastEdge && glowing) {
+        lastEdge = edgeKey;
+        if (edge)
+          for (const [name, value] of Object.entries(glowBand(edge)))
+            glowing.style.setProperty(name, value);
+        glowing.dataset.on = edge ? "true" : "false";
+      }
       if (path !== lastPath) {
         lastPath = path;
         clipPath.current?.setAttribute("d", path);
@@ -285,20 +329,33 @@ export default function KaraokeLine({ fragments, now = 0, clock, active, highlig
 
   // Without a clock (static rendering), paint once from `now`.
   const initial = clock
-    ? { path: "", glows: [] as Box[] }
+    ? { path: "", glows: [] as Box[], edge: null }
     : paintAt(geometry, fragments, now, active, highlightStyle);
   const paint: CSSProperties = {
     clipPath: initial.path ? `url(#${clipId})` : undefined,
     visibility: initial.path ? "visible" : "hidden",
   };
 
+  const lineText = <RubyText text={text} rubies={rubies} />;
   return (
     <span ref={root} dir="auto" className={styles.line}>
       <span ref={base} className={styles.base}>
-        <RubyText text={text} rubies={rubies} />
+        {lineText}
       </span>
+      {highlightStyle === "lava" && (
+        // Under the sung colour: a soft glow behind the letters around the lava edge.
+        <span
+          ref={glowText}
+          className={styles.glowText}
+          aria-hidden="true"
+          data-on={initial.edge ? "true" : "false"}
+          style={initial.edge ? (glowBand(initial.edge) as CSSProperties) : undefined}
+        >
+          {lineText}
+        </span>
+      )}
       <span ref={paintLayer} className={styles.paint} aria-hidden="true" style={paint}>
-        <RubyText text={text} rubies={rubies} />
+        {lineText}
       </span>
       <svg className={styles.clipDefs} aria-hidden="true" focusable="false">
         <clipPath id={clipId} clipPathUnits="userSpaceOnUse">

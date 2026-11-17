@@ -17,6 +17,56 @@
   color: #fff;
   opacity: 0.3;
 }
+/* Character glow for the lava fill: the sung letters themselves, in the accent colour with a
+   thin glow, seen only through a band on the edge's line that fades in from behind and stops at
+   the edge (KaraokeLine glowBand). Sits under the sung colour layer, so letters stay crisp. */
+.glowText {
+  position: absolute;
+  /* Larger than the line, so the halo of its first and last letters isn't cut off at the line's
+     edges (a mask clips to the element's box); the padding keeps the text where the line has it,
+     and the band is placed from the content box, the line's own box. */
+  inset: -0.5em;
+  padding: 0.5em;
+  pointer-events: none;
+  /* Only the glow: the crisp letters come from the sung colour layer above. Alpha via relative
+     colour, not a mix with "transparent", which left a dark rim around the blur. */
+  color: transparent;
+  /* Well under the fill's full strength, so it reads as a soft halo, not a second outline. */
+  text-shadow:
+    0 0 0.1em rgb(from var(--accent) r g b / 0.5),
+    0 0 0.3em rgb(from var(--accent) r g b / 0.22);
+  /* Fades in behind and out just before the wavy edge, so nothing cuts it off sharply. */
+  /* Two gradients over the same band, intersected: along the line it fades in and out at the
+     edge; across it, it fades at the top and bottom so neighbouring lines never catch the glow. */
+  --glow-along: linear-gradient(
+    var(--glow-direction, to right),
+    transparent,
+    #000 55%,
+    #000 75%,
+    transparent
+  );
+  --glow-across: linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent);
+  -webkit-mask-image: var(--glow-along), var(--glow-across);
+  mask-image: var(--glow-along), var(--glow-across);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: var(--glow-width, 0) var(--glow-height, 0);
+  mask-size: var(--glow-width, 0) var(--glow-height, 0);
+  -webkit-mask-position: var(--glow-left, 0) var(--glow-top, 0);
+  mask-position: var(--glow-left, 0) var(--glow-top, 0);
+  -webkit-mask-origin: content-box;
+  mask-origin: content-box;
+  opacity: 0;
+  transition: opacity 0.3s ease-out;
+}
+.glowText[data-on="true"] {
+  opacity: 1;
+}
+.glowText :global(rt) {
+  text-shadow: none;
+}
 .paint {
   position: absolute;
   inset: 0;

@@ -105,47 +105,83 @@ function bracketed(texts: string[]): boolean[] {
   });
 }
 
+const PUNCTUATION = ",.!?;:、。！？，";
+const OPENS = /[(（]/;
+const CLOSES = /[)）]/;
+
+/** Append a syllable with its brackets dropped, keeping one space between words and none
+ *  before punctuation ("far away (…), is" becomes "far away, is"). */
+function addTo(part: KaraokeSyllable[], syllable: KaraokeSyllable, raw: string) {
+  let text = raw.replace(BRACKETS, "").replace(/\s+/g, " ");
+  const last = part.at(-1);
+  if (!last || last.text.endsWith(" ")) text = text.trimStart();
+  if (last && PUNCTUATION.includes(text[0] ?? "") && last.text.endsWith(" "))
+    part[part.length - 1] = { ...last, text: last.text.trimEnd() };
+  if (!text.trim()) {
+    // A bracket alone or a gap: keep the word break, drop the syllable.
+    const previous = part.at(-1);
+    if (text && previous && !previous.text.endsWith(" "))
+      part[part.length - 1] = { ...previous, text: `${previous.text} ` };
+    return;
+  }
+  part.push({ ...syllable, text });
+}
+
+/** Close one backing part before the next: "hey" becomes "hey, ". */
+function endPart(part: KaraokeSyllable[]) {
+  const last = part[part.length - 1];
+  let text = last.text.trimEnd();
+  if (text && !PUNCTUATION.includes(text.at(-1)!)) text += ",";
+  part[part.length - 1] = { ...last, text: `${text} ` };
+}
+
 /** Backing vocals shown as their own, smaller line under the lead: syllables marked
  *  ``voice: 2`` and everything written in round brackets, which is always a backing vocal
  *  (also in lyrics stored before they were marked). The brackets themselves are dropped: the
- *  separate line says it already. A line that is bracketed as a whole has no lead part. */
+ *  separate line says it already. Each bracketed part is one backing part, and parts are joined
+ *  with commas: "Hello (hey) I am (hey)" is lead "Hello I am", backing "hey, hey". A line that
+ *  is bracketed as a whole has no lead part. Same rule as backing_vocals.separate_voices. */
 export function splitVoices(syllables: KaraokeSyllable[]): {
   lead: KaraokeSyllable[];
   backing: KaraokeSyllable[];
 } {
   const inBrackets = bracketed(syllables.map((syllable) => syllable.text));
-  const backing = syllables.map((syllable, index) => syllable.voice === 2 || inBrackets[index]);
-  if (!backing.some(Boolean)) return { lead: syllables, backing: [] };
-  const clean = (part: KaraokeSyllable[]) => {
-    const cleaned = part
-      .map((syllable) => ({ ...syllable, text: syllable.text.replace(BRACKETS, "") }))
-      .filter((syllable) => syllable.text.trim());
-    if (cleaned.length)
-      cleaned[cleaned.length - 1] = { ...cleaned.at(-1)!, text: cleaned.at(-1)!.text.trimEnd() };
-    return cleaned;
-  };
-  return {
-    lead: clean(syllables.filter((_, index) => !backing[index])),
-    backing: clean(syllables.filter((_, index) => backing[index])),
-  };
+  const isBacking = syllables.map((syllable, index) => syllable.voice === 2 || inBrackets[index]);
+  if (!isBacking.some(Boolean)) return { lead: syllables, backing: [] };
+  const lead: KaraokeSyllable[] = [];
+  const backing: KaraokeSyllable[] = [];
+  let newPart = false;
+  syllables.forEach((syllable, index) => {
+    if (isBacking[index]) {
+      if (backing.length && (newPart || OPENS.test(syllable.text))) endPart(backing);
+      newPart = CLOSES.test(syllable.text);
+      addTo(backing, syllable, syllable.text);
+    } else {
+      // Lead words between two backing runs split them into separate parts.
+      newPart = newPart || backing.length > 0;
+      addTo(lead, syllable, syllable.text);
+    }
+  });
+  for (const part of [lead, backing])
+    if (part.length) part[part.length - 1] = { ...part.at(-1)!, text: part.at(-1)!.text.trimEnd() };
+  return { lead, backing };
 }
 
 /** The same split for a line without syllables: its text outside and inside round brackets. */
 export function splitTextVoices(text: string): { lead: string; backing: string } {
-  if (!/[(（]/.test(text)) return { lead: text, backing: "" };
-  let depth = 0,
-    lead = "",
-    backing = "";
-  for (const character of text) {
-    if (character === "(" || character === "（") {
-      depth++;
-      if (depth === 1 && backing) backing += " ";
-    } else if (character === ")" || character === "）") depth = Math.max(0, depth - 1);
-    else if (depth > 0) backing += character;
-    else lead += character;
-  }
-  const tidy = (part: string) => part.replace(/\s+/g, " ").trim();
-  return { lead: tidy(lead), backing: tidy(backing) };
+  if (!OPENS.test(text)) return { lead: text, backing: "" };
+  const pieces = text.split(/([(（][^()（）]*[)）])/);
+  const syllables = pieces
+    .map((piece, index) => ({
+      text: piece,
+      start_ms: 0,
+      end_ms: 0,
+      ...(index % 2 ? { voice: 2 } : {}),
+    }))
+    .filter((piece) => piece.text);
+  const { lead, backing } = splitVoices(syllables as KaraokeSyllable[]);
+  const join = (part: KaraokeSyllable[]) => part.map((syllable) => syllable.text).join("");
+  return { lead: join(lead), backing: join(backing) };
 }
 
 type TimedLine = {

@@ -166,10 +166,65 @@ test("bracketed words are backing vocals even without a voice mark", () => {
   );
 });
 
+test("timed lines with two bracketed parts get comma-separated backing and no brackets", () => {
+  const at = (text, start, voice) => ({
+    text,
+    start_ms: start,
+    end_ms: start + 90,
+    ...(voice ? { voice } : {}),
+  });
+  const split = splitVoices([
+    at("Hello ", 0),
+    at("(hey) ", 100),
+    at("I ", 200),
+    at("am ", 300),
+    at("(hey)", 400),
+  ]);
+  assert.equal(split.lead.map((s) => s.text).join(""), "Hello I am");
+  assert.equal(split.backing.map((s) => s.text).join(""), "hey, hey");
+  assert.deepEqual(
+    split.backing.map((s) => s.start_ms),
+    [100, 400],
+  );
+  // Brackets glued to lead words, as the aligner stores them.
+  const glued = splitVoices([
+    at("Wait (", 0),
+    at("don't ", 1, 2),
+    at("let ", 2, 2),
+    at("go), ", 3, 2),
+    at("and ", 4),
+    at("pre", 5),
+    at("tend (", 6),
+    at("don't ", 7, 2),
+    at("let ", 8, 2),
+    at("go)", 9, 2),
+  ]);
+  assert.equal(glued.lead.map((s) => s.text).join(""), "Wait and pretend");
+  assert.equal(glued.backing.map((s) => s.text).join(""), "don't let go, don't let go");
+  // Navidrome background cues: one bracketed part each, after the lead words.
+  const cues = splitVoices([
+    at("Hello ", 0),
+    at("I ", 1),
+    at("am ", 2),
+    at("(hey) ", 3, 2),
+    at("(hey)", 4, 2),
+  ]);
+  assert.equal(cues.backing.map((s) => s.text).join(""), "hey, hey");
+});
+
 test("plain lines split their bracketed text into a backing part", () => {
   assert.deepEqual(splitTextVoices("Lonely (so lonely) tonight (tonight)"), {
     lead: "Lonely tonight",
-    backing: "so lonely tonight",
+    backing: "so lonely, tonight",
+  });
+  // Two bracketed parts are two backing parts: "hey, hey", never "hey hey" or brackets.
+  assert.deepEqual(splitTextVoices("Hello (hey) I am (hey)"), {
+    lead: "Hello I am",
+    backing: "hey, hey",
+  });
+  assert.deepEqual(splitTextVoices("Is he far away (is he far away?), is he okay? (Is he okay?)"), {
+    lead: "Is he far away, is he okay?",
+    backing: "is he far away? Is he okay?",
   });
   assert.deepEqual(splitTextVoices("(Ooh, ooh)"), { lead: "", backing: "Ooh, ooh" });
   assert.deepEqual(splitTextVoices("No brackets here"), { lead: "No brackets here", backing: "" });

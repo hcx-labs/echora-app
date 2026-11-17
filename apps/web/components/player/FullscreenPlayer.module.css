@@ -6,201 +6,813 @@
  * right. Narrow: details row over the panel.
  */
 .player[data-slot="dialog-content"] {
-  position: fixed; inset: 0 0 var(--player-height) 0; z-index: 1101; display: grid; grid-template-rows: minmax(0, 1fr);
-  width: 100%; height: auto; max-width: none; margin: 0; padding: 0; gap: 0;
+  position: fixed;
+  inset: 0 0 var(--player-height) 0;
+  z-index: 1101;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  width: 100%;
+  height: auto;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  gap: 0;
   /* Cancel the dialog primitive's centering: zero Tailwind's translate variables as well as the property. */
-  --tw-translate-x: 0; --tw-translate-y: 0; translate: none !important; transform: none; border: 0; box-shadow: none; overflow: hidden;
+  --tw-translate-x: 0;
+  --tw-translate-y: 0;
+  translate: none !important;
+  transform: none;
+  border: 0;
+  box-shadow: none;
+  overflow: hidden;
   --gutter-fs: clamp(20px, 5vw, 96px);
-  color: #f3f3f3; font-family: var(--ui-font);
-  background: linear-gradient(180deg, rgb(0 0 0 / .55) 0%, rgb(0 0 0 / .18) 22%, rgb(0 0 0 / .22) 70%, rgb(0 0 0 / .6) 100%);
+  color: #f3f3f3;
+  font-family: var(--ui-font);
+  background: linear-gradient(
+    180deg,
+    rgb(0 0 0 / 0.55) 0%,
+    rgb(0 0 0 / 0.18) 22%,
+    rgb(0 0 0 / 0.22) 70%,
+    rgb(0 0 0 / 0.6) 100%
+  );
 }
-.closing { pointer-events: none; }
+.closing {
+  pointer-events: none;
+}
 
 /* Toolbar */
-.group { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.player [data-slot=button][data-variant=ghost] { color: rgb(255 255 255 / .8); }
-.player [data-slot=button][data-variant=ghost]:hover:not(:disabled) { background: rgb(255 255 255 / .1); color: #fff; }
-.player .toggleOn, .player .toggleOn:hover { background: rgb(255 255 255 / .16); color: var(--accent) !important; }
-.segmented[data-slot=tabs-list] { background: rgb(0 0 0 / .35); border-color: rgb(255 255 255 / .14); }
-.segmented [data-slot=tabs-trigger] { color: rgb(255 255 255 / .65); padding-inline: 10px; }
-.segmented [data-slot=tabs-trigger]:hover { color: #fff; }
-.segmented [data-slot=tabs-trigger][data-state=active] { background: rgb(255 255 255 / .16); color: #fff; }
+.group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.player [data-slot="button"][data-variant="ghost"] {
+  color: rgb(255 255 255 / 0.8);
+}
+.player [data-slot="button"][data-variant="ghost"]:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.1);
+  color: #fff;
+}
+.player .toggleOn,
+.player .toggleOn:hover {
+  background: rgb(255 255 255 / 0.16);
+  color: var(--accent) !important;
+}
+.segmented[data-slot="tabs-list"] {
+  background: rgb(0 0 0 / 0.35);
+  border-color: rgb(255 255 255 / 0.14);
+}
+.segmented [data-slot="tabs-trigger"] {
+  color: rgb(255 255 255 / 0.65);
+  padding-inline: 10px;
+}
+.segmented [data-slot="tabs-trigger"]:hover {
+  color: #fff;
+}
+.segmented [data-slot="tabs-trigger"][data-state="active"] {
+  background: rgb(255 255 255 / 0.16);
+  color: #fff;
+}
 /* The text size menu is one segment in the same frame; it lights up like an active one while open. */
-.menuTrigger { display: inline-flex; align-items: center; justify-content: center; height: 100%; padding: 0 10px; border: 0; background: transparent; outline: none; cursor: pointer; }
-.menuTrigger svg { width: 16px; height: 16px; }
-.menuTrigger:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 60%, transparent); }
-.segmented [data-slot=tabs-trigger][data-state=open] { background: rgb(255 255 255 / .16); color: #fff; }
-.translationSelect[data-slot=select-trigger] { background: rgb(0 0 0 / .35); border-color: rgb(255 255 255 / .14); }
+.menuTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+.menuTrigger svg {
+  width: 16px;
+  height: 16px;
+}
+.menuTrigger:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 60%, transparent);
+}
+.segmented [data-slot="tabs-trigger"][data-state="open"] {
+  background: rgb(255 255 255 / 0.16);
+  color: #fff;
+}
+.translationSelect[data-slot="select-trigger"] {
+  background: rgb(0 0 0 / 0.35);
+  border-color: rgb(255 255 255 / 0.14);
+}
 
 /* Stage: track on the left, a framed Lyrics / Up next panel on the right. */
-.stage { position: relative; z-index: 2; min-height: 0; width: 100%; max-width: 1760px; margin: 0 auto; padding: clamp(16px, 3vh, 32px) var(--gutter-fs);
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); column-gap: clamp(40px, 5vw, 96px); grid-template-rows: auto; align-content: center; align-items: stretch; }
-/* The track column sets the row height; the panel matches it from the top of the art to the bottom of the tags. */
-.nowPlaying { display: flex; flex-direction: column; align-items: center; gap: 24px; min-width: 0; min-height: 0; container-type: inline-size; }
+.stage {
+  position: relative;
+  z-index: 2;
+  min-height: 0;
+  width: 100%;
+  max-width: 1760px;
+  margin: 0 auto;
+  padding: clamp(16px, 3vh, 32px) var(--gutter-fs);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  column-gap: clamp(40px, 5vw, 96px);
+  grid-template-rows: auto;
+  align-content: center;
+  align-items: stretch;
+}
 /* Sized by height so it gives way to the details on short screens instead of pushing them into the dock. */
-.art { position: relative; height: min(100cqw, calc(100dvh - var(--player-height) - 300px), 680px); max-width: 100%; min-height: 0; aspect-ratio: 1; flex: 0 1 auto; overflow: hidden; display: grid; place-items: center; background: rgb(255 255 255 / .06); box-shadow: 0 40px 100px rgb(0 0 0 / .55); }
-.art img { width: 100%; height: 100%; object-fit: cover; }
-.art>svg { width: 36%; height: 36%; color: rgb(255 255 255 / .35); }
+.art {
+  position: relative;
+  height: min(100cqw, calc(100dvh - var(--player-height) - 300px), 680px);
+  max-width: 100%;
+  min-height: 0;
+  aspect-ratio: 1;
+  flex: 0 1 auto;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: rgb(255 255 255 / 0.06);
+  box-shadow: 0 40px 100px rgb(0 0 0 / 0.55);
+}
+.art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.art > svg {
+  width: 36%;
+  height: 36%;
+  color: rgb(255 255 255 / 0.35);
+}
 /* The cover and its motion loop share one grid cell; the loop fades in once it can play. */
-.art>* { grid-area: 1 / 1; }
-.motionVideo { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: cover; opacity: 0; pointer-events: none; }
-.motionVideo[data-ready] { opacity: 1; }
-.artworkStyle { position: absolute; z-index: 2; top: 12px; left: 12px; display: flex; align-items: center; padding: 4px; background: var(--raised); box-shadow: 0 2px 12px rgb(0 0 0 / .35); }
-.meta { min-width: 0; width: min(100%, 620px); text-align: center; }
-.title { margin: 0; font-size: 28px; font-weight: 600; line-height: 1.25; letter-spacing: -.025em; }
-.artist { margin: 6px 0 0; font-size: 15px; font-weight: 500; color: rgb(255 255 255 / .9); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.album { margin: 4px 0 0; font-size: 14px; color: rgb(255 255 255 / .55); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tags { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 14px 0 0; }
-.tag { border: 1px solid rgb(255 255 255 / .22); padding: 0 7px; font-size: 12px; line-height: 22px; font-weight: 500; color: rgb(255 255 255 / .8); font-variant-numeric: tabular-nums; }
-.tag:first-child { border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--accent); }
+.art > * {
+  grid-area: 1 / 1;
+}
+.motionVideo {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  pointer-events: none;
+}
+.motionVideo[data-ready] {
+  opacity: 1;
+}
+.artworkStyle {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  background: var(--raised);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 0.35);
+}
+.meta {
+  min-width: 0;
+  width: min(100%, 620px);
+  text-align: center;
+}
+.title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+}
+.artist {
+  margin: 6px 0 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: rgb(255 255 255 / 0.9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.album {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: rgb(255 255 255 / 0.55);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 14px 0 0;
+}
+.tag {
+  border: 1px solid rgb(255 255 255 / 0.22);
+  padding: 0 7px;
+  font-size: 12px;
+  line-height: 22px;
+  font-weight: 500;
+  color: rgb(255 255 255 / 0.8);
+  font-variant-numeric: tabular-nums;
+}
+.tag:first-child {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent);
+}
 
 /* Size containment keeps the panel from adding height, so the stretch gives it exactly the track column's. */
-.panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; contain: size; border: 1px solid rgb(255 255 255 / .08); background: rgb(0 0 0 / .32); backdrop-filter: blur(6px); }
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  contain: size;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(0 0 0 / 0.32);
+  backdrop-filter: blur(6px);
+}
 /* The blur softens the moving backdrop behind the panel. With the backdrop off (or hidden, below
    1200 x 720) there is only a smooth gradient behind it: blurring that looks the same, yet costs
    a full-panel blur every frame the lyrics change. */
-.panelFlat { backdrop-filter: none; }
-@media (max-width: 1199px), (max-height: 719px) { .panel { backdrop-filter: none; } }
-.panelHeader { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 0 16px 0 24px; border-bottom: 1px solid rgb(255 255 255 / .08); }
-.panelTabs[data-slot=tabs-list] { border-bottom: 0; gap: 8px; }
-.panelTabs [data-slot=tabs-trigger] { height: 52px; margin-right: 12px; font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: rgb(255 255 255 / .55); }
-.panelTabs [data-slot=tabs-trigger]:hover, .panelTabs [data-slot=tabs-trigger][data-state=active] { color: #fff; }
-.count { min-width: 20px; padding: 0 5px; background: rgb(255 255 255 / .12); font-size: 12px; line-height: 18px; letter-spacing: 0; text-align: center; font-variant-numeric: tabular-nums; }
-.panelControls { display: flex; align-items: center; gap: 6px; padding-bottom: 8px; }
-.panelBody { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.panelEmpty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center; font-size: 13px; color: rgb(255 255 255 / .55); }
-.panelEmpty strong { font-size: 15px; font-weight: 600; color: rgb(255 255 255 / .85); }
+.panelFlat {
+  backdrop-filter: none;
+}
+@media (max-width: 1199px), (max-height: 719px) {
+  .panel {
+    backdrop-filter: none;
+  }
+}
+.panelHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px 0 24px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.08);
+}
+.panelTabs[data-slot="tabs-list"] {
+  border-bottom: 0;
+  gap: 8px;
+}
+.panelTabs [data-slot="tabs-trigger"] {
+  height: 52px;
+  margin-right: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.55);
+}
+.panelTabs [data-slot="tabs-trigger"]:hover,
+.panelTabs [data-slot="tabs-trigger"][data-state="active"] {
+  color: #fff;
+}
+.count {
+  min-width: 20px;
+  padding: 0 5px;
+  background: rgb(255 255 255 / 0.12);
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.panelControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 8px;
+}
+.panelBody {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.panelEmpty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.55);
+}
+.panelEmpty strong {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgb(255 255 255 / 0.85);
+}
 
 /* Lyrics: a full scrolling column; the active line is kept centred. Sizes sit on the app scale, topping out at the 28px page title. */
-.lyrics { position: relative; flex: 1; min-width: 0; min-height: 0; --line: 24px; }
-.lyricsSmall { --line: 20px; }
-.lyricsNormal { --line: 24px; }
-.lyricsLarge { --line: 28px; }
-.lineList { position: absolute; inset: 0; overflow-y: auto; scrollbar-width: none; scroll-behavior: auto; overscroll-behavior: contain; padding: 0 32px; display: flex; flex-direction: column; align-items: center; gap: calc(var(--line) * .6); text-align: center;
-  mask-image: linear-gradient(180deg, transparent 0%, #000 20%, #000 80%, transparent 100%); }
-.lineList::-webkit-scrollbar { display: none; }
+.lyrics {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  --line: 24px;
+}
+.lyricsSmall {
+  --line: 20px;
+}
+.lyricsNormal {
+  --line: 24px;
+}
+.lyricsLarge {
+  --line: 28px;
+}
+.lineList {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  scroll-behavior: auto;
+  overscroll-behavior: contain;
+  padding: 0 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--line) * 0.6);
+  text-align: center;
+  mask-image: linear-gradient(180deg, transparent 0%, #000 20%, #000 80%, transparent 100%);
+}
+.lineList::-webkit-scrollbar {
+  display: none;
+}
 /* Spacers let the first and last lines reach the centre; percentages here resolve against the list height. */
-.lineList::before, .lineList::after { content: ""; flex: 0 0 42%; }
+.lineList::before,
+.lineList::after {
+  content: "";
+  flex: 0 0 42%;
+}
 /* Half the list below the last line, so the final line can still reach the exact centre. */
-.lineList::after { flex-basis: 50%; }
-.line { max-width: 100%; padding: 4px 0; border: 0; background: transparent; text-align: center; cursor: pointer;
-  font-family: inherit; font-weight: 600; font-size: var(--line); line-height: 1.4; letter-spacing: -.01em; white-space: pre-wrap; overflow-wrap: anywhere;
+.lineList::after {
+  flex-basis: 50%;
+}
+.line {
+  max-width: 100%;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  text-align: center;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: var(--line);
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   /* Solid text dimmed as one layer (--ink), not a translucent colour: connected scripts such as
      Nastaliq overlap their glyphs, and a translucent colour doubles up where they overlap. */
-  color: #fff; --ink: .26;
+  color: #fff;
+  --ink: 0.26;
   /* Lines further from the active one recede, so focus reads at a glance. */
-  opacity: calc((1 - var(--distance, 0) * .17) * var(--ink));
-  transition: color .5s var(--ease-out-soft), opacity .6s var(--ease-out-soft), text-shadow .5s var(--ease-out-soft); }
-.line[data-state=past] { --ink: .16; }
-.line[data-state=active] { color: #fff; opacity: 1; text-shadow: 0 2px 28px rgb(0 0 0 / .4); }
+  opacity: calc((1 - var(--distance, 0) * 0.17) * var(--ink));
+  transition:
+    color 0.5s var(--ease-out-soft),
+    opacity 0.6s var(--ease-out-soft),
+    text-shadow 0.5s var(--ease-out-soft);
+}
+.line[data-state="past"] {
+  --ink: 0.16;
+}
+.line[data-state="active"] {
+  color: #fff;
+  opacity: 1;
+  text-shadow: 0 2px 28px rgb(0 0 0 / 0.4);
+}
 /*
  * In karaoke the singing line paints its own colours, and a finished line is fully
  * in the accent. Giving the button the same accent means the plain text that
  * replaces it starts exactly there and fades to the past colour, with no white flash.
  */
-.karaoke .line[data-state=active] { color: var(--accent); }
+.karaoke .line[data-state="active"] {
+  color: var(--accent);
+}
 /* Karaoke accents can be light gray or white: recede the other lines further so the wipe stands out. */
-.karaoke .line[data-state=next] { --ink: .13; }
-.karaoke .line[data-state=past] { color: #fff; --ink: .08; }
-.karaoke .line:not([data-state=active]):hover { color: #fff; opacity: .8; }
-.line:hover { opacity: .8; }
-.originalLine { unicode-bidi: isolate; overflow-wrap: anywhere; }
+.karaoke .line[data-state="next"] {
+  --ink: 0.13;
+}
+.karaoke .line[data-state="past"] {
+  color: #fff;
+  --ink: 0.08;
+}
+.karaoke .line:not([data-state="active"]):hover {
+  color: #fff;
+  opacity: 0.8;
+}
+.line:hover {
+  opacity: 0.8;
+}
+.originalLine {
+  unicode-bidi: isolate;
+  overflow-wrap: anywhere;
+}
 /* The face comes from the app font stack and :lang rules; RTL scripts just need more room. */
-.originalLine[dir=rtl] { line-height: 1.65; }
-.lyrics:lang(ur) .line, .lyrics:lang(ur) .untimedTranslations { line-height: 2; }
-.bilingual .line { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.untimedTranslations { position: absolute; inset: 0; overflow-y: auto; scrollbar-width: none; padding: 48px 32px; text-align: center; white-space: pre-wrap; font-family: inherit; font-weight: 600; font-size: var(--line); line-height: 1.5; color: rgb(255 255 255 / .82);
-  mask-image: linear-gradient(180deg, transparent 0%, #000 10%, #000 90%, transparent 100%); }
-.untimedTranslations::-webkit-scrollbar { display: none; }
-.untimedTranslations p { margin: 0 0 .5em; }
+.originalLine[dir="rtl"] {
+  line-height: 1.65;
+}
+.lyrics:lang(ur) .line,
+.lyrics:lang(ur) .untimedTranslations {
+  line-height: 2;
+}
+.bilingual .line {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.untimedTranslations {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 48px 32px;
+  text-align: center;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: var(--line);
+  line-height: 1.5;
+  color: rgb(255 255 255 / 0.82);
+  mask-image: linear-gradient(180deg, transparent 0%, #000 10%, #000 90%, transparent 100%);
+}
+.untimedTranslations::-webkit-scrollbar {
+  display: none;
+}
+.untimedTranslations p {
+  margin: 0 0 0.5em;
+}
 
 /* Up next */
-.queueBody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.queueScroll { flex: 1; min-height: 0; }
-.queueList { margin: 0; padding: 8px 12px; list-style: none; }
-.queueTrack { display: grid; grid-template-columns: 28px 44px minmax(0, 1fr); align-items: center; gap: 12px; width: 100%; padding: 8px; border: 0; background: transparent; color: inherit; text-align: left; }
-.queueTrack:hover { background: rgb(255 255 255 / .06); }
-.queueTrack[aria-current=true] { background: rgb(255 255 255 / .1); }
-.queueTrack[aria-current=true] strong, .queueTrack[aria-current=true] .queueIndex { color: var(--accent); }
-.queueIndex { display: grid; place-items: center; font-size: 12px; color: rgb(255 255 255 / .45); font-variant-numeric: tabular-nums; }
-.queueArt { width: 44px; height: 44px; }
-.queueText { min-width: 0; }
-.queueText strong, .queueText small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.queueText strong { font-size: 14px; font-weight: 600; }
-.queueText small { margin-top: 2px; font-size: 12px; color: rgb(255 255 255 / .55); }
-.queueFooter { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px 10px 24px; border-top: 1px solid rgb(255 255 255 / .08); font-size: 12px; color: rgb(255 255 255 / .55); }
+.queueBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.queueScroll {
+  flex: 1;
+  min-height: 0;
+}
+.queueList {
+  margin: 0;
+  padding: 8px 12px;
+  list-style: none;
+}
+.queueTrack {
+  display: grid;
+  grid-template-columns: 28px 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.queueTrack:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+.queueTrack[aria-current="true"] {
+  background: rgb(255 255 255 / 0.1);
+}
+.queueTrack[aria-current="true"] strong,
+.queueTrack[aria-current="true"] .queueIndex {
+  color: var(--accent);
+}
+.queueIndex {
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.45);
+  font-variant-numeric: tabular-nums;
+}
+.queueArt {
+  width: 44px;
+  height: 44px;
+}
+.queueText {
+  min-width: 0;
+}
+.queueText strong,
+.queueText small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queueText strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.queueText small {
+  margin-top: 2px;
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.55);
+}
+.queueFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px 10px 24px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.55);
+}
 
-.fullscreenMarquee { display: block; white-space: nowrap; width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.fullscreenMarquee>span { width: max-content; display: block; }
-.meta .fullscreenMarquee>span { margin-inline: auto; }
-@media (max-width: 960px) { .meta .fullscreenMarquee>span { margin-inline: 0; } }
-.fullscreenMarquee[data-overflowing]>span { animation: marquee 18s ease-in-out infinite; }
-@keyframes marquee { 0%, 15%, 85%, 100% { transform: none; } 45%, 55% { transform: translateX(var(--fullscreen-marquee-offset)); } }
+.fullscreenMarquee {
+  display: block;
+  white-space: nowrap;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fullscreenMarquee > span {
+  width: max-content;
+  display: block;
+}
+.meta .fullscreenMarquee > span {
+  margin-inline: auto;
+}
+@media (max-width: 960px) {
+  .meta .fullscreenMarquee > span {
+    margin-inline: 0;
+  }
+}
+.fullscreenMarquee[data-overflowing] > span {
+  animation: marquee 18s ease-in-out infinite;
+}
+@keyframes marquee {
+  0%,
+  15%,
+  85%,
+  100% {
+    transform: none;
+  }
+  45%,
+  55% {
+    transform: translateX(var(--fullscreen-marquee-offset));
+  }
+}
 
 /* Narrow: compact track row, the panel fills the middle, dock at the bottom. */
 @media (max-width: 960px) {
-  .optionLabel { display: none; }
-  .stage { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); row-gap: 12px; align-content: stretch; padding: 16px; }
-  .nowPlaying { flex-direction: row; justify-content: flex-start; gap: 14px; }
-  .art { width: 64px; height: 64px; flex-shrink: 0; box-shadow: none; }
-  .nowPlaying { container-type: normal; }
-  .panel { contain: none; }
-  .meta { text-align: left; }
-  .title { font-size: 20px; }
-  .artist { margin-top: 2px; font-size: 14px; }
-  .album { font-size: 12px; }
-  .tags { justify-content: flex-start; margin-top: 6px; }
-  .panelHeader { flex-wrap: wrap; padding: 0 8px 0 16px; }
-  .panelTabs [data-slot=tabs-trigger] { height: 44px; }
-  .lyrics { --line: 20px; }
-  .lyricsSmall { --line: 18px; }
-  .lyricsNormal { --line: 20px; }
-  .lyricsLarge { --line: 22px; }
-  .lineList { padding: 0 16px; }
+  .optionLabel {
+    display: none;
+  }
+  .stage {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    row-gap: 12px;
+    align-content: stretch;
+    padding: 16px;
+  }
+  .art {
+    width: 64px;
+    height: 64px;
+    flex-shrink: 0;
+    box-shadow: none;
+  }
+  .panel {
+    contain: none;
+  }
+  .meta {
+    text-align: left;
+  }
+  .title {
+    font-size: 20px;
+  }
+  .artist {
+    margin-top: 2px;
+    font-size: 14px;
+  }
+  .album {
+    font-size: 12px;
+  }
+  .tags {
+    justify-content: flex-start;
+    margin-top: 6px;
+  }
+  .panelHeader {
+    flex-wrap: wrap;
+    padding: 0 8px 0 16px;
+  }
+  .panelTabs [data-slot="tabs-trigger"] {
+    height: 44px;
+  }
+  .lyrics {
+    --line: 20px;
+  }
+  .lyricsSmall {
+    --line: 18px;
+  }
+  .lyricsNormal {
+    --line: 20px;
+  }
+  .lyricsLarge {
+    --line: 22px;
+  }
+  .lineList {
+    padding: 0 16px;
+  }
 }
-@media (prefers-reduced-motion: reduce) { .fullscreenMarquee[data-overflowing]>span { animation: none; } .line { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .fullscreenMarquee[data-overflowing] > span {
+    animation: none;
+  }
+  .line {
+    transition: none;
+  }
+}
 
 /*
  * Phones: a full-screen now-playing view over the player bar, with its own controls.
  * Header, then the artwork / lyrics / queue body, then track details, seek and controls.
  */
-.mobile[data-slot="dialog-content"] { inset: 0; background: linear-gradient(180deg, rgb(0 0 0 / .62) 0%, rgb(0 0 0 / .3) 30%, rgb(0 0 0 / .4) 62%, rgb(0 0 0 / .78) 100%); }
-.mobileStage { position: relative; z-index: 2; min-height: 0; height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto auto;
-  padding: max(8px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom)); }
-.mobileHeader { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; gap: 8px; height: 52px; }
-.mobileHeader [data-slot=button] svg { width: 22px; height: 22px; }
-.mobileSource { margin: 0; min-width: 0; text-align: center; line-height: 1.3; }
-.mobileSource small { display: block; font-size: 10px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: rgb(255 255 255 / .55); }
-.mobileSource strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
-.mobileBody { min-height: 0; display: flex; flex-direction: column; padding: 12px 0; }
+.mobile[data-slot="dialog-content"] {
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgb(0 0 0 / 0.62) 0%,
+    rgb(0 0 0 / 0.3) 30%,
+    rgb(0 0 0 / 0.4) 62%,
+    rgb(0 0 0 / 0.78) 100%
+  );
+}
+.mobileStage {
+  position: relative;
+  z-index: 2;
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  padding: max(8px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+}
+.mobileHeader {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+}
+.mobileHeader [data-slot="button"] svg {
+  width: 22px;
+  height: 22px;
+}
+.mobileSource {
+  margin: 0;
+  min-width: 0;
+  text-align: center;
+  line-height: 1.3;
+}
+.mobileSource small {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.55);
+}
+.mobileSource strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.mobileBody {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 0;
+}
 /* The cover takes the largest square that fits between the header and the details. */
-.mobileArt { flex: 1; min-height: 0; display: grid; place-items: center; container-type: size; }
-.mobileArt .art { width: min(100cqw, 100cqh); height: min(100cqw, 100cqh); max-width: none; box-shadow: 0 30px 80px rgb(0 0 0 / .6); }
-.mobileArt .art>svg { width: 30%; height: 30%; }
-.mobileLyricsControls { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; padding-bottom: 8px; }
-.mobileBody .lyrics { --line: 22px; }
-.mobileBody .lyricsSmall { --line: 18px; }
-.mobileBody .lyricsNormal { --line: 22px; }
-.mobileBody .lyricsLarge { --line: 26px; }
-.mobileBody .lineList { padding: 0 4px; }
-.mobileBody .queueBody { border: 1px solid rgb(255 255 255 / .08); background: rgb(0 0 0 / .32); backdrop-filter: blur(6px); }
-.mobileTrack { display: flex; align-items: center; gap: 12px; min-width: 0; padding-top: 4px; }
-.mobileThumb { width: 48px; height: 48px; flex-shrink: 0; }
-.mobileMeta { flex: 1; min-width: 0; }
-.mobileMeta .title { font-size: 22px; }
-.mobileMeta .artist { margin-top: 2px; color: rgb(255 255 255 / .7); }
-.mobileTrack .tag { flex-shrink: 0; border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--accent); }
-.mobileSeek { padding-top: 14px; }
-.mobileTimes { display: flex; justify-content: space-between; margin-top: 4px; font-size: 11px; color: rgb(255 255 255 / .55); font-variant-numeric: tabular-nums; }
-.mobileControls { display: grid; grid-template-columns: repeat(5, auto); justify-content: space-between; align-items: center; padding-top: 10px; }
-.mobileControls [data-slot=button] svg { width: 24px; height: 24px; }
-.mobileControls [data-slot=button]:disabled { opacity: .3; }
-.mobilePlay[data-slot=button] { width: 68px; height: 68px; }
-.mobilePlay[data-slot=button] svg { width: 28px; height: 28px; }
+.mobileArt {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  container-type: size;
+}
+.mobileArt .art {
+  width: min(100cqw, 100cqh);
+  height: min(100cqw, 100cqh);
+  max-width: none;
+  box-shadow: 0 30px 80px rgb(0 0 0 / 0.6);
+}
+.mobileArt .art > svg {
+  width: 30%;
+  height: 30%;
+}
+.mobileLyricsControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding-bottom: 8px;
+}
+.mobileBody .lyrics {
+  --line: 22px;
+}
+.mobileBody .lyricsSmall {
+  --line: 18px;
+}
+.mobileBody .lyricsNormal {
+  --line: 22px;
+}
+.mobileBody .lyricsLarge {
+  --line: 26px;
+}
+.mobileBody .lineList {
+  padding: 0 4px;
+}
+.mobileBody .queueBody {
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(0 0 0 / 0.32);
+  backdrop-filter: blur(6px);
+}
+.mobileTrack {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 4px;
+}
+.mobileThumb {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+}
+.mobileMeta {
+  flex: 1;
+  min-width: 0;
+}
+.mobileMeta .title {
+  font-size: 22px;
+}
+.mobileMeta .artist {
+  margin-top: 2px;
+  color: rgb(255 255 255 / 0.7);
+}
+.mobileTrack .tag {
+  flex-shrink: 0;
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent);
+}
+.mobileSeek {
+  padding-top: 14px;
+}
+.mobileTimes {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.55);
+  font-variant-numeric: tabular-nums;
+}
+.mobileControls {
+  display: grid;
+  grid-template-columns: repeat(5, auto);
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 10px;
+}
+.mobileControls [data-slot="button"] svg {
+  width: 24px;
+  height: 24px;
+}
+.mobileControls [data-slot="button"]:disabled {
+  opacity: 0.3;
+}
+.mobilePlay[data-slot="button"] {
+  width: 68px;
+  height: 68px;
+}
+.mobilePlay[data-slot="button"] svg {
+  width: 28px;
+  height: 28px;
+}
 @media (max-height: 640px) {
-  .mobileMeta .title { font-size: 19px; }
-  .mobilePlay[data-slot=button] { width: 58px; height: 58px; }
-  .mobileSeek { padding-top: 8px; }
+  .mobileMeta .title {
+    font-size: 19px;
+  }
+  .mobilePlay[data-slot="button"] {
+    width: 58px;
+    height: 58px;
+  }
+  .mobileSeek {
+    padding-top: 8px;
+  }
 }
 
 /* Backing vocals: their own smaller, quieter line under the lead, highlighted on their own timing. */
@@ -209,24 +821,64 @@
  * keeps the same colour for both parts, so the backing stays readable ahead of time.
  * Inline backing sits tight under its lead (sung together) with more room after the pair.
  */
-.backingVoice { display: block; margin-top: .04em; font-size: .72em; font-weight: 500; line-height: 1.3; letter-spacing: 0;
-  transition: opacity .35s var(--ease-out-soft), transform .35s var(--ease-out-soft); }
-.line:has(.backingVoice) { padding-bottom: calc(4px + .3em); }
+.backingVoice {
+  display: block;
+  margin-top: 0.04em;
+  font-size: 0.72em;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0;
+  transition:
+    opacity 0.35s var(--ease-out-soft),
+    transform 0.35s var(--ease-out-soft);
+}
+.line:has(.backingVoice) {
+  padding-bottom: calc(4px + 0.3em);
+}
 /* On the playing line: held back until shortly before it is sung, forward while sung, then settled. */
 /* Backing vocals fill in their own colour: the accent turned round the colour wheel, so the two
    voices read apart at a glance whatever the artwork. */
-.karaoke { --backing-accent: #9ad8ff; }
-@supports (color: oklch(from red l c h)) {
-  .karaoke { --backing-accent: oklch(from var(--accent) max(l, .8) max(c, .1) calc(h + 150)); }
+.karaoke {
+  --backing-accent: #9ad8ff;
 }
-.backingVoice, .echoLine { --accent: var(--backing-accent, #9ad8ff); }
-.karaoke .line[data-state=active] .backingVoice, .karaoke .line[data-state=active] .echoLine { color: var(--backing-accent, #9ad8ff); }
-.backingVoice[data-reveal=waiting] { opacity: .45; transform: translateY(-.08em); }
-.backingVoice[data-reveal=singing] { opacity: 1; transform: none; }
-.backingVoice[data-reveal=done] { opacity: .8; transform: none; }
+@supports (color: oklch(from red l c h)) {
+  .karaoke {
+    --backing-accent: oklch(from var(--accent) max(l, 0.8) max(c, 0.1) calc(h + 150));
+  }
+}
+.backingVoice,
+.echoLine {
+  --accent: var(--backing-accent, #9ad8ff);
+}
+.karaoke .line[data-state="active"] .backingVoice,
+.karaoke .line[data-state="active"] .echoLine {
+  color: var(--backing-accent, #9ad8ff);
+}
+.backingVoice[data-reveal="waiting"] {
+  opacity: 0.45;
+  transform: translateY(-0.08em);
+}
+.backingVoice[data-reveal="singing"] {
+  opacity: 1;
+  transform: none;
+}
+.backingVoice[data-reveal="done"] {
+  opacity: 0.8;
+  transform: none;
+}
 /* A backing line sung on its own: its own slot at nearly full size, set apart by a lighter weight. */
-.echoLine { display: inline-block; font-size: .86em; font-weight: 500; letter-spacing: 0; }
-@media (prefers-reduced-motion: reduce) { .backingVoice { transition: none; transform: none !important; } }
+.echoLine {
+  display: inline-block;
+  font-size: 0.86em;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .backingVoice {
+    transition: none;
+    transform: none !important;
+  }
+}
 
 /*
  * Highlight styles that theme the whole lyric view, not only the singing line.
@@ -237,40 +889,210 @@
 
 /* Stage view: the cover melts into the background and the lyrics take the whole stage. */
 /* Two copies of the blurred cover drift past each other; translucent, so the backdrop visualizer shows through. */
-.stageBackdrop { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; opacity: .6;
-  animation: stageIn .9s var(--ease-out-soft) backwards; }
-.stageBackdrop::before, .stageBackdrop::after { content: ""; position: absolute; left: -15%; top: -15%; width: 130%; height: 130%;
-  background: var(--stage-cover) center / cover no-repeat; filter: blur(80px) saturate(1.4) brightness(.5); will-change: transform; }
-.stageBackdrop::before { animation: stageDriftA 38s ease-in-out infinite alternate; }
-.stageBackdrop::after { opacity: .55; mix-blend-mode: screen; animation: stageDriftB 53s ease-in-out infinite alternate; }
-.stageBackdrop[data-playing=false]::before, .stageBackdrop[data-playing=false]::after { animation-play-state: paused; }
+.stageBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.6;
+  animation: stageIn 0.9s var(--ease-out-soft) backwards;
+}
+.stageBackdrop::before,
+.stageBackdrop::after {
+  content: "";
+  position: absolute;
+  left: -15%;
+  top: -15%;
+  width: 130%;
+  height: 130%;
+  background: var(--stage-cover) center / cover no-repeat;
+  filter: blur(80px) saturate(1.4) brightness(0.5);
+  will-change: transform;
+}
+.stageBackdrop::before {
+  animation: stageDriftA 38s ease-in-out infinite alternate;
+}
+.stageBackdrop::after {
+  opacity: 0.55;
+  mix-blend-mode: screen;
+  animation: stageDriftB 53s ease-in-out infinite alternate;
+}
+.stageBackdrop[data-playing="false"]::before,
+.stageBackdrop[data-playing="false"]::after {
+  animation-play-state: paused;
+}
+/* Kawarp canvas (StageBackdrop.tsx): no CSS layers, so no blur filters or drift animations run.
+   The canvas draws at a quarter size and is stretched; its own blur hides that. */
+.stageShader {
+  opacity: 0.42;
+}
+.stageShader::before,
+.stageShader::after {
+  content: none;
+}
+.stageShader canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 1;
+  transition: opacity 1.2s var(--ease-out-soft);
+}
+.stageShader canvas[data-loaded="false"] {
+  opacity: 0;
+}
 /* Until the cover has loaded the layers stay clear; then they fade in to their resting opacity. */
-.stageBackdrop::before, .stageBackdrop::after { transition: opacity 1.2s var(--ease-out-soft); }
-.stageBackdrop[data-loaded=false]::before, .stageBackdrop[data-loaded=false]::after { opacity: 0; }
-@keyframes stageDriftA { from { transform: translate(-6%, -4%) scale(1.1) rotate(0deg); } to { transform: translate(6%, 5%) scale(1.3) rotate(24deg); } }
-@keyframes stageDriftB { from { transform: translate(8%, 6%) scale(1.35) rotate(180deg); } to { transform: translate(-7%, -6%) scale(1.15) rotate(214deg); } }
+.stageBackdrop::before,
+.stageBackdrop::after {
+  transition: opacity 1.2s var(--ease-out-soft);
+}
+.stageBackdrop[data-loaded="false"]::before,
+.stageBackdrop[data-loaded="false"]::after {
+  opacity: 0;
+}
+@keyframes stageDriftA {
+  from {
+    transform: translate(-6%, -4%) scale(1.1) rotate(0deg);
+  }
+  to {
+    transform: translate(6%, 5%) scale(1.3) rotate(24deg);
+  }
+}
+@keyframes stageDriftB {
+  from {
+    transform: translate(8%, 6%) scale(1.35) rotate(180deg);
+  }
+  to {
+    transform: translate(-7%, -6%) scale(1.15) rotate(214deg);
+  }
+}
 /* No `to` frame: the fade ends at the layer's own resting opacity instead of overshooting to 1. */
-@keyframes stageIn { from { opacity: 0; } }
-.stageTrigger { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 100%; border: 0; background: transparent; cursor: pointer;
-  font-family: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; outline: none; transition: color .15s, background-color .15s; }
-.stageTrigger svg { width: 16px; height: 16px; flex-shrink: 0; }
-.stageTrigger:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 60%, transparent); }
+@keyframes stageIn {
+  from {
+    opacity: 0;
+  }
+}
 /* Without the track column nothing sets the row height: the stage itself fills the screen. */
-.staged .stage { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); align-content: stretch; max-width: 1500px; height: 100%; }
-.staged .nowPlaying { display: none; }
-.staged .panel { border-color: transparent; background: transparent; backdrop-filter: none; contain: none; min-height: 0; height: 100%; }
-.staged .panelHeader { border-bottom-color: transparent; }
-.staged .lyrics, .staged .lyrics.lyricsNormal { --line: clamp(34px, 4.4vw, 66px); }
-.staged .lyrics.lyricsSmall { --line: clamp(28px, 3.5vw, 52px); }
-.staged .lyrics.lyricsLarge { --line: clamp(40px, 5.4vw, 80px); }
-.staged .line { font-weight: 800; line-height: 1.22; letter-spacing: -.025em; }
+.staged .stage {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-content: stretch;
+  max-width: 1500px;
+  height: 100%;
+}
+.staged .panel {
+  border-color: transparent;
+  background: transparent;
+  backdrop-filter: none;
+  contain: none;
+  min-height: 0;
+  height: 100%;
+}
+.staged .panelHeader {
+  border-bottom-color: transparent;
+}
+.staged .lyrics,
+.staged .lyrics.lyricsNormal {
+  --line: clamp(34px, 4.4vw, 66px);
+}
+.staged .lyrics.lyricsSmall {
+  --line: clamp(28px, 3.5vw, 52px);
+}
+.staged .lyrics.lyricsLarge {
+  --line: clamp(40px, 5.4vw, 80px);
+}
+.staged .line {
+  font-weight: 800;
+  line-height: 1.22;
+  letter-spacing: -0.025em;
+}
 /* No glow: the karaoke wipe paints each word as a clipped piece, so a shadow shows as boxes. */
-.staged .line[data-state=active] { text-shadow: none; }
-.staged .lineList { padding: 0 clamp(24px, 6vw, 120px); }
+.staged .line[data-state="active"] {
+  text-shadow: none;
+}
+.staged .lineList {
+  padding: 0 clamp(24px, 6vw, 120px);
+}
+/* Up next on Stage: one centred column of larger rows over the backdrop, like the lyrics. */
+.staged .queueScroll {
+  mask-image: linear-gradient(transparent, #000 32px, #000 calc(100% - 32px), transparent);
+}
+.staged .queueList {
+  width: min(100%, 920px);
+  margin: 0 auto;
+  padding: 24px clamp(16px, 4vw, 48px);
+}
+.staged .queueTrack {
+  grid-template-columns: 36px 64px minmax(0, 1fr);
+  gap: 18px;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+.staged .queueTrack:hover {
+  background: rgb(255 255 255 / 0.07);
+}
+.staged .queueTrack[aria-current="true"] {
+  background: rgb(255 255 255 / 0.1);
+}
+.staged .queueArt {
+  width: 64px;
+  height: 64px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+}
+.staged .queueIndex {
+  font-size: 14px;
+}
+.staged .queueText strong {
+  font-size: clamp(16px, 1.3vw, 20px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.staged .queueText small {
+  margin-top: 4px;
+  font-size: 14px;
+}
+.staged .queueFooter {
+  width: min(100%, 920px);
+  margin: 0 auto;
+  border-top-color: transparent;
+  padding-inline: clamp(28px, 4vw, 60px);
+}
+/* Song info on Stage: the cover sits large; the player's artwork block fills its column. */
+.staged .panelBody .art {
+  height: auto;
+  width: 100%;
+  max-width: none;
+  border-radius: 0;
+}
+.staged .panelBody .art .artworkStyle {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.staged .panelBody .art:hover .artworkStyle,
+.staged .panelBody .art:focus-within .artworkStyle {
+  opacity: 1;
+}
 /* Long instrumental stretches: the lyrics recede (smaller, fainter, soft) and return just before the next line. */
-.staged .lineList { transform-origin: 50% 50%; transition: transform 1.2s var(--ease-out-soft), opacity 1.2s var(--ease-out-soft), filter 1.2s var(--ease-out-soft); }
-.staged .lyrics[data-resting=true] .lineList { transform: scale(.8); opacity: .4; filter: blur(1.5px); }
+.staged .lineList {
+  transform-origin: 50% 50%;
+  transition:
+    transform 1.2s var(--ease-out-soft),
+    opacity 1.2s var(--ease-out-soft),
+    filter 1.2s var(--ease-out-soft);
+}
+.staged .lyrics[data-resting="true"] .lineList {
+  transform: scale(0.8);
+  opacity: 0.4;
+  filter: blur(1.5px);
+}
 @media (prefers-reduced-motion: reduce) {
-  .stageBackdrop, .stageBackdrop::before, .stageBackdrop::after { animation: none; }
-  .staged .lyrics[data-resting=true] .lineList { transform: none; filter: none; }
+  .stageBackdrop,
+  .stageBackdrop::before,
+  .stageBackdrop::after {
+    animation: none;
+  }
+  .staged .lyrics[data-resting="true"] .lineList {
+    transform: none;
+    filter: none;
+  }
 }
