@@ -23,7 +23,8 @@ def source_lines(row):
 
 
 def backfill_translations(user_id, url, external_ids, *, check, progress):
-    summary = {"translated": 0, "reused": 0, "failed": 0, "stale": 0}
+    # `declined`: the model answered but would not translate (see lyric_translation._checked).
+    summary = {"translated": 0, "reused": 0, "failed": 0, "declined": 0, "stale": 0}
     settings, encrypted = load_settings()
     if not settings.enabled or not settings.model or not settings.language_pairs:
         return summary
@@ -86,6 +87,14 @@ def backfill_translations(user_id, url, external_ids, *, check, progress):
                 summary["translated"] += 1
             except TranslationError as error:
                 # No remote response bodies, keys, or lyrics in logs. A later sync retries.
+                if str(error) in {"declined", "refusal"}:
+                    logger.warning(
+                        "Translation declined by the model for track %s (%s)",
+                        row["track_id"],
+                        error,
+                    )
+                    summary["declined"] += 1
+                    continue
                 logger.warning("Translation failed for track %s: %s", row["track_id"], error)
                 summary["failed"] += 1
         progress(

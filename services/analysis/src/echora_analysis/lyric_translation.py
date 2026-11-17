@@ -198,8 +198,14 @@ def translate(
 
 
 def _checked(lines: list[str], translated: list[dict]) -> list[dict]:
-    if any(
-        source.strip() and not target["text"].strip() for source, target in zip(lines, translated)
-    ):
-        raise TranslationError("empty_translation")
-    return translated
+    blank = sum(
+        bool(source.strip()) and not target["text"].strip()
+        for source, target in zip(lines, translated)
+    )
+    if not blank:
+        return translated
+    # A model that won't translate (for example, citing copyright) answers with a note, usually
+    # in the first line, and leaves the rest blank: most lines empty but not all of them.
+    sung = sum(bool(source.strip()) for source in lines)
+    wrote = any(target["text"].strip() for target in translated)
+    raise TranslationError("declined" if wrote and blank * 2 > sung else "empty_translation")

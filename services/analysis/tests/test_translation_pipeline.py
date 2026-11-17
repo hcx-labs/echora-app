@@ -68,3 +68,41 @@ def test_cancellation_and_reuse(monkeypatch):
 
     with pytest.raises(Cancelled):
         pipeline.backfill_translations("user", "url", ["id"], check=cancel, progress=lambda _: None)
+
+
+def test_declined_counted_apart_from_failed(monkeypatch):
+    import echora_analysis
+    from contextlib import contextmanager
+    from echora_analysis.lyric_translation import TranslationError
+
+    settings = ExternalAISettings(
+        enabled=True,
+        url="http://localhost/v1",
+        model="test",
+        language_pairs=[{"source": "ja", "target": "en"}, {"source": "ja", "target": "fr"}],
+    )
+    monkeypatch.setattr(pipeline, "load_settings", lambda: (settings, None))
+    monkeypatch.setattr(
+        echora_analysis, "main", SimpleNamespace(_cipher=lambda: None), raising=False
+    )
+    row = {"track_id": "track", "text": "source", "language": "ja", "provenance": {}}
+    db = MagicMock()
+    db.execute.return_value.fetchall.return_value = [row]
+
+    @contextmanager
+    def connect(*a, **kw):
+        yield db
+
+    monkeypatch.setattr(pipeline.psycopg, "connect", connect)
+    monkeypatch.setattr(pipeline, "require_database_url", lambda: "unused")
+    monkeypatch.setattr(pipeline, "load_translations", lambda *a: [])
+    errors = iter([TranslationError("declined"), TranslationError("transport_failure")])
+
+    def translate(*a, **kw):
+        raise next(errors)
+
+    monkeypatch.setattr(pipeline, "translate", translate)
+    result = pipeline.backfill_translations(
+        "user", "url", ["id"], check=lambda: None, progress=lambda _: None
+    )
+    assert (result["declined"], result["failed"]) == (1, 1)
