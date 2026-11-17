@@ -82,7 +82,9 @@ def _example_percentiles(
             for index, profile in enumerate(modes):
                 if profile is None or not reference_modes:
                     continue
-                value = max(mode_transport_similarity(profile, reference) for reference in reference_modes)
+                value = max(
+                    mode_transport_similarity(profile, reference) for reference in reference_modes
+                )
                 best_passage = max(
                     float(np.max(_normalized_rows(profile[0]) @ _normalized_rows(reference[0]).T))
                     for reference in reference_modes
@@ -108,7 +110,9 @@ def _example_percentiles(
             for index, profile in enumerate(acoustic_modes):
                 if profile is None or not reference_modes:
                     continue
-                value = max(mode_transport_similarity(profile, reference) for reference in reference_modes)
+                value = max(
+                    mode_transport_similarity(profile, reference) for reference in reference_modes
+                )
                 best_passage = max(
                     float(np.max(_normalized_rows(profile[0]) @ _normalized_rows(reference[0]).T))
                     for reference in reference_modes
@@ -158,23 +162,33 @@ def resolve_references(prompt: str, rows: list[dict[str, object]]) -> list[dict[
 
 
 def rank_curation(
-    rows: list[dict[str, object]], matrix: np.ndarray, positive_prompt: str, negative_prompt: str,
-    track_limit: int, refresh_mode: str, existing_track_ids: list[str] | None = None,
-    positive_track_ids: list[str] | None = None, negative_track_ids: list[str] | None = None,
-    lyrics_matrix: np.ndarray | None = None, lyrics_available: np.ndarray | None = None,
+    rows: list[dict[str, object]],
+    matrix: np.ndarray,
+    positive_prompt: str,
+    negative_prompt: str,
+    track_limit: int,
+    refresh_mode: str,
+    existing_track_ids: list[str] | None = None,
+    positive_track_ids: list[str] | None = None,
+    negative_track_ids: list[str] | None = None,
+    lyrics_matrix: np.ndarray | None = None,
+    lyrics_available: np.ndarray | None = None,
     lyrics_positive_queries: np.ndarray | None = None,
     lyrics_negative_queries: np.ndarray | None = None,
     listen_counts: dict[str, int] | None = None,
     recent_track_ids: set[str] | None = None,
     familiarity_percent: int = 70,
     shuffle_seed: int | None = None,
-    sound_prompts: list[list[str]] | None = None, themes_prompts: list[list[str]] | None = None,
+    sound_prompts: list[list[str]] | None = None,
+    themes_prompts: list[list[str]] | None = None,
     sound_negative_prompts: list[list[str]] | None = None,
     themes_negative_prompts: list[list[str]] | None = None,
     sound_weight: int | None = None,
-    voice_matrix: np.ndarray | None = None, voice_available: np.ndarray | None = None,
+    voice_matrix: np.ndarray | None = None,
+    voice_available: np.ndarray | None = None,
     semantic_modes: list[ModeProfile | None] | None = None,
-    acoustic_matrix: np.ndarray | None = None, acoustic_available: np.ndarray | None = None,
+    acoustic_matrix: np.ndarray | None = None,
+    acoustic_available: np.ndarray | None = None,
     acoustic_modes: list[ModeProfile | None] | None = None,
     context_track_ids: list[str] | None = None,
     eligible_track_ids: set[str] | None = None,
@@ -203,26 +217,44 @@ def rank_curation(
         raise ValueError("minimum_match_percentile must be between zero and one")
     # A language-only recipe has no musical requirement. Missing or tied
     # evidence for a requested musical direction is not a language-only recipe.
-    musical_requirement = any((
-        positive_prompt.strip(), negative_prompt.strip(), positive_track_ids,
-        negative_track_ids, context_track_ids, sound_prompts, themes_prompts,
-        sound_negative_prompts, themes_negative_prompts,
-        lyrics_positive_queries is not None and len(lyrics_positive_queries) > 0,
-        lyrics_negative_queries is not None and len(lyrics_negative_queries) > 0,
-        sound_profile, instrumental_only,
-    ))
-    structured = any(value is not None for value in (
-        sound_prompts, themes_prompts, sound_negative_prompts, themes_negative_prompts,
-    ))
+    musical_requirement = any(
+        (
+            positive_prompt.strip(),
+            negative_prompt.strip(),
+            positive_track_ids,
+            negative_track_ids,
+            context_track_ids,
+            sound_prompts,
+            themes_prompts,
+            sound_negative_prompts,
+            themes_negative_prompts,
+            lyrics_positive_queries is not None and len(lyrics_positive_queries) > 0,
+            lyrics_negative_queries is not None and len(lyrics_negative_queries) > 0,
+            sound_profile,
+            instrumental_only,
+        )
+    )
+    structured = any(
+        value is not None
+        for value in (
+            sound_prompts,
+            themes_prompts,
+            sound_negative_prompts,
+            themes_negative_prompts,
+        )
+    )
     positive_references = resolve_references(positive_prompt, rows)
     negative_references = resolve_references(negative_prompt, rows)
     row_by_id = {str(row["id"]): row for row in rows}
     for identifiers, references in (
-        (positive_track_ids or [], positive_references), (negative_track_ids or [], negative_references),
+        (positive_track_ids or [], positive_references),
+        (negative_track_ids or [], negative_references),
     ):
         for identifier in identifiers:
             row = row_by_id.get(str(identifier))
-            if row is not None and not any(item["kind"] == "track" and item["name"] == str(row["title"]) for item in references):
+            if row is not None and not any(
+                item["kind"] == "track" and item["name"] == str(row["title"]) for item in references
+            ):
                 references.append({"kind": "track", "name": str(row["title"])})
 
     def indices(references: list[dict[str, str]]) -> list[int]:
@@ -235,31 +267,59 @@ def rank_curation(
                     break
         return sorted(set(matches))
 
-    positive_indices = sorted(set(indices(positive_references) + [
-        index for index, row in enumerate(rows) if str(row["id"]) in set(positive_track_ids or [])
-    ]))
-    negative_indices = sorted(set(indices(negative_references) + [
-        index for index, row in enumerate(rows) if str(row["id"]) in set(negative_track_ids or [])
-    ]))
+    positive_indices = sorted(
+        set(
+            indices(positive_references)
+            + [
+                index
+                for index, row in enumerate(rows)
+                if str(row["id"]) in set(positive_track_ids or [])
+            ]
+        )
+    )
+    negative_indices = sorted(
+        set(
+            indices(negative_references)
+            + [
+                index
+                for index, row in enumerate(rows)
+                if str(row["id"]) in set(negative_track_ids or [])
+            ]
+        )
+    )
     context_indices = [
         index for index, row in enumerate(rows) if str(row["id"]) in set(context_track_ids or [])
     ]
     example_positive, example_negative, example_evidence = _example_percentiles(
-        matrix, positive_indices, negative_indices, semantic_modes,
-        acoustic_matrix, acoustic_available, acoustic_modes,
+        matrix,
+        positive_indices,
+        negative_indices,
+        semantic_modes,
+        acoustic_matrix,
+        acoustic_available,
+        acoustic_modes,
     )
     context_positive, _, context_evidence = _example_percentiles(
-        matrix, context_indices, [], semantic_modes,
-        acoustic_matrix, acoustic_available, acoustic_modes, "time_",
+        matrix,
+        context_indices,
+        [],
+        semantic_modes,
+        acoustic_matrix,
+        acoustic_available,
+        acoustic_modes,
+        "time_",
     )
     for index in range(len(example_evidence)):
         enhanced = bool(example_evidence[index].get("profile_enhanced")) or bool(
             context_evidence[index].get("profile_enhanced")
         )
-        example_evidence[index].update({
-            key: value for key, value in context_evidence[index].items()
-            if key != "profile_enhanced"
-        })
+        example_evidence[index].update(
+            {
+                key: value
+                for key, value in context_evidence[index].items()
+                if key != "profile_enhanced"
+            }
+        )
         if example_evidence[index] or context_evidence[index]:
             example_evidence[index]["profile_enhanced"] = enhanced
     tag_evidence: dict[str, list[dict[str, object]]] = {str(row["id"]): [] for row in rows}
@@ -269,7 +329,8 @@ def rank_curation(
         return np.exp(np.mean(np.log(stacked), axis=0)).astype(np.float32)
 
     def _semantic_prompt_raw(
-        positives: list[str], negatives: list[str] | None = None,
+        positives: list[str],
+        negatives: list[str] | None = None,
     ) -> np.ndarray:
         """Score a MuQ text direction, using duration modes where available."""
         positive = np.asarray(concepts.embed_texts(positives), dtype=np.float32).mean(axis=0)
@@ -317,7 +378,11 @@ def rank_curation(
         def _voice_percentile(kind: str) -> np.ndarray | None:
             if voice_matrix is None or voice_available is None or not voice_available.any():
                 return None
-            instrumental, female, male = (voice_matrix[:, 0], voice_matrix[:, 1], voice_matrix[:, 2])
+            instrumental, female, male = (
+                voice_matrix[:, 0],
+                voice_matrix[:, 1],
+                voice_matrix[:, 2],
+            )
             evidence = {"female": female, "male": male, "instrumental": instrumental}[kind]
             return empirical_percentiles(evidence, voice_available)
 
@@ -333,8 +398,7 @@ def rank_curation(
             return values
 
         per_tag_semantic: list[np.ndarray] = [
-            _semantic_percentile(group)
-            for group in semantic_groups
+            _semantic_percentile(group) for group in semantic_groups
         ]
         semantic_negative_count = len(negative_groups)
         for group in negative_groups:
@@ -347,17 +411,26 @@ def rank_curation(
         per_tag_lyrics: list[np.ndarray] = []
         lyrics_negative_count = 0
         if lyrics_matrix is not None and lyrics_available is not None:
-            normalized_lyrics = lyrics_matrix / np.maximum(np.linalg.norm(lyrics_matrix, axis=1, keepdims=True), 1e-8)
+            normalized_lyrics = lyrics_matrix / np.maximum(
+                np.linalg.norm(lyrics_matrix, axis=1, keepdims=True), 1e-8
+            )
 
             def _lyrics_percentile(center: np.ndarray) -> np.ndarray:
                 value = np.asarray(center, dtype=np.float32)
                 value /= max(float(np.linalg.norm(value)), 1e-8)
-                return np.asarray(empirical_percentiles(normalized_lyrics @ value, lyrics_available), dtype=np.float32)
+                return np.asarray(
+                    empirical_percentiles(normalized_lyrics @ value, lyrics_available),
+                    dtype=np.float32,
+                )
 
-            positive_centers = np.asarray(lyrics_positive_queries) if lyrics_positive_queries is not None else []
+            positive_centers = (
+                np.asarray(lyrics_positive_queries) if lyrics_positive_queries is not None else []
+            )
             for center in positive_centers:
                 per_tag_lyrics.append(_lyrics_percentile(center))
-            negative_centers = np.asarray(lyrics_negative_queries) if lyrics_negative_queries is not None else []
+            negative_centers = (
+                np.asarray(lyrics_negative_queries) if lyrics_negative_queries is not None else []
+            )
             for center in negative_centers:
                 per_tag_lyrics.append(1.0 - _lyrics_percentile(center))
                 lyrics_negative_count += 1
@@ -365,10 +438,18 @@ def rank_curation(
                 lyrics_percentiles = _geomean_percentiles(per_tag_lyrics)
         channels: list[tuple[np.ndarray, float]] = []
         if per_tag_semantic and per_tag_lyrics:
-            channels.extend([
-                (semantic_percentiles, (sound_weight if sound_weight is not None else 50) / 100.0),
-                (lyrics_percentiles, 1.0 - (sound_weight if sound_weight is not None else 50) / 100.0),
-            ])
+            channels.extend(
+                [
+                    (
+                        semantic_percentiles,
+                        (sound_weight if sound_weight is not None else 50) / 100.0,
+                    ),
+                    (
+                        lyrics_percentiles,
+                        1.0 - (sound_weight if sound_weight is not None else 50) / 100.0,
+                    ),
+                ]
+            )
         elif per_tag_semantic:
             channels.append((semantic_percentiles, 1.0))
         elif per_tag_lyrics:
@@ -389,23 +470,31 @@ def rank_curation(
         semantic_positive_count = len(per_tag_semantic) - semantic_negative_count
         for tag_index, tag_percentiles in enumerate(per_tag_semantic):
             for index, row in enumerate(rows):
-                tag_evidence[str(row["id"])].append({
-                    "channel": "semantic", "tag": tag_index + 1,
-                    "negative": tag_index >= semantic_positive_count,
-                    "percentile": float(tag_percentiles[index]),
-                })
+                tag_evidence[str(row["id"])].append(
+                    {
+                        "channel": "semantic",
+                        "tag": tag_index + 1,
+                        "negative": tag_index >= semantic_positive_count,
+                        "percentile": float(tag_percentiles[index]),
+                    }
+                )
         lyrics_positive_count = len(per_tag_lyrics) - lyrics_negative_count
         for tag_index, tag_percentiles in enumerate(per_tag_lyrics):
             for index, row in enumerate(rows):
-                tag_evidence[str(row["id"])].append({
-                    "channel": "lyrics", "tag": tag_index + 1,
-                    "negative": tag_index >= lyrics_positive_count,
-                    "percentile": float(tag_percentiles[index]),
-                })
+                tag_evidence[str(row["id"])].append(
+                    {
+                        "channel": "lyrics",
+                        "tag": tag_index + 1,
+                        "negative": tag_index >= lyrics_positive_count,
+                        "percentile": float(tag_percentiles[index]),
+                    }
+                )
     else:
         semantic_positives = [positive_prompt] if positive_prompt.strip() else []
         semantic_negatives = [negative_prompt] if negative_prompt.strip() else []
-        semantic_active = bool(semantic_positives) or bool(positive_indices) or bool(context_indices)
+        semantic_active = (
+            bool(semantic_positives) or bool(positive_indices) or bool(context_indices)
+        )
         if semantic_positives:
             semantic_raw = _semantic_prompt_raw(semantic_positives, semantic_negatives)
             percentiles = empirical_percentiles(semantic_raw)
@@ -416,20 +505,34 @@ def rank_curation(
         semantic_percentiles = percentiles.copy()
         lyrics_percentiles = np.full(len(rows), 0.5, dtype=np.float32)
         all_positive_indices = sorted(set(positive_indices + context_indices))
-        has_lyrics_examples = any(
-            lyrics_available[index] for index in all_positive_indices
-        ) if lyrics_available is not None else False
-        if lyrics_matrix is not None and lyrics_available is not None and (lyrics_positive_queries is not None or has_lyrics_examples):
-            positive_parts = list(lyrics_positive_queries) if lyrics_positive_queries is not None else []
+        has_lyrics_examples = (
+            any(lyrics_available[index] for index in all_positive_indices)
+            if lyrics_available is not None
+            else False
+        )
+        if (
+            lyrics_matrix is not None
+            and lyrics_available is not None
+            and (lyrics_positive_queries is not None or has_lyrics_examples)
+        ):
+            positive_parts = (
+                list(lyrics_positive_queries) if lyrics_positive_queries is not None else []
+            )
             positive_parts.extend(
                 lyrics_matrix[index] for index in all_positive_indices if lyrics_available[index]
             )
             positive_center = np.mean(positive_parts, axis=0)
             positive_center /= max(float(np.linalg.norm(positive_center)), 1e-8)
-            normalized_lyrics = lyrics_matrix / np.maximum(np.linalg.norm(lyrics_matrix, axis=1, keepdims=True), 1e-8)
+            normalized_lyrics = lyrics_matrix / np.maximum(
+                np.linalg.norm(lyrics_matrix, axis=1, keepdims=True), 1e-8
+            )
             lyrics_raw = normalized_lyrics @ positive_center
-            negative_parts = list(lyrics_negative_queries) if lyrics_negative_queries is not None else []
-            negative_parts.extend(lyrics_matrix[index] for index in negative_indices if lyrics_available[index])
+            negative_parts = (
+                list(lyrics_negative_queries) if lyrics_negative_queries is not None else []
+            )
+            negative_parts.extend(
+                lyrics_matrix[index] for index in negative_indices if lyrics_available[index]
+            )
             if negative_parts:
                 negative_center = np.mean(negative_parts, axis=0)
                 negative_center /= max(float(np.linalg.norm(negative_center)), 1e-8)
@@ -437,20 +540,29 @@ def rank_curation(
             lyrics_percentiles = empirical_percentiles(lyrics_raw, lyrics_available)
             if semantic_active:
                 score, percentiles = combine_concept_percentiles(
-                    semantic_raw, lyrics_raw, lyrics_available, 0.45, 0.55,
+                    semantic_raw,
+                    lyrics_raw,
+                    lyrics_available,
+                    0.45,
+                    0.55,
                 )
             else:
                 score, percentiles = lyrics_raw, lyrics_percentiles
         example_parts = [
-            value for value in (example_positive, context_positive, example_negative)
+            value
+            for value in (example_positive, context_positive, example_negative)
             if value is not None
         ]
         if example_parts:
-            semantic_parts = ([semantic_percentiles] if semantic_active and semantic_positives else [])
+            semantic_parts = (
+                [semantic_percentiles] if semantic_active and semantic_positives else []
+            )
             semantic_parts.extend(example_parts)
             semantic_percentiles = _geomean_percentiles(semantic_parts)
-            if lyrics_matrix is not None and lyrics_available is not None and (
-                lyrics_positive_queries is not None or has_lyrics_examples
+            if (
+                lyrics_matrix is not None
+                and lyrics_available is not None
+                and (lyrics_positive_queries is not None or has_lyrics_examples)
             ):
                 score = 0.45 * semantic_percentiles + 0.55 * lyrics_percentiles
             else:
@@ -461,7 +573,10 @@ def rank_curation(
     if sound_profile:
         profile_parts: list[np.ndarray] = []
         for axis, target in sound_profile.items():
-            raw = np.asarray([row.get("sound_descriptors", {}).get(axis, np.nan) for row in rows], dtype=np.float32)
+            raw = np.asarray(
+                [row.get("sound_descriptors", {}).get(axis, np.nan) for row in rows],
+                dtype=np.float32,
+            )
             available = np.isfinite(raw)
             if available.sum() < 2:
                 continue
@@ -481,15 +596,19 @@ def rank_curation(
             profile_parts.append(np.where(available, closeness, np.nan))
             for index in np.flatnonzero(available):
                 evidence = {
-                    "target": float(target), "actual_percentile": float(actual[index]),
-                    "value": float(raw[index]), "closeness": float(closeness[index]),
+                    "target": float(target),
+                    "actual_percentile": float(actual[index]),
+                    "value": float(raw[index]),
+                    "closeness": float(closeness[index]),
                 }
                 if axis == "vocals":
-                    evidence.update({
-                        "vocal_weight": vocal_weight,
-                        "instrumental_weight": instrumental_weight,
-                        "instrumental_percentile": float(1.0 - actual[index]),
-                    })
+                    evidence.update(
+                        {
+                            "vocal_weight": vocal_weight,
+                            "instrumental_weight": instrumental_weight,
+                            "instrumental_percentile": float(1.0 - actual[index]),
+                        }
+                    )
                 profile_evidence[index][axis] = evidence
         if profile_parts:
             profile_values = np.asarray(profile_parts, dtype=np.float32)
@@ -516,22 +635,34 @@ def rank_curation(
         classified_instrumentals = {
             str(rows[index]["id"])
             for index in range(len(rows))
-            if voice_matrix is not None and voice_available is not None
+            if voice_matrix is not None
+            and voice_available is not None
             and bool(voice_available[index])
             and float(voice_matrix[index, 0]) >= INSTRUMENTAL_ONLY_THRESHOLD
         }
-        eligible = classified_instrumentals if eligible is None else eligible & classified_instrumentals
+        eligible = (
+            classified_instrumentals if eligible is None else eligible & classified_instrumentals
+        )
     # Embedding score filters first; Last.fm only promotes within the high scorers.
-    matching_order = [int(index) for index in np.argsort(adjusted, kind="stable")[::-1]
-                      if (not musical_requirement or float(percentiles[index]) >= minimum_match_percentile)
-                      and (eligible is None or str(rows[index]["id"]) in eligible)]
-    familiar_matching = [index for index in matching_order if counts.get(str(rows[index]["id"]), 0) > 0]
+    matching_order = [
+        int(index)
+        for index in np.argsort(adjusted, kind="stable")[::-1]
+        if (not musical_requirement or float(percentiles[index]) >= minimum_match_percentile)
+        and (eligible is None or str(rows[index]["id"]) in eligible)
+    ]
+    familiar_matching = [
+        index for index in matching_order if counts.get(str(rows[index]["id"]), 0) > 0
+    ]
     familiar_set = set(familiar_matching)
     new_order = [index for index in matching_order if index not in familiar_set]
     # The slider guides how many familiar slots to aim for, but familiar tracks
     # only come from the matching pool. If none of them cleared the threshold,
     # Last.fm is irrelevant and the whole playlist comes from new tracks.
-    familiar_target = min(round(track_limit * familiarity_percent / 100), len(familiar_matching)) if listen_counts is not None else 0
+    familiar_target = (
+        min(round(track_limit * familiarity_percent / 100), len(familiar_matching))
+        if listen_counts is not None
+        else 0
+    )
     selected_indices: list[int] = []
     artist_counts: dict[str, int] = {}
     used_recording_groups: set[str] = set()
@@ -560,26 +691,41 @@ def rank_curation(
         row = rows[index]
         count = counts.get(str(row["id"]), 0)
         familiar = count > 0
-        selected.append({
-            **row, "score": float(score[index]), "percentile": float(percentiles[index]),
-            "retained": str(row["id"]) in existing,
-            "evidence": {
-                "match_basis": "library_relative" if musical_requirement else "no_musical_requirement",
-                "match_confidence": None,
-                "representation_runs": row.get("representation_runs", {}),
-                "minimum_match_percentile": minimum_match_percentile if musical_requirement else None,
-                "semantic_percentile": float(semantic_percentiles[index]),
-                "lyrics_percentile": float(lyrics_percentiles[index]),
-                "lyrics_available": bool(lyrics_available[index]) if lyrics_available is not None else False,
-                "listen_count": count, "selection_pool": "familiar" if familiar else "discovery",
-                "tag_percentiles": tag_evidence.get(str(row["id"]), []),
-                "sound_profile": profile_evidence[index],
-                "instrumental_only": ({
-                    "threshold": INSTRUMENTAL_ONLY_THRESHOLD,
-                    "confidence": float(voice_matrix[index, 0]),
-                } if instrumental_only and voice_matrix is not None else None),
-                "example_similarity": example_evidence[index],
-            },
-        })
+        selected.append(
+            {
+                **row,
+                "score": float(score[index]),
+                "percentile": float(percentiles[index]),
+                "retained": str(row["id"]) in existing,
+                "evidence": {
+                    "match_basis": "library_relative"
+                    if musical_requirement
+                    else "no_musical_requirement",
+                    "match_confidence": None,
+                    "representation_runs": row.get("representation_runs", {}),
+                    "minimum_match_percentile": minimum_match_percentile
+                    if musical_requirement
+                    else None,
+                    "semantic_percentile": float(semantic_percentiles[index]),
+                    "lyrics_percentile": float(lyrics_percentiles[index]),
+                    "lyrics_available": bool(lyrics_available[index])
+                    if lyrics_available is not None
+                    else False,
+                    "listen_count": count,
+                    "selection_pool": "familiar" if familiar else "discovery",
+                    "tag_percentiles": tag_evidence.get(str(row["id"]), []),
+                    "sound_profile": profile_evidence[index],
+                    "instrumental_only": (
+                        {
+                            "threshold": INSTRUMENTAL_ONLY_THRESHOLD,
+                            "confidence": float(voice_matrix[index, 0]),
+                        }
+                        if instrumental_only and voice_matrix is not None
+                        else None
+                    ),
+                    "example_similarity": example_evidence[index],
+                },
+            }
+        )
     random.Random(shuffle_seed).shuffle(selected)
     return selected, {"positive": positive_references, "negative": negative_references}
