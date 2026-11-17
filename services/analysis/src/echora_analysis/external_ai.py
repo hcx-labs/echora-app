@@ -68,6 +68,8 @@ class ExternalAISettings(BaseModel):
     transcription_prompt: str = Field(
         default=DEFAULT_TRANSCRIPTION_PROMPT, min_length=1, max_length=8000
     )
+    # Its own model (a stronger one fixes mixed-language refrains); empty uses `model`.
+    transcription_model: str = Field(default="", max_length=200)
     # Off by default: it sends every song's lyrics to the provider once.
     lyric_themes: bool = False
 
@@ -96,7 +98,7 @@ class ExternalAISettings(BaseModel):
             ) from None
         return value.rstrip("/")
 
-    @field_validator("model", "prompt", "transcription_prompt")
+    @field_validator("model", "prompt", "transcription_prompt", "transcription_model")
     @classmethod
     def trim(cls, value):
         return value.strip()
@@ -168,10 +170,13 @@ class TranscriptionUpdate(BaseModel):
     transcription_prompt: str = Field(
         default=DEFAULT_TRANSCRIPTION_PROMPT, min_length=1, max_length=8000
     )
+    transcription_model: str = Field(default="", max_length=200)
 
     @model_validator(mode="after")
     def coherent(self):
-        self.transcription_prompt = ExternalAISettings(**self.model_dump()).transcription_prompt
+        validated = ExternalAISettings(**self.model_dump())
+        self.transcription_prompt = validated.transcription_prompt
+        self.transcription_model = validated.transcription_model
         return self
 
 
@@ -233,7 +238,13 @@ def router(require_user, cipher):
         return {
             **{
                 key: value[key]
-                for key in ("enabled", "transcription_refinement", "transcription_prompt")
+                for key in (
+                    "enabled",
+                    "transcription_refinement",
+                    "transcription_prompt",
+                    "transcription_model",
+                    "model",
+                )
             },
             "default_transcription_prompt": DEFAULT_TRANSCRIPTION_PROMPT,
         }

@@ -93,6 +93,22 @@ def test_refine_keeps_timing_and_falls_back_per_line():
     )
 
 
+def test_refine_uses_its_own_model_when_set():
+    content = {"summary": "s", "lines": [{"id": i, "text": t} for i, t in enumerate("abc")]}
+    for own, expected in [("", "m"), ("strong", "strong")]:
+        seen = []
+        out = refine(
+            settings(transcription_model=own),
+            None,
+            RESULT,
+            title="T",
+            artist="A",
+            transport=reply(content, seen),
+        )
+        assert seen[0]["model"] == expected
+        assert out["transcription"]["refinement"]["model"] == expected
+
+
 @pytest.mark.parametrize(
     "content",
     [
