@@ -21,11 +21,9 @@ import {
   readPlaybackPreferences,
   writePlaybackPreferences,
 } from "../player/playbackPreferences";
-import { SectionHeading, Choice, ChoiceItem, LocationToggles, Toggle } from "./Presentation";
+import { SectionHeading, Choice, ChoiceItem, Toggle } from "./Presentation";
 
 import { Button } from "../ui/button";
-import { SettingsNotice } from "./SettingsNotice";
-import { RangeControl } from "./RangeControl";
 import { SettingRow } from "./SettingRow";
 import { SidePanel } from "../layout/side-panel";
 import { Pane } from "../layout/pane";
@@ -41,14 +39,8 @@ import { toast } from "sonner";
 import { Notice } from "../ui/notice";
 import NavidromePluginSettings from "./NavidromePluginSettings";
 import MotionArtworkSettings from "./MotionArtworkSettings";
-
-type Feature = "transcription" | "karaoke" | "hum";
-type Location = "local" | "modal";
-const featureNames: Record<Feature, string> = {
-  transcription: "AI lyrics generation",
-  karaoke: "Karaoke timing",
-  hum: "Query by humming",
-};
+import AnalysisFeatures from "./AnalysisFeatures";
+import AppearanceSettings from "./AppearanceSettings";
 
 const allTabs = [
   "server",
@@ -156,23 +148,6 @@ export default function SettingsView() {
   // Only load failures stay on the page; action results are toasts.
   const [loadError, setLoadError] = useState("");
   const [playback, setPlayback] = useState<PlaybackPreferences>(defaultPlaybackPreferences);
-  // Hugging Face token for gated model downloads, shared by this server and Modal.
-  const [huggingface, setHuggingface] = useState<{ has: boolean; account: string | null }>({
-    has: false,
-    account: null,
-  });
-  const [huggingfaceToken, setHuggingfaceToken] = useState("");
-  const [motionArtwork, setMotionArtwork] = useState<{
-    enabled: boolean;
-    generate_during_sync: boolean;
-    generate_on_modal: boolean;
-  } | null>(null);
-  // Optional features, switched on separately for syncs on this server and on Modal.
-  const [features, setFeatures] = useState<Record<Feature, Record<Location, boolean>>>({
-    transcription: { local: false, modal: false },
-    karaoke: { local: true, modal: true },
-    hum: { local: true, modal: true },
-  });
 
   function apply(value: Settings) {
     setSettings(value);
@@ -181,21 +156,6 @@ export default function SettingsView() {
     setLastfmUsername(value.lastfm.username || "");
     setTimezone(value.timezone);
     setDisplayName(value.profile.display_name);
-    setHuggingface({
-      has: value.models.has_huggingface_token,
-      account: value.models.huggingface_account,
-    });
-    setFeatures({
-      transcription: {
-        local: value.models.transcription_processing_enabled,
-        modal: value.models.transcription_modal_enabled,
-      },
-      karaoke: {
-        local: value.models.karaoke_processing_enabled,
-        modal: value.models.karaoke_modal_enabled,
-      },
-      hum: { local: value.models.hum_processing_enabled, modal: value.models.hum_modal_enabled },
-    });
     setPlayback(readPlaybackPreferences());
   }
   function load() {
@@ -215,89 +175,6 @@ export default function SettingsView() {
     setPlayback(next);
     writePlaybackPreferences(next);
     toast.success("Playback preferences saved", { id: "playback-preferences" });
-  }
-  function saveAnimationSpeed(next: PlaybackPreferences["animationSpeed"]) {
-    savePlayback({ ...playback, animationSpeed: next });
-  }
-  async function saveHuggingfaceToken(token: string) {
-    setBusy(true);
-    try {
-      const result = await api<{ has_token: boolean; account: string | null }>(
-        "/settings/models/huggingface",
-        {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ token }),
-        },
-      );
-      setHuggingface({ has: result.has_token, account: result.account });
-      setHuggingfaceToken("");
-      toast.success(result.has_token ? "Hugging Face token saved" : "Hugging Face token removed", {
-        description: result.account ? `Signed in as ${result.account}.` : undefined,
-      });
-    } catch (reason) {
-      fail("Could not save the Hugging Face token", reason);
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function saveMotionArtwork(location: Location, next: boolean) {
-    setBusy(true);
-    try {
-      await api("/settings/motion-artwork/location", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ enabled: next, location }),
-      });
-      setMotionArtwork((current) =>
-        current
-          ? {
-              ...current,
-              [location === "modal" ? "generate_on_modal" : "generate_during_sync"]: next,
-            }
-          : current,
-      );
-      toast.success(
-        `Motion artwork ${next ? "on" : "off"} for ${location === "modal" ? "Modal syncs" : "syncs on this server"}`,
-        {
-          description:
-            next && location === "modal"
-              ? "The next Modal sync downloads the motion artwork models (about 44 GB) to Modal first."
-              : undefined,
-        },
-      );
-    } catch (reason) {
-      fail("Could not save motion artwork", reason);
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function saveFeature(feature: Feature, location: Location, next: boolean) {
-    const where = location === "modal" ? "Modal syncs" : "syncs on this server";
-    const name = featureNames[feature];
-    setBusy(true);
-    try {
-      const result = await api<{ pending?: number }>(`/settings/models/${feature}`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ enabled: next, location }),
-      });
-      setFeatures((current) => ({
-        ...current,
-        [feature]: { ...current[feature], [location]: next },
-      }));
-      const pending =
-        typeof result.pending === "number" ? `${result.pending} tracks are waiting. ` : "";
-      toast.success(`${name} ${next ? "on" : "off"} for ${where}`, {
-        description: next
-          ? `${pending}The next Entire Library sync ${location === "modal" ? "on Modal" : "on this server"} processes them.`
-          : `Existing results remain available. ${where[0].toUpperCase() + where.slice(1)} skip new ${name.toLowerCase()} work.`,
-      });
-    } catch (reason) {
-      fail(`Could not save ${name.toLowerCase()}`, reason);
-    } finally {
-      setBusy(false);
-    }
   }
 
   function fail(title: string, reason: unknown) {
@@ -411,18 +288,6 @@ export default function SettingsView() {
     settings && !settings.profile.is_admin && adminTabs.includes(knownTab) ? "account" : knownTab;
   // Sign-in settings load whenever that section opens, by click or by URL.
   const oidcOpen = tab === "oidc";
-  // Motion artwork's location switches live in its own settings; load them with the models tab.
-  const modelsOpen = tab === "models" && Boolean(settings?.profile.is_admin);
-  useEffect(() => {
-    if (!modelsOpen) return;
-    api<{ enabled: boolean; generate_during_sync: boolean; generate_on_modal: boolean }>(
-      "/settings/motion-artwork",
-    )
-      .then(({ enabled, generate_during_sync, generate_on_modal }) =>
-        setMotionArtwork({ enabled, generate_during_sync, generate_on_modal }),
-      )
-      .catch(() => setMotionArtwork(null));
-  }, [modelsOpen]);
   useEffect(() => {
     if (!oidcOpen) return;
     api<OidcSettings>("/settings/oidc")
@@ -717,334 +582,8 @@ export default function SettingsView() {
                     </SettingRow>
                   </section>
                 )}
-                {tab === "models" && settings?.profile.is_admin && (
-                  <section>
-                    <SectionHeading
-                      title="Optional features"
-                      description="Each sync runs on this server or on Modal, chosen when it starts. A feature runs only in syncs where it is switched on, so work that needs a GPU can be left to Modal."
-                    />
-                    <SettingsNotice tone="warning" title="AI-generated lyrics">
-                      Generated words and timing may be inaccurate. Existing lyrics remain available
-                      when processing is switched off.
-                    </SettingsNotice>
-                    <LocationToggles
-                      label="AI lyrics generation"
-                      description="Use Mel-Band-Roformer and MOSS to transcribe tracks with missing lyrics. Off by default. Switching off prevents further tracks from starting."
-                      local={features.transcription.local}
-                      modal={features.transcription.modal}
-                      disabled={busy}
-                      onChange={(location, next) => saveFeature("transcription", location, next)}
-                    />
-                    <LocationToggles
-                      label="Karaoke timing"
-                      description="Generate syllable timing for tracks with synced lyrics."
-                      local={features.karaoke.local}
-                      modal={features.karaoke.modal}
-                      disabled={busy}
-                      onChange={(location, next) => saveFeature("karaoke", location, next)}
-                    />
-                    <LocationToggles
-                      label="Query by humming"
-                      description="Extract melody contours from the full mix, vocals, and accompaniment. Tracks already indexed remain searchable."
-                      local={features.hum.local}
-                      modal={features.hum.modal}
-                      disabled={busy}
-                      onChange={(location, next) => saveFeature("hum", location, next)}
-                    />
-                    {motionArtwork && (
-                      <LocationToggles
-                        label="Motion artwork"
-                        description={
-                          motionArtwork.enabled
-                            ? "Render looping covers with LTX-2.5. Style and quality are in Motion artwork settings."
-                            : "Enable motion artwork in Motion artwork settings first."
-                        }
-                        local={motionArtwork.generate_during_sync}
-                        modal={motionArtwork.generate_on_modal}
-                        disabled={busy || !motionArtwork.enabled}
-                        onChange={saveMotionArtwork}
-                      />
-                    )}
-                    <div className={styles.group}>
-                      <SectionHeading
-                        title="Always processed"
-                        description="Search, curations and voice filters depend on these, so every sync runs them wherever it runs."
-                      />
-                    </div>
-                    <SettingRow label="Audio embeddings" description="MuQ-MuLan and MERT">
-                      <span className="text-[12px] text-muted-foreground">Every sync</span>
-                    </SettingRow>
-                    <SettingRow label="Lyrics embeddings" description="BGE-M3">
-                      <span className="text-[12px] text-muted-foreground">Every sync</span>
-                    </SettingRow>
-                    <SettingRow label="Voice detection" description="Vocal presence and voice type">
-                      <span className="text-[12px] text-muted-foreground">Every sync</span>
-                    </SettingRow>
-                    <div className={styles.group}>
-                      <SectionHeading
-                        title="Model downloads"
-                        description="Some models are gated on Hugging Face, such as LTX-2.5 for motion artwork. One token serves downloads on this server and on Modal."
-                      />
-                    </div>
-                    <SettingRow
-                      label="Hugging Face token"
-                      htmlFor="huggingface-token"
-                      description={
-                        huggingface.has
-                          ? `Saved${huggingface.account ? ` for ${huggingface.account}` : ""}. Enter a new token to replace it. Accept each gated model's license with this account.`
-                          : "A read token from Hugging Face → Settings → Access Tokens. Accept each gated model's license with the same account. Stored encrypted."
-                      }
-                    >
-                      <form
-                        className="flex gap-2"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          if (huggingfaceToken.trim()) void saveHuggingfaceToken(huggingfaceToken);
-                        }}
-                      >
-                        <Input
-                          id="huggingface-token"
-                          type="password"
-                          autoComplete="new-password"
-                          maxLength={1000}
-                          value={huggingfaceToken}
-                          placeholder={huggingface.has ? "••••••••••••••••" : "hf_…"}
-                          onChange={(event) => setHuggingfaceToken(event.target.value)}
-                          disabled={busy}
-                        />
-                        <Button
-                          type="submit"
-                          variant="outline"
-                          disabled={busy || !huggingfaceToken.trim()}
-                        >
-                          Save
-                        </Button>
-                        {huggingface.has && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={busy}
-                            onClick={() => saveHuggingfaceToken("")}
-                          >
-                            Remove
-                          </Button>
-                        )}
-                      </form>
-                    </SettingRow>
-                  </section>
-                )}
-                {tab === "appearance" && (
-                  <section>
-                    <SectionHeading title="Motion and interface" />
-                    <SettingRow
-                      label={<>Animation speed</>}
-                      htmlFor="settings-field-7"
-                      description={<>This preference applies across the entire application.</>}
-                    >
-                      <Choice
-                        id="settings-field-7"
-                        value={playback.animationSpeed}
-                        onChange={(value) =>
-                          saveAnimationSpeed(value as PlaybackPreferences["animationSpeed"])
-                        }
-                      >
-                        <ChoiceItem value="slow">Slow</ChoiceItem>
-                        <ChoiceItem value="normal">Normal</ChoiceItem>
-                        <ChoiceItem value="fast">Fast</ChoiceItem>
-                      </Choice>
-                    </SettingRow>
-                    <SettingRow
-                      label={<>Karaoke highlight style</>}
-                      htmlFor="settings-field-8"
-                      description={
-                        <>
-                          Highlight each syllable at once, fill it with a moving liquid edge, bring
-                          words out of a blur (Bloom), or punch each word in like a combo hit
-                          (Strike). Timing stays the same. Saved in this browser.
-                        </>
-                      }
-                    >
-                      <Choice
-                        id="settings-field-8"
-                        value={playback.karaokeHighlightStyle}
-                        onChange={(value) =>
-                          savePlayback({
-                            ...playback,
-                            karaokeHighlightStyle:
-                              value as PlaybackPreferences["karaokeHighlightStyle"],
-                          })
-                        }
-                      >
-                        <ChoiceItem value="syllable">Syllable highlight</ChoiceItem>
-                        <ChoiceItem value="lava">Lava fill</ChoiceItem>
-                      </Choice>
-                    </SettingRow>
-                    <section className="pt-6">
-                      <SectionHeading
-                        title="Audio-reactive backdrop"
-                        description="Choose how the desktop background responds to the playing track and its frequency bands."
-                      />
-                      <SettingRow
-                        label={<>Backdrop style</>}
-                        htmlFor="settings-field-9"
-                        description={
-                          <>
-                            All styles use the playing track and its album-derived color palette.
-                            Backdrops are hidden in the compact mobile layout.
-                          </>
-                        }
-                      >
-                        <Choice
-                          id="settings-field-9"
-                          value={playback.backdropPreset}
-                          onChange={(value) =>
-                            savePlayback({
-                              ...playback,
-                              backdropPreset: value as PlaybackPreferences["backdropPreset"],
-                            })
-                          }
-                        >
-                          <ChoiceItem value="waves">PS3 waves</ChoiceItem>
-                          <ChoiceItem value="oscilloscope">Oscilloscope</ChoiceItem>
-                          <ChoiceItem value="void">Void tunnel</ChoiceItem>
-                          <ChoiceItem value="curtain">Digital curtain</ChoiceItem>
-                          <ChoiceItem value="ascii">ASCII dance</ChoiceItem>
-                          <ChoiceItem value="roots">Living roots</ChoiceItem>
-                          <ChoiceItem value="lightningfall">Lightning Fall</ChoiceItem>
-                          <ChoiceItem value="meshgrid">Mesh Grid</ChoiceItem>
-                          <ChoiceItem value="clouds">Storm clouds</ChoiceItem>
-                          <ChoiceItem value="waterdrops">Water drops</ChoiceItem>
-                        </Choice>
-                        {playback.backdropPreset === "waterdrops" && (
-                          <SettingsNotice tone="info" title="Backdrop behavior">
-                            Music drives invisible drop impacts on an album-colored water surface.
-                            Bass sets impact size, vocals change drop velocity and ripple spread,
-                            and treble changes surface tension and damping. Ripples overlap and
-                            interfere, then settle when playback pauses.
-                          </SettingsNotice>
-                        )}
-                        {playback.backdropPreset === "meshgrid" && (
-                          <SettingsNotice tone="info" title="Backdrop behavior">
-                            A rippling triangular landscape in album-art colors. Bass raises the
-                            waves, vocals roughen the mesh, and treble lights the edges.
-                          </SettingsNotice>
-                        )}
-                        {playback.backdropPreset === "lightningfall" && (
-                          <SettingsNotice tone="info" title="Backdrop behavior">
-                            Dense falling trails in album-art colors. Bass and tempo drive the flow;
-                            individual frequency bands subtly vary trail length, thickness, and
-                            glow. Pausing dims the trails.
-                          </SettingsNotice>
-                        )}
-                        {playback.backdropPreset === "clouds" && (
-                          <SettingsNotice tone="warning" title="Flashing effects">
-                            Full-background smoke. Bass drives billowing, vocals drive cloud color,
-                            and treble lights cloud edges and soft internal lightning. Attacks in
-                            any band can trigger branching strikes. Drift follows estimated tempo.
-                            Strikes are at least 0.8 seconds apart. Contains flashes. Set all three
-                            sensitivity sliders to zero for no lightning, or turn off Animated
-                            backdrop.
-                          </SettingsNotice>
-                        )}
-                      </SettingRow>
-                      <SettingRow
-                        label={<>Wave frame rate</>}
-                        htmlFor="settings-field-10"
-                        description={
-                          <>
-                            Stored in this browser so each device can use an appropriate rendering
-                            load.
-                          </>
-                        }
-                      >
-                        <Choice
-                          id="settings-field-10"
-                          value={playback.waveFrameRate}
-                          onChange={(value) =>
-                            savePlayback({
-                              ...playback,
-                              waveFrameRate: value as PlaybackPreferences["waveFrameRate"],
-                            })
-                          }
-                        >
-                          <ChoiceItem value="30">30 FPS</ChoiceItem>
-                          <ChoiceItem value="60">60 FPS</ChoiceItem>
-                          <ChoiceItem value="uncapped">Uncapped</ChoiceItem>
-                        </Choice>
-                      </SettingRow>
-                      <Toggle
-                        label="Animated backdrop"
-                        checked={playback.wavesEnabled}
-                        disabled={busy}
-                        onChange={() =>
-                          savePlayback({ ...playback, wavesEnabled: !playback.wavesEnabled })
-                        }
-                      />
-                      <div>
-                        <SettingRow
-                          label={
-                            <>
-                              <b>Backdrop opacity</b>
-                              <output className="font-normal tabular-nums">
-                                {Math.round(playback.backdropOpacity * 100)}%
-                              </output>
-                            </>
-                          }
-                          htmlFor="settings-field-11"
-                        >
-                          <RangeControl
-                            id="settings-field-11"
-                            aria-label="Backdrop opacity"
-                            min="0"
-                            max="1"
-                            step="0.05"
-                            value={playback.backdropOpacity}
-                            onChange={(event) =>
-                              savePlayback({
-                                ...playback,
-                                backdropOpacity: Number(event.target.value),
-                              })
-                            }
-                          />
-                        </SettingRow>
-                      </div>
-                      <div>
-                        {(
-                          [
-                            ["bassReactivity", "Bass"],
-                            ["vocalReactivity", "Vocals"],
-                            ["trebleReactivity", "Treble"],
-                          ] as const
-                        ).map(([key, label]) => (
-                          <SettingRow
-                            key={key}
-                            label={
-                              <>
-                                <b>{label}</b>
-                                <output className="font-normal tabular-nums">
-                                  {Math.round(playback[key] * 100)}%
-                                </output>
-                              </>
-                            }
-                            htmlFor={`settings-${key}`}
-                          >
-                            <RangeControl
-                              id={`settings-${key}`}
-                              disabled={!playback.wavesEnabled}
-                              min="0"
-                              max="2"
-                              step="0.05"
-                              value={playback[key]}
-                              onChange={(event) =>
-                                savePlayback({ ...playback, [key]: Number(event.target.value) })
-                              }
-                            />
-                          </SettingRow>
-                        ))}
-                      </div>
-                    </section>
-                  </section>
-                )}
+                {tab === "models" && settings?.profile.is_admin && <AnalysisFeatures />}
+                {tab === "appearance" && <AppearanceSettings />}
                 {tab === "timezone" && (
                   <form onSubmit={saveTimezone}>
                     <SectionHeading title="Listening periods" />

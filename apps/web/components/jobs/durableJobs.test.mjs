@@ -41,7 +41,7 @@ test('cleanup aborts requests and ignores late results', async t => {
 });
 test('setup and shared hook do not expose cancellation actions', () => {
   // Source-level contract guard: the frontend suite has no DOM rendering harness.
-  for (const path of ['../onboarding/SetupWizard.tsx', './useDurableJob.ts']) {
+  for (const path of ['../onboarding/LibraryStep.tsx', './useDurableJob.ts']) {
     const source = readFileSync(new URL(path, import.meta.url), 'utf8');
     assert.doesNotMatch(source, /cancel/i, `${path} must not expose job cancellation`);
   }

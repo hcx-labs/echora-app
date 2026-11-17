@@ -44,7 +44,7 @@ export default function AppShell({
         return;
       }
       if (!onboarding && !value.onboarding_complete) {
-        router.replace("/connect");
+        router.replace("/setup");
         return;
       }
       setUser(value);
@@ -63,7 +63,7 @@ export default function AppShell({
     const cachedUser = getCachedUser();
     if (cachedUser) {
       if (onboarding && cachedUser.onboarding_complete) router.replace("/home");
-      else if (!onboarding && !cachedUser.onboarding_complete) router.replace("/connect");
+      else if (!onboarding && !cachedUser.onboarding_complete) router.replace("/setup");
     } else
       fetch("/analysis/auth/me")
         .then((response) => {

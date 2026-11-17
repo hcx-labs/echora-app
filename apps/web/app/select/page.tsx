@@ -1,5 +1,6 @@
-import SetupWizard from "@/components/onboarding/SetupWizard";
+import { redirect } from "next/navigation";
 
-export default function SelectPage() {
-  return <SetupWizard initialStep={1} />;
+// Onboarding moved to /setup; old links land at its start.
+export default function LegacySetupPage() {
+  redirect("/setup");
 }

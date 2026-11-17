@@ -182,3 +182,9 @@
 :lang(ko) { font-family: 'Manrope', 'Noto Sans KR', var(--script-fonts), sans-serif; }
 :lang(zh) { font-family: 'Manrope', 'Noto Sans SC', var(--script-fonts), sans-serif; }
 :lang(zh-TW), :lang(zh-HK), :lang(zh-Hant) { font-family: 'Manrope', 'Noto Sans TC', var(--script-fonts), sans-serif; }
+
+/* Onboarding: an indeterminate bar while waiting on the music server or a job. */
+@keyframes setup-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}

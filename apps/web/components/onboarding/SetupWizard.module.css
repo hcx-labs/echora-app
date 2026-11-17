@@ -1,4 +1,0 @@
-.workspace{height:100%;min-height:0;min-width:0;background:var(--workspace)}
-.step{display:flex;flex-direction:column;height:100%;min-height:0;min-width:0}
-.content{flex:1;min-height:0;overflow:auto;padding:8px var(--gutter) 48px}
-.connect>form{max-width:720px}
