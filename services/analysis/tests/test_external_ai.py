@@ -271,6 +271,8 @@ def test_transport_failure_and_empty_translation():
                 "enabled",
                 "transcription_refinement",
                 "transcription_prompt",
+                "transcription_model",
+                "model",
                 "default_transcription_prompt",
             },
         ),

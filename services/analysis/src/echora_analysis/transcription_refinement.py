@@ -61,6 +61,13 @@ def enabled(settings: ExternalAISettings) -> bool:
     return bool(settings.ready() and settings.transcription_refinement)
 
 
+def refinement_settings(settings: ExternalAISettings) -> ExternalAISettings:
+    """The settings refinement runs with: its own model when one is set, else the shared one."""
+    if not settings.transcription_model:
+        return settings
+    return settings.model_copy(update={"model": settings.transcription_model})
+
+
 def prompt_revision(settings: ExternalAISettings) -> str:
     return hashlib.sha256((settings.transcription_prompt + CONTRACT).encode()).hexdigest()[:16]
 
@@ -106,6 +113,8 @@ def refine(
     transport=None,
 ) -> dict:
     """The transcription result with corrected line text and a `refinement` record."""
+    # Refinement may have its own model; every request below and the record use it.
+    settings = refinement_settings(settings)
     lines = result.get("lines") or []
     if not 0 < len(lines) <= MAX_LINES:
         raise RefinementError("invalid_input")

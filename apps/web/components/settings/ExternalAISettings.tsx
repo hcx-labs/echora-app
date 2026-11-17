@@ -29,6 +29,8 @@ type Configuration = {
   has_key: boolean;
   transcription_refinement: boolean;
   transcription_prompt: string;
+  /** Refinement's own model; empty uses `model`. */
+  transcription_model: string;
   default_transcription_prompt?: string;
   lyric_themes: boolean;
 };
@@ -106,6 +108,8 @@ async function request(
       enabled: body.enabled,
       transcription_refinement: body.transcription_refinement,
       transcription_prompt: body.transcription_prompt,
+      transcription_model: body.transcription_model ?? "",
+      model: body.model,
       default_transcription_prompt: body.default_transcription_prompt,
     };
   if (section === "/themes") return { enabled: body.enabled, lyric_themes: body.lyric_themes };
@@ -149,6 +153,7 @@ function SettingsSection({ section }: { section: Section }) {
             language_pairs: [],
             transcription_refinement: true,
             transcription_prompt: "",
+            transcription_model: "",
             lyric_themes: false,
             ...result,
           });
@@ -197,6 +202,7 @@ function SettingsSection({ section }: { section: Section }) {
             ? {
                 transcription_refinement: value.transcription_refinement,
                 transcription_prompt: value.transcription_prompt.trim(),
+                transcription_model: value.transcription_model.trim(),
               }
             : {
                 prompt: value.prompt.trim(),
@@ -483,7 +489,7 @@ function SettingsSection({ section }: { section: Section }) {
                   <SectionHeading
                     id="external-ai-transcription-title"
                     title="Transcription refinement"
-                    description="During sync, AI-transcribed lyrics get a second pass that fixes mis-heard words using the whole song as context. Line timing is kept. Uses the model set under API endpoint."
+                    description="During sync, AI-transcribed lyrics get a second pass that fixes mis-heard words using the whole song as context. Line timing is kept."
                   />
                   {!value.enabled && (
                     <SettingsNotice tone="info" title="External AI is off">
@@ -496,6 +502,27 @@ function SettingsSection({ section }: { section: Section }) {
                     onChange={(transcription_refinement) => update({ transcription_refinement })}
                     disabled={saving || !value.enabled}
                   />
+                  <SettingRow
+                    label="Refinement model"
+                    htmlFor="external-ai-transcription-model"
+                    description={
+                      <span id="external-ai-transcription-model-help">
+                        A stronger model fixes more, such as a refrain in another language. Leave
+                        blank to use the API endpoint&apos;s model
+                        {value.model ? ` (${value.model})` : ""}.
+                      </span>
+                    }
+                  >
+                    <Input
+                      id="external-ai-transcription-model"
+                      maxLength={200}
+                      placeholder={value.model || "Same as API endpoint"}
+                      value={value.transcription_model}
+                      onChange={(event) => update({ transcription_model: event.target.value })}
+                      aria-describedby="external-ai-transcription-model-help"
+                      disabled={saving}
+                    />
+                  </SettingRow>
                   <SettingRow
                     label="Refinement prompt"
                     htmlFor="external-ai-transcription-prompt"
