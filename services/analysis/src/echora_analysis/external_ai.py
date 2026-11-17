@@ -1,4 +1,8 @@
-"""Instance-wide, admin-trusted OpenAI-compatible configuration.
+"""Instance-wide, admin-trusted External AI configuration.
+
+The provider is an OpenAI-compatible endpoint ("openai", the default) or Claude through the
+official Anthropic SDK ("anthropic", see claude_client.py). For Claude the URL is optional and
+defaults to the Anthropic API.
 
 Local/private HTTP destinations are intentional: admins control network egress.
 Use network policy to restrict it where needed. HTTP exposes keys/lyrics on the
@@ -9,6 +13,7 @@ URL is the API base (e.g. http://localhost:8000/v1), not a completion URL.
 from __future__ import annotations
 
 import re
+from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -47,9 +52,13 @@ class LanguagePair(BaseModel):
         return self
 
 
+Provider = Literal["openai", "anthropic"]
+
+
 class ExternalAISettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool = False
+    provider: Provider = "openai"
     url: str = Field(default="", max_length=2048)
     model: str = Field(default="", max_length=200)
     prompt: str = Field(default=DEFAULT_PROMPT, min_length=1, max_length=8000)
@@ -95,9 +104,17 @@ class ExternalAISettings(BaseModel):
         pairs = [(p.source, p.target) for p in self.language_pairs]
         if len(set(pairs)) != len(pairs):
             raise ValueError("Duplicate language pair")
-        if not self.prompt or not self.transcription_prompt or (self.enabled and not self.url):
+        if (
+            not self.prompt
+            or not self.transcription_prompt
+            or (self.enabled and self.provider == "openai" and not self.url)
+        ):
             raise ValueError("Enabled API requires a URL; prompts cannot be blank")
         return self
+
+    def ready(self) -> bool:
+        """Enabled with everything a request needs (Claude's URL defaults to the Anthropic API)."""
+        return bool(self.enabled and self.model and (self.url or self.provider == "anthropic"))
 
 
 class SettingsUpdate(ExternalAISettings):
@@ -108,7 +125,10 @@ class SettingsUpdate(ExternalAISettings):
 class EndpointUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool = False
+    provider: Provider = "openai"
     url: str = Field(default="", max_length=2048)
+    # Shared by every External AI feature, so it lives with the endpoint.
+    model: str = Field(default="", max_length=200)
     api_key: SecretStr | None = Field(default=None, max_length=8192, exclude=True)
 
     @field_validator("url")
@@ -116,23 +136,27 @@ class EndpointUpdate(BaseModel):
     def endpoint(cls, value):
         return ExternalAISettings.endpoint(value)
 
+    @field_validator("model")
+    @classmethod
+    def trim(cls, value):
+        return value.strip()
+
     @model_validator(mode="after")
     def coherent(self):
-        if self.enabled and not self.url:
+        if self.enabled and self.provider == "openai" and not self.url:
             raise ValueError("Enabled API requires a URL")
         return self
 
 
 class TranslationUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    model: str = Field(default="", max_length=200)
     prompt: str = Field(default=DEFAULT_PROMPT, min_length=1, max_length=8000)
     language_pairs: list[LanguagePair] = Field(default_factory=list, max_length=64)
 
     @model_validator(mode="after")
     def coherent(self):
         validated = ExternalAISettings(**self.model_dump())
-        self.model, self.prompt = validated.model, validated.prompt
+        self.prompt = validated.prompt
         return self
 
 
@@ -192,10 +216,10 @@ def router(require_user, cipher):
         return {**settings.model_dump(), "has_key": has_key}
 
     def endpoint_response(value):
-        return {key: value[key] for key in ("enabled", "url", "has_key")}
+        return {key: value[key] for key in ("enabled", "provider", "url", "model", "has_key")}
 
     def translation_response(value):
-        return {key: value[key] for key in ("model", "prompt", "language_pairs")}
+        return {key: value[key] for key in ("prompt", "language_pairs")}
 
     def transcription_response(value):
         # `enabled` is read-only here: the section only acts while External AI is on.

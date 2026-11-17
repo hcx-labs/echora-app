@@ -689,7 +689,7 @@ def _write_external_prompts(
     from .translation_storage import load_settings as load_external_ai
 
     external_ai, encrypted = load_external_ai()
-    if not (external_ai.enabled and external_ai.url and external_ai.model):
+    if not external_ai.ready():
         raise ComfyUIUnavailable("External AI is not enabled for prompt writing")
     key = None
     if encrypted:

@@ -1,6 +1,7 @@
 "use client";
 
 import { toast } from "sonner";
+import { ArrowRight, X } from "lucide-react";
 import { Notice } from "../ui/notice";
 
 import { SettingsNotice } from "./SettingsNotice";
@@ -9,16 +10,18 @@ import { SectionHeading, Toggle } from "./Presentation";
 import { Button } from "../ui/button";
 import { LoadingState } from "../ui/spinner";
 import { Input } from "../ui/input";
-import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { SettingRow } from "./SettingRow";
 import styles from "./ExternalAISettings.module.css";
 import layout from "./SettingsView.module.css";
 import ClearTranslationsWarning from "./ClearTranslationsWarning";
 
 type LanguagePair = { source: string; target: string };
+type Provider = "openai" | "anthropic";
 type Configuration = {
   enabled: boolean;
+  provider: Provider;
   url: string;
   model: string;
   prompt: string;
@@ -52,7 +55,9 @@ function validate(value: Configuration, section: Section): string {
     }
   }
   if (section === "endpoint")
-    return value.enabled && !value.url ? "Enter an API URL before enabling External AI." : "";
+    return value.enabled && value.provider === "openai" && !value.url
+      ? "Enter an API URL before enabling External AI."
+      : "";
   if (!value.prompt.trim()) return "Enter a translation prompt.";
   const seen = new Set<string>();
   for (const pair of value.language_pairs) {
@@ -87,7 +92,13 @@ async function request(
   }
   const body = await response.json();
   if (section === "/endpoint")
-    return { enabled: body.enabled, url: body.url, has_key: body.has_key };
+    return {
+      enabled: body.enabled,
+      provider: body.provider,
+      url: body.url,
+      model: body.model,
+      has_key: body.has_key,
+    };
   if (section === "/transcription")
     return {
       enabled: body.enabled,
@@ -95,7 +106,7 @@ async function request(
       transcription_prompt: body.transcription_prompt,
       default_transcription_prompt: body.default_transcription_prompt,
     };
-  return { model: body.model, prompt: body.prompt, language_pairs: body.language_pairs };
+  return { prompt: body.prompt, language_pairs: body.language_pairs };
 }
 
 export default function ExternalAISettings() {
@@ -126,6 +137,7 @@ function SettingsSection({ section }: { section: Section }) {
         if (!controller.signal.aborted)
           setValue({
             enabled: false,
+            provider: "openai",
             url: "",
             has_key: false,
             model: "",
@@ -169,7 +181,9 @@ function SettingsSection({ section }: { section: Section }) {
       section === "endpoint"
         ? {
             enabled: value.enabled,
+            provider: value.provider,
             url: value.url,
+            model: value.model.trim(),
             ...(clearKey ? { api_key: "" } : apiKey ? { api_key: apiKey } : {}),
           }
         : section === "transcription"
@@ -178,7 +192,6 @@ function SettingsSection({ section }: { section: Section }) {
               transcription_prompt: value.transcription_prompt.trim(),
             }
           : {
-              model: value.model.trim(),
               prompt: value.prompt.trim(),
               language_pairs: value.language_pairs.map((pair) => ({
                 source: normalizeTag(pair.source),
@@ -252,7 +265,7 @@ function SettingsSection({ section }: { section: Section }) {
                   <SectionHeading
                     id="external-ai-endpoint-title"
                     title="API endpoint"
-                    description="Configure the OpenAI-compatible endpoint shared by External AI features."
+                    description="Configure the AI provider shared by External AI features."
                   />
                   <Toggle
                     label="Enable External AI"
@@ -261,11 +274,33 @@ function SettingsSection({ section }: { section: Section }) {
                     disabled={saving}
                   />
                   <SettingRow
+                    label="Provider"
+                    htmlFor="external-ai-provider"
+                    description="Changing provider clears the URL. The stored key is kept, so replace it too."
+                  >
+                    <Select
+                      value={value.provider}
+                      onValueChange={(provider) =>
+                        update({ provider: provider as Provider, url: "" })
+                      }
+                    >
+                      <SelectTrigger id="external-ai-provider" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="openai">OpenAI-compatible endpoint</SelectItem>
+                        <SelectItem value="anthropic">Claude (Anthropic API)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </SettingRow>
+                  <SettingRow
                     label="API base URL"
                     htmlFor="external-ai-url"
                     description={
                       <span id="external-ai-url-help">
-                        /chat/completions is appended. Local HTTP is allowed; prefer HTTPS off-host.
+                        {value.provider === "anthropic"
+                          ? "Optional. Leave blank for the Anthropic API."
+                          : "/chat/completions is appended. Local HTTP is allowed; prefer HTTPS off-host."}
                       </span>
                     }
                   >
@@ -273,11 +308,33 @@ function SettingsSection({ section }: { section: Section }) {
                       id="external-ai-url"
                       type="url"
                       maxLength={2048}
-                      required={value.enabled}
+                      required={value.enabled && value.provider === "openai"}
                       value={value.url}
-                      placeholder="http://localhost:8000/v1"
+                      placeholder={
+                        value.provider === "anthropic"
+                          ? "https://api.anthropic.com"
+                          : "http://localhost:8000/v1"
+                      }
                       onChange={(event) => update({ url: event.target.value })}
                       aria-describedby="external-ai-url-help"
+                    />
+                  </SettingRow>
+                  <SettingRow
+                    label="Model"
+                    htmlFor="external-ai-model"
+                    description={
+                      <span id="external-ai-model-help">
+                        Used by every External AI feature. For Claude, for example claude-opus-5-5
+                        or claude-haiku-5-5.
+                      </span>
+                    }
+                  >
+                    <Input
+                      id="external-ai-model"
+                      maxLength={200}
+                      value={value.model}
+                      onChange={(event) => update({ model: event.target.value })}
+                      aria-describedby="external-ai-model-help"
                     />
                   </SettingRow>
                   <SettingRow
@@ -327,74 +384,59 @@ function SettingsSection({ section }: { section: Section }) {
                     description="Missing translations are generated during sync when External AI is enabled."
                   />
                   <SettingRow
-                    label="Model"
-                    htmlFor="external-ai-model"
-                    description={
-                      <span id="external-ai-model-help">
-                        Use the model identifier provided by your endpoint.
-                      </span>
-                    }
-                  >
-                    <Input
-                      id="external-ai-model"
-                      maxLength={200}
-                      value={value.model}
-                      onChange={(event) => update({ model: event.target.value })}
-                      aria-describedby="external-ai-model-help"
-                    />
-                  </SettingRow>
-                  <SettingRow
                     label="Language pairs"
                     description="Choose source and target language tags, such as ja, en or pt-BR."
                   >
                     <div className={styles.pairs}>
+                      {value.language_pairs.length > 0 && (
+                        <div className={styles.pairHeader} aria-hidden="true">
+                          <span>Source</span>
+                          <span />
+                          <span>Target</span>
+                        </div>
+                      )}
                       {value.language_pairs.map((pair, index) => (
                         <div className={styles.pair} key={index}>
-                          <Label>
-                            <span>
-                              Source <span className="sr-only">{index + 1}</span>
-                            </span>
-                            <Input
-                              required
-                              value={pair.source}
-                              placeholder="ja"
-                              onChange={(event) =>
-                                update({
-                                  language_pairs: value.language_pairs.map((item, i) =>
-                                    i === index ? { ...item, source: event.target.value } : item,
-                                  ),
-                                })
-                              }
-                            />
-                          </Label>
-                          <Label>
-                            <span>
-                              Target <span className="sr-only">{index + 1}</span>
-                            </span>
-                            <Input
-                              required
-                              value={pair.target}
-                              placeholder="en"
-                              onChange={(event) =>
-                                update({
-                                  language_pairs: value.language_pairs.map((item, i) =>
-                                    i === index ? { ...item, target: event.target.value } : item,
-                                  ),
-                                })
-                              }
-                            />
-                          </Label>
+                          <Input
+                            required
+                            aria-label={`Source language ${index + 1}`}
+                            value={pair.source}
+                            placeholder="ja"
+                            onChange={(event) =>
+                              update({
+                                language_pairs: value.language_pairs.map((item, i) =>
+                                  i === index ? { ...item, source: event.target.value } : item,
+                                ),
+                              })
+                            }
+                          />
+                          <ArrowRight className={styles.pairArrow} aria-hidden="true" />
+                          <Input
+                            required
+                            aria-label={`Target language ${index + 1}`}
+                            value={pair.target}
+                            placeholder="en"
+                            onChange={(event) =>
+                              update({
+                                language_pairs: value.language_pairs.map((item, i) =>
+                                  i === index ? { ...item, target: event.target.value } : item,
+                                ),
+                              })
+                            }
+                          />
                           <Button
                             type="button"
-                            variant="outline"
+                            variant="ghost"
+                            size="icon-sm"
                             aria-label={`Remove language pair ${index + 1}`}
+                            title="Remove"
                             onClick={() =>
                               update({
                                 language_pairs: value.language_pairs.filter((_, i) => i !== index),
                               })
                             }
                           >
-                            Remove
+                            <X aria-hidden="true" />
                           </Button>
                         </div>
                       ))}
@@ -434,7 +476,7 @@ function SettingsSection({ section }: { section: Section }) {
                   <SectionHeading
                     id="external-ai-transcription-title"
                     title="Transcription refinement"
-                    description="During sync, AI-transcribed lyrics get a second pass that fixes mis-heard words using the whole song as context. Line timing is kept. Uses the model set under Lyrics translation."
+                    description="During sync, AI-transcribed lyrics get a second pass that fixes mis-heard words using the whole song as context. Line timing is kept. Uses the model set under API endpoint."
                   />
                   {!value.enabled && (
                     <SettingsNotice tone="info" title="External AI is off">

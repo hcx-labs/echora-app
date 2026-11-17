@@ -40,6 +40,21 @@ Requests use the official `openai` Python SDK, pinned to 3.19.2, with `max_compl
 and caps input/output size. A blocking read may last until its read timeout after
 the budget; this is not a strict wall-clock cancellation mechanism.
 
+## Claude provider
+
+Revision `0063_external_ai_provider` adds `provider`: `openai` (default, the
+OpenAI-compatible endpoint above) or `anthropic`. With `anthropic`, translation,
+transcription refinement and the motion artwork writer call Claude through the official
+`anthropic` Python SDK, pinned to 2.9.0 (`claude_client.py`). The URL is optional and
+defaults to `https://api.anthropic.com`; the model is a Claude model ID such as
+`claude-opus-5-5`. A key is required: the client never falls back to `ANTHROPIC_API_KEY`
+or other environment or profile credentials. Replies use structured outputs (a JSON schema
+per feature), then go through the same validation as the OpenAI path. SDK retries, redirects
+and environment proxies stay disabled. Claude replies are not streamed, so each request has a
+single deadline (translation 180s, refinement 240s, motion writer 120s). A refusal or a reply
+cut off at `max_tokens` fails with `refusal` or `incomplete_response` and the caller keeps its
+usual fallback. Changing provider keeps the stored key, so replace the key as well.
+
 ## Translation contract and storage
 
 `lyric_translation.translate` is opt-in, refuses disabled settings/unconfigured
