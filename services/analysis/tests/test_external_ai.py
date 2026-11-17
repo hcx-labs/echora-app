@@ -264,6 +264,7 @@ def test_transport_failure_and_empty_translation():
     [
         ("endpoint", {"enabled", "provider", "url", "model", "has_key"}),
         ("translation", {"prompt", "language_pairs"}),
+        ("themes", {"enabled", "lyric_themes"}),
         (
             "transcription",
             {

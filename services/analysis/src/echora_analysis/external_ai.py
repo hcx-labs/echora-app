@@ -68,6 +68,8 @@ class ExternalAISettings(BaseModel):
     transcription_prompt: str = Field(
         default=DEFAULT_TRANSCRIPTION_PROMPT, min_length=1, max_length=8000
     )
+    # Off by default: it sends every song's lyrics to the provider once.
+    lyric_themes: bool = False
 
     @field_validator("url")
     @classmethod
@@ -173,6 +175,11 @@ class TranscriptionUpdate(BaseModel):
         return self
 
 
+class ThemesUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    lyric_themes: bool = False
+
+
 class RedactedSettingsRoute(APIRoute):
     def get_route_handler(self):
         handler = super().get_route_handler()
@@ -231,6 +238,10 @@ def router(require_user, cipher):
             "default_transcription_prompt": DEFAULT_TRANSCRIPTION_PROMPT,
         }
 
+    def themes_response(value):
+        # `enabled` is read-only here, as for transcription.
+        return {key: value[key] for key in ("enabled", "lyric_themes")}
+
     @api.get("/endpoint")
     def read_endpoint(user=Depends(admin)):
         return endpoint_response(read_settings(user))
@@ -242,6 +253,14 @@ def router(require_user, cipher):
     @api.get("/transcription")
     def read_transcription(user=Depends(admin)):
         return transcription_response(read_settings(user))
+
+    @api.get("/themes")
+    def read_themes(user=Depends(admin)):
+        return themes_response(read_settings(user))
+
+    @api.put("/themes")
+    def write_themes(body: ThemesUpdate, user=Depends(admin)):
+        return themes_response(storage.save_section(body.model_dump()))
 
     @api.put("/transcription")
     def write_transcription(body: TranscriptionUpdate, user=Depends(admin)):

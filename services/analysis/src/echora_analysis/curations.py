@@ -13,7 +13,7 @@ from .concepts import combine_concept_percentiles, empirical_percentiles
 # promotion and the discovery pool both draw from inside this pool; anything
 # below it only appears when the pool cannot fill the playlist.
 MATCH_PERCENTILE = 0.75
-CURATION_SCORING_REVISION = 6
+CURATION_SCORING_REVISION = 7
 INSTRUMENTAL_ONLY_THRESHOLD = 0.5
 EXAMPLE_COMPONENT_WEIGHTS = {
     "muq_global": 0.50,

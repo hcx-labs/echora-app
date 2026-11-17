@@ -93,6 +93,7 @@ from .karaoke_pipeline import KARAOKE_PIPELINE_REVISION
 from .melody_config import MELODY_CONTOUR_REVISION
 from .media_cache import cache_key, media_cache
 from .lyrics_analysis import shared_lyrics_model
+from .lyric_themes import PROMPT_REVISION as LYRIC_THEMES_REVISION
 from .navidrome import NavidromeClient, media_navidrome_client
 from .representations import configure_representations
 
@@ -2405,6 +2406,7 @@ def _curation_corpus(
                       acoustic_embedding.run_id AS mert_run_id,
                       lyrics_embedding.run_id AS lyrics_run_id,
                       voice_embedding.embedding AS voice_embedding,
+                      theme_embedding.embedding AS theme_embedding,
                       acoustic_embedding.embedding AS acoustic_embedding,
                       muq_profile.id AS muq_profile_id, mert_profile.id AS mert_profile_id,
                       ts.external_id AS source_id, ts.source_data->>'coverArt' AS cover_art,
@@ -2464,8 +2466,15 @@ def _curation_corpus(
                  WHERE e.track_id=t.id AND e.embedding_type='voice-gender' AND ar.model_name='mtg-jamendo-voice-gender-v2'
                  ORDER BY ar.created_at DESC LIMIT 1
                ) voice_embedding ON true
+               LEFT JOIN LATERAL (
+                 SELECT th.embedding::text AS embedding
+                 FROM track_lyric_themes th JOIN lyrics ly ON ly.track_id=th.track_id
+                 WHERE th.track_id=t.id AND th.status='ready' AND th.prompt_revision=%s
+                   AND th.source_checksum=encode(sha256(convert_to(ly.text, 'UTF8')), 'hex')
+                 LIMIT 1
+               ) theme_embedding ON true
                ORDER BY t.id, ts.id""",
-            (user_id, connection_id),
+            (user_id, connection_id, LYRIC_THEMES_REVISION),
         )
         rows = cursor.fetchall()
         profile_ids = [
@@ -2496,6 +2505,14 @@ def _curation_corpus(
         encoded = row.pop("lyrics_embedding")
         if encoded is not None:
             lyrics_matrix[index] = np.fromstring(str(encoded).strip("[]"), sep=",")
+    theme_available = np.asarray(
+        [row.get("theme_embedding") is not None for row in rows], dtype=bool
+    )
+    theme_matrix = np.zeros((len(rows), 1024), dtype=np.float32)
+    for index, row in enumerate(rows):
+        encoded = row.pop("theme_embedding")
+        if encoded is not None:
+            theme_matrix[index] = np.fromstring(str(encoded).strip("[]"), sep=",")
     voice_available = np.asarray(
         [row.get("voice_embedding") is not None for row in rows], dtype=bool
     )
@@ -2581,7 +2598,33 @@ def _curation_corpus(
         acoustic_matrix if acoustic_dimension else None,
         acoustic_available,
         acoustic_modes,
+        theme_matrix,
+        theme_available,
     )
+
+
+# Use theme descriptions once they cover this share of the tracks that have lyrics.
+THEME_COVERAGE_THRESHOLD = 0.5
+
+
+def _theme_overlay(
+    lyrics_matrix: np.ndarray,
+    lyrics_available: np.ndarray,
+    theme_matrix: np.ndarray,
+    theme_available: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, bool]:
+    """The vectors the Themes channel compares queries and examples against.
+
+    Theme descriptions (lyric_themes.py) replace whole-lyric embeddings once they cover most
+    of the tracks with lyrics. The two live in different regions of the BGE-M3 space, so they
+    are never ranked together: a track with lyrics but no description yet is treated like one
+    without lyrics (neutral) until a sync describes it.
+    """
+    lyric_count = int(lyrics_available.sum())
+    covered = int((theme_available & lyrics_available).sum())
+    if lyric_count == 0 or covered < THEME_COVERAGE_THRESHOLD * lyric_count:
+        return lyrics_matrix, lyrics_available, False
+    return theme_matrix, theme_available.copy(), True
 
 
 SONIC_AUDIO_SPLIT = (0.70, 0.30)  # MuQ : MERT within the audio share
@@ -2728,11 +2771,17 @@ def _preview_curation(
         acoustic_matrix,
         acoustic_available,
         acoustic_modes,
+        theme_matrix,
+        theme_available,
     ) = _curation_corpus(user_id, connection_id)
     if request.curation_type == "sonic_journey":
         return _preview_sonic_journey(
             request, rows, matrix, acoustic_matrix, lyrics_matrix, lyrics_available
         )
+    raw_lyrics_coverage = int(lyrics_available.sum())
+    lyrics_matrix, lyrics_available, themes_active = _theme_overlay(
+        lyrics_matrix, lyrics_available, theme_matrix, theme_available
+    )
     language_map: dict[str, dict[str, object]] = {}
     if request.target_language:
         with (
@@ -3054,7 +3103,9 @@ def _preview_curation(
             "mert": sum(profile is not None for profile in acoustic_modes),
             "mert_global": int(acoustic_available.sum()),
         },
-        "lyrics_coverage": int(lyrics_available.sum()),
+        "lyrics_coverage": raw_lyrics_coverage,
+        "theme_coverage": int(theme_available.sum()),
+        "lyrics_representation": "themes" if themes_active else "lyrics",
         "shuffle_seed": shuffle_seed,
         "language": language_report,
         "familiarity": {
