@@ -26,12 +26,12 @@ def save_settings(settings, encrypted_key, *, replace_key):
         row = db.execute(
             """
             INSERT INTO external_ai_settings (singleton, enabled, provider, url, model, prompt, language_pairs,
-                transcription_refinement, transcription_prompt, api_key_encrypted)
-            VALUES (true, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                transcription_refinement, transcription_prompt, lyric_themes, api_key_encrypted)
+            VALUES (true, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (singleton) DO UPDATE SET enabled=EXCLUDED.enabled,
                 provider=EXCLUDED.provider, url=EXCLUDED.url, model=EXCLUDED.model, prompt=EXCLUDED.prompt,
                 language_pairs=EXCLUDED.language_pairs, transcription_refinement=EXCLUDED.transcription_refinement,
-                transcription_prompt=EXCLUDED.transcription_prompt, updated_at=now(),
+                transcription_prompt=EXCLUDED.transcription_prompt, lyric_themes=EXCLUDED.lyric_themes, updated_at=now(),
                 api_key_encrypted=CASE WHEN %s THEN EXCLUDED.api_key_encrypted ELSE external_ai_settings.api_key_encrypted END
             RETURNING api_key_encrypted IS NOT NULL
         """,
@@ -44,6 +44,7 @@ def save_settings(settings, encrypted_key, *, replace_key):
                 Jsonb([p.model_dump() for p in settings.language_pairs]),
                 settings.transcription_refinement,
                 settings.transcription_prompt,
+                settings.lyric_themes,
                 encrypted_key,
                 replace_key,
             ),
@@ -117,6 +118,7 @@ def save_section(values, encrypted_key=None, *, replace_key=False):
         "language_pairs",
         "transcription_refinement",
         "transcription_prompt",
+        "lyric_themes",
     }
     if not values or not set(values) <= allowed:
         raise ValueError("Invalid settings fields")

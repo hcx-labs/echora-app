@@ -30,12 +30,14 @@ type Configuration = {
   transcription_refinement: boolean;
   transcription_prompt: string;
   default_transcription_prompt?: string;
+  lyric_themes: boolean;
 };
-type Section = "endpoint" | "translation" | "transcription";
+type Section = "endpoint" | "translation" | "transcription" | "themes";
 const endpoint = "/analysis/settings/external-ai";
 const normalizeTag = (value: string) => value.trim().replaceAll("_", "-").toLowerCase();
 
 function validate(value: Configuration, section: Section): string {
+  if (section === "themes") return "";
   if (section === "transcription")
     return value.transcription_prompt.trim() ? "" : "Enter a transcription refinement prompt.";
   if (section === "endpoint" && value.url) {
@@ -106,6 +108,7 @@ async function request(
       transcription_prompt: body.transcription_prompt,
       default_transcription_prompt: body.default_transcription_prompt,
     };
+  if (section === "/themes") return { enabled: body.enabled, lyric_themes: body.lyric_themes };
   return { prompt: body.prompt, language_pairs: body.language_pairs };
 }
 
@@ -115,6 +118,7 @@ export default function ExternalAISettings() {
       <SettingsSection section="endpoint" />
       <SettingsSection section="translation" />
       <SettingsSection section="transcription" />
+      <SettingsSection section="themes" />
     </div>
   );
 }
@@ -145,6 +149,7 @@ function SettingsSection({ section }: { section: Section }) {
             language_pairs: [],
             transcription_refinement: true,
             transcription_prompt: "",
+            lyric_themes: false,
             ...result,
           });
       })
@@ -159,7 +164,7 @@ function SettingsSection({ section }: { section: Section }) {
   }, [attempt, section]);
 
   useEffect(() => {
-    if (section !== "transcription") return;
+    if (section !== "transcription" && section !== "themes") return;
     const follow = (event: Event) => update({ enabled: (event as CustomEvent<boolean>).detail });
     window.addEventListener("echora:external-ai-enabled", follow);
     return () => window.removeEventListener("echora:external-ai-enabled", follow);
@@ -186,18 +191,20 @@ function SettingsSection({ section }: { section: Section }) {
             model: value.model.trim(),
             ...(clearKey ? { api_key: "" } : apiKey ? { api_key: apiKey } : {}),
           }
-        : section === "transcription"
-          ? {
-              transcription_refinement: value.transcription_refinement,
-              transcription_prompt: value.transcription_prompt.trim(),
-            }
-          : {
-              prompt: value.prompt.trim(),
-              language_pairs: value.language_pairs.map((pair) => ({
-                source: normalizeTag(pair.source),
-                target: normalizeTag(pair.target),
-              })),
-            };
+        : section === "themes"
+          ? { lyric_themes: value.lyric_themes }
+          : section === "transcription"
+            ? {
+                transcription_refinement: value.transcription_refinement,
+                transcription_prompt: value.transcription_prompt.trim(),
+              }
+            : {
+                prompt: value.prompt.trim(),
+                language_pairs: value.language_pairs.map((pair) => ({
+                  source: normalizeTag(pair.source),
+                  target: normalizeTag(pair.target),
+                })),
+              };
     try {
       const result = await request(
         {
@@ -254,7 +261,7 @@ function SettingsSection({ section }: { section: Section }) {
     <form className={styles.form} onSubmit={save} aria-busy={loading || saving}>
       {loading ? (
         <LoadingState
-          label={`Loading ${section === "endpoint" ? "API endpoint" : section === "translation" ? "lyrics translation" : "transcription refinement"} settings…`}
+          label={`Loading ${{ endpoint: "API endpoint", translation: "lyrics translation", transcription: "transcription refinement", themes: "song theme" }[section]} settings…`}
         />
       ) : (
         value && (
@@ -525,6 +532,26 @@ function SettingsSection({ section }: { section: Section }) {
                   </SettingRow>
                 </section>
               )}
+              {section === "themes" && (
+                <section aria-labelledby="external-ai-themes-title">
+                  <SectionHeading
+                    id="external-ai-themes-title"
+                    title="Song themes for curation"
+                    description="During sync, each song's lyrics are sent once to the model, which writes a short description of what the song is about and a few theme tags. Curation's Themes search matches against these instead of the raw lyrics once most songs have one. Uses the model set under API endpoint."
+                  />
+                  {!value.enabled && (
+                    <SettingsNotice tone="info" title="External AI is off">
+                      Theme descriptions are written only while External AI is enabled.
+                    </SettingsNotice>
+                  )}
+                  <Toggle
+                    label="Describe song themes"
+                    checked={value.enabled && value.lyric_themes}
+                    onChange={(lyric_themes) => update({ lyric_themes })}
+                    disabled={saving || !value.enabled}
+                  />
+                </section>
+              )}
               <div className={layout.actions}>
                 <Button type="submit" loading={saving}>
                   {saving
@@ -533,7 +560,9 @@ function SettingsSection({ section }: { section: Section }) {
                       ? "Save API settings"
                       : section === "translation"
                         ? "Save translation settings"
-                        : "Save refinement settings"}
+                        : section === "themes"
+                          ? "Save theme settings"
+                          : "Save refinement settings"}
                 </Button>
               </div>
               {section === "translation" && (

@@ -384,6 +384,12 @@ def execute(job: dict, context) -> dict | None:
             summary["translations"] = backfill_translations(
                 user_id, credentials[0], ids, check=context.check, progress=report
             )
+        if operation in {"navidrome_sync", "import", "lyrics_backfill"}:
+            from .lyric_themes import backfill_themes
+
+            summary["themes"] = backfill_themes(
+                user_id, credentials[0], ids, check=context.check, progress=report
+            )
         if operation in {"navidrome_sync", "import", "lyrics_backfill", "karaoke_backfill"}:
             from .karaoke_pipeline import backfill_karaoke
 
