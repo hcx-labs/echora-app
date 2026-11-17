@@ -259,6 +259,25 @@ def test_transport_failure_and_empty_translation():
         )
 
 
+def test_declined_translation_is_told_apart_from_gaps():
+    settings = config()
+    pair = settings.language_pairs[0]
+
+    def reply(texts):
+        lines = [{"id": i, "text": t} for i, t in enumerate(texts)]
+        return httpx.MockTransport(lambda request: httpx.Response(200, content=response(lines)))
+
+    source = ["one", "two", "three", "four"]
+    # A note in the first line and nothing else: the model would not translate.
+    with pytest.raises(TranslationError, match="^declined$"):
+        translate(
+            settings, None, pair, source, transport=reply(["I can't translate this.", "", "", ""])
+        )
+    # One line missing from an otherwise complete translation is still a gap.
+    with pytest.raises(TranslationError, match="^empty_translation$"):
+        translate(settings, None, pair, source, transport=reply(["un", "deux", "", "quatre"]))
+
+
 @pytest.mark.parametrize(
     "section,keys",
     [
