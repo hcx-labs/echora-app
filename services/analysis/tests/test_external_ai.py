@@ -262,8 +262,8 @@ def test_transport_failure_and_empty_translation():
 @pytest.mark.parametrize(
     "section,keys",
     [
-        ("endpoint", {"enabled", "url", "has_key"}),
-        ("translation", {"model", "prompt", "language_pairs"}),
+        ("endpoint", {"enabled", "provider", "url", "model", "has_key"}),
+        ("translation", {"prompt", "language_pairs"}),
         (
             "transcription",
             {
@@ -287,7 +287,7 @@ def test_section_contracts(api, monkeypatch, section, keys):
     combined = {**ExternalAISettings().model_dump(), "has_key": True}
     monkeypatch.setattr(translation_storage, "save_section", lambda *a, **kw: combined)
     assert set(client.put(path, json={}).json()) == keys
-    wrong = {"model": "wrong-section"} if section == "endpoint" else {"url": "http://localhost/v1"}
+    wrong = {"prompt": "wrong-section"} if section == "endpoint" else {"url": "http://localhost/v1"}
     assert client.put(path, json=wrong).status_code == 422
 
 

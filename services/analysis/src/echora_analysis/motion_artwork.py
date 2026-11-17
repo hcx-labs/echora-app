@@ -353,7 +353,7 @@ def router(require_user):
             "enabled": settings.enabled,
             "comfyui": _external_status(url) if url else _embedded_status(),
             "external_ai": {
-                "enabled": external_ai.enabled and bool(external_ai.url and external_ai.model),
+                "enabled": external_ai.ready(),
                 "model": external_ai.model or None,
             },
             "artworks": dict(counts),

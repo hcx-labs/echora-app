@@ -25,11 +25,11 @@ def save_settings(settings, encrypted_key, *, replace_key):
     with psycopg.connect(require_database_url()) as db:
         row = db.execute(
             """
-            INSERT INTO external_ai_settings (singleton, enabled, url, model, prompt, language_pairs,
+            INSERT INTO external_ai_settings (singleton, enabled, provider, url, model, prompt, language_pairs,
                 transcription_refinement, transcription_prompt, api_key_encrypted)
-            VALUES (true, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (true, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (singleton) DO UPDATE SET enabled=EXCLUDED.enabled,
-                url=EXCLUDED.url, model=EXCLUDED.model, prompt=EXCLUDED.prompt,
+                provider=EXCLUDED.provider, url=EXCLUDED.url, model=EXCLUDED.model, prompt=EXCLUDED.prompt,
                 language_pairs=EXCLUDED.language_pairs, transcription_refinement=EXCLUDED.transcription_refinement,
                 transcription_prompt=EXCLUDED.transcription_prompt, updated_at=now(),
                 api_key_encrypted=CASE WHEN %s THEN EXCLUDED.api_key_encrypted ELSE external_ai_settings.api_key_encrypted END
@@ -37,6 +37,7 @@ def save_settings(settings, encrypted_key, *, replace_key):
         """,
             (
                 settings.enabled,
+                settings.provider,
                 settings.url,
                 settings.model,
                 settings.prompt,
@@ -109,6 +110,7 @@ def save_section(values, encrypted_key=None, *, replace_key=False):
 
     allowed = {
         "enabled",
+        "provider",
         "url",
         "model",
         "prompt",

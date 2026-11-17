@@ -15,6 +15,9 @@ dependencies = [
   "fasttext-wheel==0.9.2",
   "httpx==0.28.1",
   "openai==3.19.2",
+  # Claude as an External AI provider (claude_client.py). Built on httpx2, which it imports.
+  "anthropic==2.9.0",
+  "httpx2==2.16.2",
   "huggingface-hub==1.28.0",
   "igraph==1.0.0",
   "itsdangerous==2.2.0",

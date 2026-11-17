@@ -3,11 +3,11 @@
 .form>fieldset{min-width:0;border:0;padding:0;margin:0}
 .keyControls{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
 .keyControls>input{flex:1 1 180px;min-width:0}
-.pairs{display:grid;gap:16px;min-width:0}
-.pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;min-width:0;padding-bottom:16px;border-bottom:1px solid var(--border)}
-.pair>label{display:flex;flex-direction:column;align-items:stretch;gap:8px;min-width:0;font-size:13px;font-weight:500}
+.pairs{display:grid;gap:8px;min-width:0}
+.pairHeader,.pair{display:grid;grid-template-columns:minmax(0,1fr) 16px minmax(0,1fr) 32px;align-items:center;gap:8px;min-width:0}
+.pairHeader{font-size:12px;font-weight:500;color:var(--muted-foreground)}
 .pair input{min-width:0}
-.pair>button{grid-column:1/-1;justify-self:end}
-.pairs>button{justify-self:start}
+.pairArrow{width:16px;height:16px;color:var(--muted-foreground)}
+.pairs>button{justify-self:start;margin-top:4px}
 .prompt{min-height:160px;max-width:100%;resize:vertical}
 @media(max-width:760px){.pair input,.keyControls>input,.prompt{font-size:16px}}
