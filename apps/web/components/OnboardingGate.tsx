@@ -15,7 +15,7 @@ export default function OnboardingGate() {
         return response.json();
       })
       .then((user) => {
-        if (user) window.location.replace(user.onboarding_complete ? "/home" : "/connect");
+        if (user) window.location.replace(user.onboarding_complete ? "/home" : "/setup");
       })
       .catch(() => window.location.replace("/login"));
   }, []);

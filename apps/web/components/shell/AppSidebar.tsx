@@ -61,7 +61,7 @@ export default function AppSidebar({
     }
   }
   const items = onboarding
-    ? [{ href: "/connect", label: "Connect library", Icon: LibraryBig }]
+    ? [{ href: "/setup", label: "Connect library", Icon: LibraryBig }]
     : links;
   const isActive = (href: string) =>
     pathname === href ||
@@ -72,7 +72,7 @@ export default function AppSidebar({
     <nav aria-label="Main" className="flex h-full min-h-0 flex-col bg-nav">
       <div className="flex h-[72px] shrink-0 items-center px-5 max-md:h-14">
         <TransitionLink
-          href={onboarding ? "/connect" : "/home"}
+          href={onboarding ? "/setup" : "/home"}
           onClick={onNavigate}
           className="flex items-center gap-2.5 text-xl font-extrabold tracking-tight text-white"
         >

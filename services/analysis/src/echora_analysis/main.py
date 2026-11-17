@@ -1053,19 +1053,71 @@ def discover(
     return {
         "connection_id": connection_id,
         "server": {"version": version, "url": str(request.url).rstrip("/")},
-        "tracks": [
-            {
-                "id": track.id,
-                "title": track.title,
-                "artist": track.artist,
-                "album": track.album,
-                "duration": track.duration,
-                "genre": track.genre,
-                "cover_art": track.raw.get("coverArt"),
-            }
-            for track in tracks
-        ],
+        "tracks": [_track_summary(track) for track in tracks],
     }
+
+
+def _track_summary(track) -> dict[str, object]:
+    return {
+        "id": track.id,
+        "title": track.title,
+        "artist": track.artist,
+        "album": track.album,
+        "duration": track.duration,
+        "genre": track.genre,
+        "cover_art": track.raw.get("coverArt"),
+    }
+
+
+class SampleImportRequest(BaseModel):
+    track_ids: list[str] = Field(min_length=1, max_length=20000)
+
+
+@app.get("/navidrome/connections/{connection_id}/sample", dependencies=[Depends(require_user)])
+def navidrome_sample(
+    connection_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    echora_session: str | None = Cookie(default=None),
+) -> dict[str, object]:
+    """Random tracks from a saved connection, so onboarding needs no password after connecting."""
+    user = _session_user(echora_session)
+    credentials = _load_connection(connection_id, user["id"])
+    if credentials is None:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    try:
+        with NavidromeClient(*credentials) as client:
+            tracks = client.random_tracks(limit)
+    except Exception as error:
+        raise HTTPException(
+            status_code=502, detail="Could not read tracks from the Navidrome server"
+        ) from error
+    return {"tracks": [_track_summary(track) for track in tracks]}
+
+
+@app.post(
+    "/navidrome/connections/{connection_id}/import",
+    status_code=202,
+    dependencies=[Depends(require_user)],
+)
+def start_connection_import(
+    connection_id: str,
+    request: SampleImportRequest,
+    echora_session: str | None = Cookie(default=None),
+) -> dict[str, object]:
+    """Analyze chosen tracks of a saved connection: the onboarding sample."""
+    user = _session_user(echora_session)
+    track_ids = sorted(set(request.track_ids))
+    selection = hashlib.sha256("\n".join(track_ids).encode()).hexdigest()
+    if _load_connection(connection_id, user["id"]) is None:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    return jobs.enqueue(
+        "import",
+        "analysis",
+        user["id"],
+        connection_id=connection_id,
+        payload={"track_ids": track_ids},
+        dedupe_key=f"import:{user['id']}:{connection_id}:{selection}",
+    )
 
 
 @app.get("/navidrome/connections/{connection_id}/catalog", dependencies=[Depends(require_user)])
