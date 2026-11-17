@@ -10,6 +10,7 @@ import ExternalProcessingSettings from "../settings/ExternalProcessingSettings";
 import MotionArtworkSettings from "../settings/MotionArtworkSettings";
 import AppLoading from "../shell/AppLoading";
 import { cn } from "@/lib/utils";
+import { Button } from "../ui/button";
 import LibraryStep from "./LibraryStep";
 import { api, json, selectConnection, type Connection, type SetupSettings } from "./onboardingApi";
 import ServerStep from "./ServerStep";
@@ -74,11 +75,13 @@ const STEPS: Step[] = [
   },
 ];
 
-const PROGRESS_KEY = "echora:onboarding-done";
+// Ticks are a convenience kept in this browser, per account, so another account (or a reset
+// server) never inherits them. Whether a server is connected always comes from the server.
+const progressKey = (email: string) => `echora:onboarding-done:${email}`;
 
-function readDone(): Set<StepId> {
+function readDone(email: string): Set<StepId> {
   try {
-    return new Set(JSON.parse(localStorage.getItem(PROGRESS_KEY) || "[]"));
+    return new Set(JSON.parse(localStorage.getItem(progressKey(email)) || "[]"));
   } catch {
     return new Set();
   }
@@ -113,7 +116,8 @@ export default function Onboarding({ initialStep }: { initialStep?: string }) {
         (!user.navidrome_connection_id || value.navidrome.id === user.navidrome_connection_id)
           ? value.navidrome
           : null;
-      const finished = readDone();
+      const finished = readDone(value.profile.email);
+      if (!saved) finished.delete("server");
       const visible = STEPS.filter((step) => !step.admin || value.profile.is_admin);
       const usable = (step: Step | undefined) => Boolean(step && (!step.needsServer || saved));
       const wanted = visible.find((step) => step.id === (initialStep || stepFromPath()));
@@ -147,15 +151,19 @@ export default function Onboarding({ initialStep }: { initialStep?: string }) {
     document.getElementById("setup-main")?.scrollTo({ top: 0 });
   }, []);
 
-  const markDone = useCallback((id: StepId) => {
-    setDone((previous) => {
-      const next = new Set(previous).add(id);
-      try {
-        localStorage.setItem(PROGRESS_KEY, JSON.stringify([...next]));
-      } catch {}
-      return next;
-    });
-  }, []);
+  const email = settings?.profile.email ?? "";
+  const markDone = useCallback(
+    (id: StepId) => {
+      setDone((previous) => {
+        const next = new Set(previous).add(id);
+        try {
+          localStorage.setItem(progressKey(email), JSON.stringify([...next]));
+        } catch {}
+        return next;
+      });
+    },
+    [email],
+  );
 
   async function finish() {
     try {
@@ -166,7 +174,7 @@ export default function Onboarding({ initialStep }: { initialStep?: string }) {
           json("PUT", { complete: true, connection_id: null }),
         );
       try {
-        localStorage.removeItem(PROGRESS_KEY);
+        localStorage.removeItem(progressKey(email));
       } catch {}
       window.dispatchEvent(
         new CustomEvent("echora:user-update", { detail: { onboarding_complete: true } }),
@@ -202,7 +210,14 @@ export default function Onboarding({ initialStep }: { initialStep?: string }) {
     next: () => {
       markDone(step.id);
       const following = steps[index + 1];
-      if (following) go(following.id);
+      if (!following) return;
+      // The last step needs a server; send people to connect one rather than to a locked step.
+      if (following.needsServer && !connection) {
+        toast.info("Connect your music server first", {
+          description: "Echora needs it to find the music to analyze.",
+        });
+        go("server");
+      } else go(following.id);
     },
   };
   const locked = (item: Step) => Boolean(item.needsServer && !connection);
@@ -237,7 +252,10 @@ export default function Onboarding({ initialStep }: { initialStep?: string }) {
                   .map((item) => {
                     const position = steps.indexOf(item);
                     const isCurrent = item.id === current;
-                    const isDone = done.has(item.id) && !isCurrent;
+                    const isDone =
+                      done.has(item.id) &&
+                      !isCurrent &&
+                      (item.id !== "server" || Boolean(connection));
                     const isLocked = locked(item);
                     return (
                       <li key={item.id}>
@@ -403,9 +421,19 @@ export default function Onboarding({ initialStep }: { initialStep?: string }) {
               <AppearanceSettings essentials quiet />
             </StepFrame>
           )}
-          {step.id === "library" && connection && (
-            <LibraryStep nav={nav} connection={connection} finish={finish} />
-          )}
+          {step.id === "library" &&
+            (connection ? (
+              <LibraryStep nav={nav} connection={connection} finish={finish} />
+            ) : (
+              <StepFrame
+                nav={nav}
+                title="Connect your music server first"
+                description="Echora analyzes the music on your Navidrome server, so connect it before starting."
+                primary={<Button onClick={() => go("server")}>Connect a server</Button>}
+              >
+                <span />
+              </StepFrame>
+            ))}
         </div>
       </main>
     </div>
