@@ -1,0 +1,139 @@
+/* Song info panel: large cover beside the track's details; one column when narrow. */
+.scroll {
+  flex: 1;
+  min-height: 0;
+}
+.info {
+  display: grid;
+  grid-template-columns: minmax(0, min(46%, 560px)) minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(24px, 4vw, 64px);
+  /* Room on every side for the cover's shadow: the scroll area clips whatever falls outside. */
+  padding: 40px clamp(56px, 4vw, 72px) 64px;
+  container-type: inline-size;
+}
+.cover {
+  position: sticky;
+  top: 40px;
+  container-type: inline-size;
+}
+/* The player's artwork block (cover, motion loop, Still/Motion switch), sized to the column.
+   Two classes, so it wins over the player's own .art rules whatever order the sheets load in. */
+.info .cover > * {
+  width: 100%;
+  height: auto;
+  max-width: none;
+  aspect-ratio: 1;
+  /* Tighter than the player's own cover shadow, so it fits inside the padding above. */
+  box-shadow: 0 16px 44px rgb(0 0 0 / 0.45);
+}
+.details {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.heading h2 {
+  margin: 0;
+  font-size: clamp(28px, 3.2vw, 48px);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+.artist {
+  margin: 10px 0 0;
+  font-size: clamp(16px, 1.6vw, 22px);
+  font-weight: 600;
+  color: rgb(255 255 255 / 0.85);
+}
+.album {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: rgb(255 255 255 / 0.6);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0 0;
+}
+.chips span {
+  border: 1px solid rgb(255 255 255 / 0.2);
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 24px;
+  font-weight: 500;
+  color: rgb(255 255 255 / 0.8);
+}
+.about h3,
+.group h3 {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.5);
+}
+.about p:first-of-type {
+  margin: 0;
+  max-width: 68ch;
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgb(255 255 255 / 0.88);
+}
+.about .chips span {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+}
+.groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 28px 40px;
+}
+.group dl {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+.row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 12px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.row dt {
+  color: rgb(255 255 255 / 0.5);
+}
+.row dd {
+  margin: 0;
+  color: rgb(255 255 255 / 0.9);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.comment {
+  margin: 0;
+  max-width: 68ch;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgb(255 255 255 / 0.55);
+  white-space: pre-line;
+}
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+  color: rgb(255 255 255 / 0.6);
+}
+@container (max-width: 760px) {
+  .info {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cover {
+    position: static;
+    max-width: 420px;
+  }
+}

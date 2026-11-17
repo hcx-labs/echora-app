@@ -8,7 +8,7 @@ import math
 import re
 from xml.etree import ElementTree as ET
 
-from .backing_vocals import BACKING_VOICE, tag_bracketed_backing
+from .backing_vocals import BACKING_VOICE, separate_text, separate_voices, tag_bracketed_backing
 from .navidrome_integration import connect
 from .plugin_ranking import library_namespace
 from .navidrome_lyrics_sources import lyrics_paused
@@ -193,12 +193,25 @@ def ttml(row, translations):
         if syllables and "".join(str(s.get("text") or "") for s in syllables) == line.get(
             "text", ""
         ):
+            # Brackets never reach Navidrome: the lead words come first, then one x-bg span
+            # with the bracketed parts joined by commas ("Hello I am" + "hey, hey").
+            lead, backing = separate_voices(syllables)
+            if lead and backing:
+                # Plain readers of the paragraph get "Lonely tonight so lonely", not "tonightso".
+                lead[-1] = {**lead[-1], "text": f"{lead[-1]['text']} "}
             _append_syllables(
                 paragraph,
-                [{**s, "voice": None} for s in syllables] if background else syllables,
+                [{**s, "voice": None} for s in lead + backing] if background else lead + backing,
             )
         else:
-            paragraph.text = line.get("text") or ""
+            lead, backing = separate_text(line.get("text") or "")
+            if background or not lead:
+                paragraph.text = backing or lead
+            else:
+                paragraph.text = f"{lead} " if backing else lead
+                if backing:
+                    span = ET.SubElement(paragraph, f"{{{TT}}}span", {f"{{{TTM}}}role": "x-bg"})
+                    span.text = backing
     return ET.tostring(root, encoding="unicode")
 
 

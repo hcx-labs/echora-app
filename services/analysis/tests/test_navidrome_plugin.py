@@ -223,18 +223,19 @@ def test_ttml_marks_backing_vocals_with_the_background_role():
     root = ET.fromstring(lyrics.ttml(backing_example(), []))
     role = f"{{{lyrics.TTM}}}role"
     lead, backing_line = root.findall(f".//{{{lyrics.TT}}}p")
-    # The echo is one x-bg span, timed over its words, nested in the lead paragraph.
+    # The lead words come first, then the echo as one x-bg span timed over its words. No
+    # brackets reach Navidrome: they only marked the backing part.
     children = list(lead)
-    assert [child.get(role) for child in children] == [None, None, "x-bg", None]
-    echo = children[2]
+    assert [child.get(role) for child in children] == [None, None, None, "x-bg"]
+    echo = children[3]
     assert (echo.get("begin"), echo.get("end")) == ("00:00:01.500", "00:00:02.400")
-    assert [span.text for span in echo] == ["so ", "lone", "ly) "]
+    assert [span.text for span in echo] == ["so ", "lone", "ly"]
     assert echo[0].get("begin") == "00:00:01.500"
-    assert "".join(lead.itertext()) == "Lonely (so lonely) tonight"
+    assert "".join(lead.itertext()) == "Lonely tonight so lonely"
     # A whole backing line carries the role on its paragraph; its words are plain spans.
     assert backing_line.get(role) == "x-bg"
     assert [span.get(role) for span in backing_line] == [None, None, None]
-    assert "".join(backing_line.itertext()) == "(One, two, three)"
+    assert "".join(backing_line.itertext()) == "One, two, three"
     assert root.get(role) is None
 
 
