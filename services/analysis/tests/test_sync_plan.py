@@ -105,6 +105,7 @@ def test_parent_batches_selected_work_but_reconciles_full_catalog(monkeypatch, r
         _load_connection=Mock(return_value=("https://music", "user", "secret")),
         _attach_user_library=Mock(),
         _reconcile_user_tracks=Mock(),
+        _relink_renumbered_sources=Mock(return_value=0),
     )
     store = SimpleNamespace(expand=Mock(return_value=True))
     monkeypatch.setattr(echora_analysis, "main", main, raising=False)

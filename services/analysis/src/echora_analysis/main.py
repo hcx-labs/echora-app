@@ -1154,6 +1154,8 @@ def navidrome_sync_status(
         ) from error
     namespace = uuid.uuid5(uuid.NAMESPACE_URL, credentials[0].rstrip("/"))
     with psycopg.connect(get_settings().database_url) as connection, connection.cursor() as cursor:
+        # Heal a renumbered library here too, so it never shows as unanalyzed.
+        _relink_renumbered_sources(connection, credentials[0], tracks)
         cursor.execute(
             """
             SELECT ts.external_id FROM track_sources ts
@@ -1187,6 +1189,22 @@ def navidrome_sync_status(
             for track in missing[:50]
         ],
     }
+
+
+def _relink_renumbered_sources(connection, url: str, tracks) -> int:
+    from .source_relink import relink_sources
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT id FROM libraries WHERE namespace=%s",
+            (uuid.uuid5(uuid.NAMESPACE_URL, url.rstrip("/")),),
+        )
+        library = cursor.fetchone()
+    if library is None:
+        return 0
+    relinked = relink_sources(connection, library[0], {track.id: track.raw for track in tracks})
+    connection.commit()
+    return relinked
 
 
 def _enqueue_connection_job(

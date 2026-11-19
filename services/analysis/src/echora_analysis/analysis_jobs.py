@@ -249,6 +249,8 @@ def execute(job: dict, context) -> dict | None:
                     {"phase": "planning", "message": "Checking missing analysis before batching"}
                 )
                 with _connect() as connection:
+                    # A renumbered song keeps its analysis; it is not new work.
+                    main._relink_renumbered_sources(connection, credentials[0], catalog)
                     ids = select_sync_tracks(
                         connection,
                         credentials[0],
