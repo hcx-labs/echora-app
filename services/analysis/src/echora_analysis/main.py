@@ -1757,7 +1757,9 @@ def track_lyrics(
             "source_lines": original_lines,
         }
         for item in load_translations(track_id, original_lines)
-        if item["status"] == "ready"
+        # A mixed-language song's translation covers only its foreign lines; one where the model
+        # left every line as it was has nothing to show.
+        if item["status"] == "ready" and any(line.get("text", "").strip() for line in item["lines"])
     ]
     return {
         "available": bool(row.get("text")),
