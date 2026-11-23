@@ -1236,8 +1236,14 @@ def align_audio_with_timeline(
                 low, high = torch.quantile(activity, 0.1), torch.quantile(activity, 0.9)
                 activity = ((activity - low) / (high - low).clamp_min(1e-6)).clamp(0, 1)
             else:
+                # Read loudness at each stitched frame's true time, not on the nominal 20 ms grid.
+                clock = getattr(aligner_model, "last_frame_times", None)
+                if os.environ.get("FA_KARA_ACTIVITY_NOMINAL_GRID", "0") == "1":
+                    clock = None
                 activity = vocal_activity(
-                    resample(waveform, sample_rate, 16000).mean(0), emission.shape[0]
+                    resample(waveform, sample_rate, 16000).mean(0),
+                    emission.shape[0],
+                    frame_times=clock,
                 )
             emission = with_vocal_activity(
                 emission, activity, aligner_model.blank, vocal_activity_weight

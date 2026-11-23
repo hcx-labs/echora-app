@@ -417,18 +417,35 @@ def paced_minimum_frames(
 
 
 def vocal_activity(
-    waveform: torch.Tensor, frame_count: int, hop: int = 320, window: int = 400
+    waveform: torch.Tensor,
+    frame_count: int,
+    hop: int = 320,
+    window: int = 400,
+    frame_times: torch.Tensor | None = None,
+    sample_rate: int = 16000,
 ) -> torch.Tensor:
     """Per-frame singing activity in [0, 1] from a 16 kHz vocal stem.
 
     Loudness (dB) over each frame's receptive field, scaled between the song's 10th and 90th
     percentile, so quiet passages read near 0 and full singing near 1.
+
+    ``frame_times`` (seconds, one per frame) gives each frame's true centre in the audio. Without
+    it frame k is read at k x ``hop``, which is only right for a single inference pass: stitched
+    45 s chunks drop a frame at every seam, so the nominal grid falls 20 ms behind per chunk.
     """
     waveform = waveform.flatten().float()
-    padded = torch.nn.functional.pad(
-        waveform, (0, max(0, frame_count * hop + window - waveform.numel()))
-    )
-    frames = padded.unfold(0, window, hop)[:frame_count]
+    if frame_times is not None and frame_times.shape[0] == frame_count:
+        centres = frame_times.detach().cpu().double() * sample_rate
+        starts = torch.round(centres - (window - 1) / 2).long().clamp_min(0)
+        padded = torch.nn.functional.pad(
+            waveform, (0, max(0, int(starts.max()) + window - waveform.numel()))
+        )
+        frames = padded[starts[:, None] + torch.arange(window)]
+    else:
+        padded = torch.nn.functional.pad(
+            waveform, (0, max(0, frame_count * hop + window - waveform.numel()))
+        )
+        frames = padded.unfold(0, window, hop)[:frame_count]
     loudness = 10 * torch.log10(frames.square().mean(dim=1) + 1e-10)
     low, high = torch.quantile(loudness, 0.1), torch.quantile(loudness, 0.9)
     return ((loudness - low) / (high - low).clamp_min(1e-6)).clamp(0, 1)

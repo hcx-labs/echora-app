@@ -187,6 +187,21 @@ def test_vocal_activity_costs_only_letters_in_quiet_frames():
     assert torch.allclose(adjusted[-5:, 1], emission[-5:, 1], atol=0.2)  # singing: about free
 
 
+def test_vocal_activity_reads_loudness_at_the_true_frame_times():
+    from ctc_segmentation import vocal_activity
+
+    # Silence, then signal from 0.5 s. Stitched chunks drop a frame at each seam, so a late frame's
+    # true time runs ahead of index x 20 ms: here every frame is 100 ms (5 frames) further on.
+    waveform = torch.cat((torch.zeros(8000), torch.sin(torch.arange(16000, dtype=torch.float32))))
+    nominal = vocal_activity(waveform, 40)
+    assert nominal[:24].max() < 0.1 and nominal[26:].min() > 0.9
+    times = torch.arange(40, dtype=torch.float64) * 0.02 + 0.0125 + 0.1
+    shifted = vocal_activity(waveform, 40, frame_times=times)
+    assert shifted[:19].max() < 0.1 and shifted[21:].min() > 0.9
+    # A clock of the wrong length is ignored, not misread.
+    assert torch.equal(vocal_activity(waveform, 40, frame_times=times[:10]), nominal)
+
+
 def test_optional_groups_leave_the_lead_path_only_when_they_cost_it_time():
     from ctc_segmentation import align_with_minimum_durations
 
