@@ -10,31 +10,19 @@ import styles from "./SignalVisualizer.module.css";
 
 type Color = [number, number, number];
 const SAMPLES = 256;
-// Tunnel cross-sections a scene can take: 0 is a circle, positive values are
-// polygons with that many sides, negative values are blooms with that many petals.
-const SHAPES = [0, 6, -4, 8, -6, 5];
 const fragmentShader = `
   uniform vec2 resolution;
   uniform sampler2D waveform;
   uniform vec3 colorA, colorB, colorC;
   uniform float travel, drive, bass, mid, treble, pulse, beatPhase, anticipation, impact, shift;
-  uniform float sidesFrom, sidesTo, shapeBlend, twist, progress, mode, opacity;
+  uniform float opacity;
   varying vec2 vUv;
   const float PI = 3.14159265;
-  // Radius scale for a cross-section along an angle: 1 for a circle, a regular
-  // polygon for positive sides, a bloom of petals for negative sides.
-  float polygon(float angle, float sides) {
-    float n = abs(sides);
-    if (n < 2.5) return 1.0;
-    float sector = 2.0 * PI / n;
-    float edge = cos(PI / n) / cos(mod(angle + PI / 2.0, sector) - sector * .5);
-    return sides > 0.0 ? 1.0 / edge : edge;
-  }
   void main() {
     vec2 p = vUv - .5;
     p.x *= resolution.x / resolution.y;
     vec3 rgb = vec3(0.0);
-    if (mode < .5) {
+    {
       // Oscilloscope: the trace takes the scene colours from left to right and
       // leaves fading echoes when a bigger section lands.
       float x = vUv.x;
@@ -57,46 +45,6 @@ const fragmentShader = `
       float mirror = abs(vUv.y - .5 + sampleValue * height * .6 + .26);
       rgb += trace * exp(-mirror * resolution.y * .08) * .05 * (.4 + drive);
       rgb *= ends * (.55 + drive * .55);
-    } else {
-      float radius = length(p * vec2(1.0, 1.1));
-      float angle = atan(p.y, p.x);
-      // Rings twist as they recede; the scene sets how much.
-      float depthHint = -log(max(radius, .02));
-      float turned = angle + depthHint * twist + travel * twist * .15;
-      float shape = mix(polygon(turned, sidesFrom), polygon(turned, sidesTo), shapeBlend);
-      float ripple = sin(angle * 3.0 + travel * .9) * mid * .02 + sin(angle * 7.0 - travel * .6) * treble * .008;
-      float swell = 1.0 + bass * .05 + pulse * .035 + impact * .08 + ripple;
-      // A build-up stretches the rings apart, as if the tunnel were accelerating.
-      float spacing = 3.2 - anticipation * 1.4 + impact * .6;
-      float depth = -log(max(radius * shape / swell, .02)) * spacing + travel;
-      float ring = abs(fract(depth) - .5);
-      float aa = max(fwidth(depth), .006);
-      float line = 1.0 - smoothstep(.01, .01 + aa * 1.2, ring);
-      float halo = exp(-ring * (26.0 - drive * 10.0));
-      float aperture = smoothstep(.09, .3, radius);
-      float outer = 1.0 - smoothstep(.6, 1.2, radius);
-      // Alternate the scene colours along the tunnel, with a slow drift.
-      float index = floor(depth);
-      float alternate = .5 + .5 * sin(index * 1.3 + travel * .2);
-      vec3 ringColor = mix(colorA, colorB, alternate);
-      // Beats flash the nearest rings; the flash eases inward with the beat phase.
-      float near = smoothstep(.22, .75, radius);
-      float beatFlash = pulse * near * (1.0 - beatPhase * .6);
-      float light = .16 + drive * .42 + beatFlash * .7;
-      rgb += ringColor * (line * light + halo * (.05 + drive * .1 + treble * .08));
-      // Wall panels between rings, lit by the treble.
-      float panels = pow(.5 + .5 * cos(turned * max(3.0, abs(sidesTo)) + index * 2.1), 6.0);
-      rgb += colorC * panels * halo * (.03 + treble * .14) * (.5 + drive);
-      // Warp streaks pull toward the centre while a build-up gathers.
-      float streakAngle = fract(angle / (2.0 * PI) * 48.0 + floor(depth * .5) * .37);
-      float streak = exp(-abs(streakAngle - .5) * 40.0) * smoothstep(.12, .5, radius) * fract(depth * .5);
-      rgb += mix(colorC, vec3(1.0), .35) * streak * anticipation * .5;
-      // The impact: a bright shock ring racing outward.
-      float shock = exp(-pow((radius - (1.0 - impact) * 1.1) * 9.0, 2.0)) * impact;
-      rgb += mix(colorA, vec3(1.0), .45) * shock * .9;
-      rgb *= aperture * outer;
-      // A far light that grows as the song goes on: the end of the journey.
-      rgb += colorC * exp(-radius * radius * 90.0) * (.05 + progress * .12) * (.6 + drive * .4);
     }
     // Soft roll-off keeps hue when lights overlap.
     rgb = rgb / (1.0 + rgb * .6);
@@ -104,7 +52,7 @@ const fragmentShader = `
   }
 `;
 
-/** One GPU draw call for the scope or the tunnel, both moving through the song's journey. */
+/** One GPU draw call for the oscilloscope, moving through the song's journey. */
 export default function SignalVisualizer() {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -128,7 +76,6 @@ export default function SignalVisualizer() {
       colorA: { value: new THREE.Vector3(0.3, 0.7, 0.65) },
       colorB: { value: new THREE.Vector3(0.5, 0.4, 0.8) },
       colorC: { value: new THREE.Vector3(0.6, 0.8, 1) },
-      mode: { value: 0 },
       travel: { value: 0 },
       drive: { value: 0 },
       opacity: { value: 1 },
@@ -140,11 +87,6 @@ export default function SignalVisualizer() {
       anticipation: { value: 0 },
       impact: { value: 0 },
       shift: { value: 0 },
-      progress: { value: 0 },
-      sidesFrom: { value: 0 },
-      sidesTo: { value: 0 },
-      shapeBlend: { value: 1 },
-      twist: { value: 0 },
     };
     const material = new THREE.ShaderMaterial({
       depthTest: false,
@@ -210,15 +152,6 @@ export default function SignalVisualizer() {
       uniforms.anticipation.value = journey.anticipation;
       uniforms.impact.value = journey.impact;
       uniforms.shift.value = journey.shift;
-      uniforms.progress.value = journey.progress;
-      const blend = journey.sceneBlend * journey.sceneBlend * (3 - 2 * journey.sceneBlend);
-      uniforms.sidesFrom.value = SHAPES[journey.previousScene % SHAPES.length];
-      uniforms.sidesTo.value = SHAPES[journey.scene % SHAPES.length];
-      uniforms.shapeBlend.value = blend;
-      const twistFor = (scene: number) => [0, 0.25, -0.18, 0.4, -0.3, 0.12][scene % 6];
-      uniforms.twist.value =
-        twistFor(journey.previousScene) +
-        (twistFor(journey.scene) - twistFor(journey.previousScene)) * blend;
       for (const [name, slot] of [
         ["colorA", 0],
         ["colorB", 1],
@@ -238,7 +171,7 @@ export default function SignalVisualizer() {
       const next =
         !failed &&
         preferences.wavesEnabled &&
-        ["oscilloscope", "void"].includes(preferences.backdropPreset) &&
+        preferences.backdropPreset === "oscilloscope" &&
         !compact.matches &&
         !reduced.matches &&
         !document.hidden;
@@ -253,7 +186,6 @@ export default function SignalVisualizer() {
           return;
         }
       }
-      uniforms.mode.value = preferences.backdropPreset === "void" ? 1 : 0;
       if (next === active) return;
       active = next;
       cancelAnimationFrame(frame);
