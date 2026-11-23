@@ -1,11 +1,16 @@
 """Fill missing translations during sync; source lyrics remain authoritative."""
 
+import functools
+import importlib.util
 import logging
+import re
 import uuid
+from pathlib import Path
 
 import psycopg
 from psycopg.rows import dict_row
 
+from .external_ai import LanguagePair
 from .settings import require_database_url
 from .translation_storage import load_settings, load_translations, save_translation
 from .lyric_translation import translate, TranslationError, source_checksum
@@ -20,6 +25,63 @@ def source_lines(row):
     ):
         return [line["text"] for line in timed]
     return (row.get("text") or "").splitlines()
+
+
+# Source language stored for a song in a target language with some lines in other languages.
+MIXED_SOURCE = "mul"
+# A song needs this many foreign lines before it is sent; fewer are usually vocables or names.
+MIXED_MIN_LINES = 2
+# fastText alone marks a line foreign only for a language translated from, and only this sure.
+MIXED_LID_CONFIDENCE = 0.7
+
+
+@functools.lru_cache(maxsize=1)
+def _label_rules():
+    """The aligner's per-line language rule (vendor/fa_kara/label_rules.py), loaded on first use."""
+    path = Path(__file__).resolve().parents[2] / "vendor" / "fa_kara" / "label_rules.py"
+    spec = importlib.util.spec_from_file_location("echora_fa_kara_label_rules", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def foreign_lines(lines: list[str], language: str, sources: set[str]) -> list[int]:
+    """Indexes of lines not in the song's language: the karaoke aligner's per-line rule
+    (romanised Urdu, Hindi, Korean, ... that fastText cannot name), or fastText confident in a
+    language that is translated from (Spanish lines it names but the rule reads as English)."""
+    rules = _label_rules()
+    found = []
+    for index, line in enumerate(lines):
+        if not line.strip():
+            continue
+        if rules.line_language(line, language) != language:
+            found.append(index)
+            continue
+        words = [word.lower() for word in rules._LID_WORD.findall(line)]
+        if len(words) >= 3:
+            top, confidence = rules.line_lid(" ".join(words))
+            if top in sources and confidence >= MIXED_LID_CONFIDENCE:
+                found.append(index)
+    return found
+
+
+def _comparable(text: str) -> str:
+    return re.sub(r"[\W_]+", "", text.casefold())
+
+
+def keep_foreign(lines: list[str], translated: list[dict], foreign: list[int]) -> list[dict]:
+    """Only translations of foreign lines, and only where the model changed them; every other line
+    is left empty, which the player shows as no translation."""
+    chosen = set(foreign)
+    return [
+        {
+            "id": line["id"],
+            "text": line["text"]
+            if line["id"] in chosen and _comparable(line["text"]) != _comparable(source)
+            else "",
+        }
+        for source, line in zip(lines, translated)
+    ]
 
 
 def backfill_translations(user_id, url, external_ids, *, check, progress):
@@ -45,11 +107,30 @@ def backfill_translations(user_id, url, external_ids, *, check, progress):
         check()
         lines = source_lines(row)
         language = (row["language"] or "").lower().replace("_", "-")
-        for pair in settings.language_pairs:
-            if language != pair.source and not (
-                "-" not in pair.source and language.split("-")[0] == pair.source
-            ):
-                continue
+        work = [
+            (pair, None)
+            for pair in settings.language_pairs
+            if language == pair.source
+            or ("-" not in pair.source and language.split("-")[0] == pair.source)
+        ]
+        # A song already in a target language may still have lines in others (an Urdu verse in an
+        # English song): translate those, with the whole song as context.
+        if not work:
+            base = language.split("-")[0]
+            targets = sorted({p.target for p in settings.language_pairs if p.target == base})
+            if targets:
+                sources = {p.source.split("-")[0] for p in settings.language_pairs}
+                try:
+                    foreign = foreign_lines(lines, base, sources)
+                except Exception:
+                    logger.exception("Finding foreign lines failed for track %s", row["track_id"])
+                    foreign = []
+                if len(foreign) >= MIXED_MIN_LINES:
+                    work = [
+                        (LanguagePair(source=MIXED_SOURCE, target=target), foreign)
+                        for target in targets
+                    ]
+        for pair, foreign in work:
             check()
             # Honor a disable action between requests, not just between batches.
             current, _ = load_settings()
@@ -65,7 +146,12 @@ def backfill_translations(user_id, url, external_ids, *, check, progress):
                 summary["reused"] += 1
                 continue
             try:
-                translated = translate(settings, key, pair, lines)
+                if foreign is None:
+                    translated = translate(settings, key, pair, lines)
+                else:
+                    translated = keep_foreign(
+                        lines, translate(settings, key, pair, lines, mixed=True), foreign
+                    )
                 check()
                 with psycopg.connect(require_database_url(), row_factory=dict_row) as db:
                     latest = db.execute(

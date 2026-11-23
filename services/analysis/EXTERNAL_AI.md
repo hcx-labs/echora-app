@@ -66,6 +66,16 @@ non-`stop` completion reasons fail with safe error codes. Outputs are reordered 
 ID. There are no automatic retries or tools. Prompt instructions reduce injection
 risk but cannot guarantee linguistic fidelity; output is always inert data.
 
+A song already in a pair's target language (English, say) can still have lines in
+other languages: an Urdu verse in an English song. When at least two lines are
+foreign by the karaoke aligner's per-line rule (`label_rules.line_language`, which
+also catches romanised Urdu, Hindi or Korean that fastText cannot name), or fastText
+is at least 0.7 sure a line is in a language some pair translates from, the whole
+song is sent with `mixed=True`, which asks the model to translate only the lines in
+another language. Only those lines keep a translation, and only where the model
+changed them; the rest are stored empty and not shown. These are stored with source
+language `mul`.
+
 `translation_storage` persists settings atomically and upserts translations by
 track, source/target pair, and provenance (`ai` versus `provider`). Each translation
 contains mapped lines, a checksum of the exact ordered source text, model, prompt

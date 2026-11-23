@@ -149,6 +149,7 @@ def safe_translations(row, translations, line_mapping):
                     {**line, "id": line_mapping[line["id"]]}
                     for line in lines
                     if line["id"] in line_mapping
+                    and line["text"].strip()
                     and line["text"].strip() != source[line["id"]].strip()
                 ],
             }
