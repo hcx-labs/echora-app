@@ -42,11 +42,12 @@ class Settings(BaseSettings):
     moss_model_id: str = Field("")
     moss_revision: str = Field("")
     hum_diagnostic_dir: str = Field("/models/torch/hum-diagnostics")
-    # Echora Kara 300M (github.com/hcx-labs/echora-kara): trained on full mixes with MuQ fusion, a
-    # backing-vocal head and a text head. Echora aligns the separated vocal stem it already extracts.
+    # Echora Kara 700M MuQ (github.com/hcx-labs/echora-kara): trained on full mixes with MuQ fusion, a
+    # backing-vocal head and a text head; 361 M parameters plus the frozen MuQ-large encoder, which
+    # it needs (fa_kara_fusion "on"). Echora aligns the full mix.
     # The decoder defaults below are the ones this model was evaluated with; change them together.
-    fa_kara_model_id: str = Field("hcxlabs/echora-kara-300m")
-    fa_kara_revision: str = Field("64087e1078b1aaf39cc1e6a9fc93874ca2f60e22")
+    fa_kara_model_id: str = Field("hcxlabs/echora-kara-700m-muq")
+    fa_kara_revision: str = Field("7c0cda150c8be886ed5ff2f903460f112cf4c7a2")
     # Local checkpoint directory; overrides the model ID snapshot when set.
     fa_kara_model_path: str | None = Field(None)
     fa_kara_audio_speed: float = Field(1.0, ge=0.5, le=1.5)

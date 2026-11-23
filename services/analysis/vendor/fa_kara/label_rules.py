@@ -1778,17 +1778,32 @@ def document_language(lines: list[str], allowed: frozenset[str] | set[str]) -> s
     return None
 
 
+# A line of an English song is not English when at most this share of its (>= LINE_FOREIGN_WORDS)
+# words is English the English path knows and fastText is not sure it is English. This is the only
+# evidence for languages fastText has no class for when romanised (Urdu, Hindi, Punjabi, ...).
+LINE_FOREIGN_SHARE = 0.5
+LINE_FOREIGN_WORDS = 3
+LINE_ENGLISH_CONFIDENCE = 0.8
+
+
 @functools.lru_cache(maxsize=65536)
 def line_language(line: str, language: str) -> str:
-    """The hint one line of an en/de/fr song is normalised with under v3.
+    """The hint one line is normalised with under v3: every line decides for itself.
 
-    Only the line's Latin words are identified. In an English song a line goes to another language when
-    fastText is confident and most of its words are not English the English path knows (CMUdict share);
-    German/French only with that language's letters and evidence (LID_EVIDENCE), everything else to the
-    generic Latin path ``auto``. In a German/French song an English line (fastText ≥ 0.8, ≥ 75 % of ≥ 2 words in CMUdict)
-    goes to English G2P. Lines of fewer than two Latin words keep the song's language."""
-    if language not in PRONUNCIATION_LANGUAGES:
-        return language
+    The song's language is only the default. Only the line's Latin words are identified, and lines of
+    fewer than two Latin words keep the song's language.
+
+    English song: a line goes to another language when fastText is confident and most of its words are
+    not English the English path knows (CMUdict share), or, whatever fastText says short of a confident
+    "English", when at most ``LINE_FOREIGN_SHARE`` of three or more distinct words are known ("Mera bhi
+    usse batana bhool na": romanised Urdu has no fastText class) or neither of two is ("Chal diya"). German/French only with that language's
+    letters and evidence (LID_EVIDENCE), everything else to the generic Latin path ``auto``, which reads
+    the words as they are written.
+
+    Any other song (German, French, Spanish, Urdu, ..., or no language): an English line (fastText
+    >= 0.8, >= 75 % of >= 2 words in CMUdict) goes to English G2P. Outside German/French songs the line
+    must be written in Latin letters only, because the song's hint also selects how its own script is
+    read."""
     words = [
         w.lower().translate(_APOS_MAP)
         for w in _LID_WORD.findall(line)
@@ -1800,9 +1815,23 @@ def line_language(line: str, language: str) -> str:
     known = [_english_known(w) for w in words if not vocable_label(w)]
     share = sum(known) / len(known) if known else 1.0
     if language == "en":
-        if top == "en" or not (
-            (confidence >= 0.6 and share < 0.5) or (confidence >= 0.9 and share < 0.8)
+        foreign = (confidence >= 0.6 and share < 0.5) or (confidence >= 0.9 and share < 0.8)
+        if top == "en":
+            foreign = False
+        # Distinct words, so a repeated unknown word ("selfie, selfie, selfie") is not a language.
+        distinct = {w: _english_known(w) for w in words if not vocable_label(w)}
+        distinct_share = sum(distinct.values()) / len(distinct) if distinct else 1.0
+        if not (top == "en" and confidence >= LINE_ENGLISH_CONFIDENCE) and (
+            (
+                len(distinct) >= LINE_FOREIGN_WORDS
+                and distinct_share <= LINE_FOREIGN_SHARE
+                # Half known and fastText leaning English is English with coinages ("I'm undebatable").
+                and (distinct_share < LINE_FOREIGN_SHARE or top != "en")
+            )
+            or (len(distinct) == 2 and distinct_share == 0 and top != "en")
         ):
+            foreign = True
+        if not foreign:
             return language
         if top in LID_ALPHABETS and set("".join(words)) <= LID_ALPHABETS[top]:
             function_words, letters = LID_EVIDENCE[top]
@@ -1812,7 +1841,10 @@ def line_language(line: str, language: str) -> str:
                 return top
         return "auto"
     if top == "en" and confidence >= 0.8 and len(known) >= 2 and share >= 0.75:
-        return "en"
+        if language in PRONUNCIATION_LANGUAGES or all(
+            "LATIN" in unicodedata.name(c, "") for c in line if c.isalpha()
+        ):
+            return "en"
     return language
 
 

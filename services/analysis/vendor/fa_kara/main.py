@@ -53,15 +53,20 @@ def file_identity(path):
     return {"path": str(path.resolve()), "sha256": hashes}
 
 
-def normalize_source_lines(lines, language, sokuon_split, hatsuon_split, label_rules="v1"):
+def normalize_source_lines(
+    lines, language, sokuon_split, hatsuon_split, label_rules="v1", line_languages=None
+):
     """Split source boundaries before normalization; never normalize a newline.
 
     ``label_rules`` selects the shared normalizer's rule set (label_rules.RULES); "v1" is the
-    behaviour of every shipped model, "v2" must only be used with a model trained on v2 labels."""
+    behaviour of every shipped model, "v2" must only be used with a model trained on v2 labels.
+    ``line_languages``, when a list, receives the language each source line was normalised with."""
     records, source_texts = [], []
     for index, line in enumerate(lines):
         text = line.rstrip("\r\n")
         source_texts.append(text)
+        if line_languages is not None:
+            line_languages.append(hn.line_language(text, language, label_rules))
         # Punctuation-only separators are display lines, not acoustic tokens.
         # Keep their source index/text and boundary without inventing speech.
         display_only = all(c.isspace() or unicodedata.category(c).startswith("P") for c in text)
@@ -350,8 +355,9 @@ def main(argv=None):
         if detected:
             lrc_language, language_source = detected, "detected"
             print(f"Lyrics stored without a language; identified as {detected}")
+    line_languages = []
     result_list, source_texts = normalize_source_lines(
-        lines, lrc_language, sokuon_split, hatsuon_split, args.label_rules
+        lines, lrc_language, sokuon_split, hatsuon_split, args.label_rules, line_languages
     )
     if not any(item.get("pron") for item in result_list):
         raise ValueError("Lyrics contain no alignable text")
@@ -609,6 +615,7 @@ def main(argv=None):
         canonical_lines.append(
             {
                 "source_index": line_index,
+                "language": line_languages[line_index],
                 "text": re.sub(
                     r"\{([^{}|]*)\|[^{}]*\}|\[([^\[\]|]*)\|[^\[\]]*\]",
                     lambda match: match.group(1) if match.group(1) is not None else match.group(2),
@@ -660,6 +667,10 @@ def main(argv=None):
             else "cpu",
             "normalization_language": lrc_language,
             "normalization_language_source": language_source,
+            # Every line decides its own language (label_rules.line_language); the song's is the default.
+            "line_language_counts": {
+                language: line_languages.count(language) for language in sorted(set(line_languages))
+            },
             "opening_backing_lines_on_lead": len(opening_backing_lines),
             "audio_source": "demucs_vocals" if args.separate_vocals else "input_audio",
             "inference_config": vars(args),

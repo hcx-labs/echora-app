@@ -148,6 +148,29 @@ def test_v3_fixes():
     # Per-line language: a Twi line of an English song is spelled, an English line of a German song is English.
     assert label_rules.line_language("Nso mayɛ dinn firi sɛ me nni bi mayɛ din", "en") == "auto"
     assert prons("Hey, I'm kinda glad you didn't pick up", "de", "v3")[:2] == ["hei", "aim"]
+    # Every line decides for itself. Romanised Urdu/Punjabi has no fastText class: the share of words
+    # English knows decides, and the line is read as written ("bhi" is not "bye").
+    for line in (
+        "Mera bhi usse batana bhool na",
+        "Pata nahi chala hum badal gaye",
+        "Bahaar vichon main te tode",
+        "Chal diya, chal diya",
+    ):
+        assert label_rules.line_language(line, "en") == "auto", line
+    assert prons("Mera bhi usse batana bhool na", "en", "v3")[:2] == ["mera", "bhi"]
+    # English stays English: coinages, a repeated unknown word, a short line.
+    for line in (
+        "I'm undebatable, I'm unavoidable, I'm unevadable",
+        "Selfie, selfie, selfie, selfie",
+        "When I'm chasing you",
+    ):
+        assert label_rules.line_language(line, "en") == "en", line
+    # An English line of any other song is English, unless the song's own script is on the line.
+    for language in ("ur", "es", "ja", "auto"):
+        assert label_rules.line_language("Don't be crazy, sweet baby", language) == "en", language
+    assert label_rules.line_language("Don't be crazy, sweet baby پیار", "ur") == "ur"
+    assert norm.line_language("Mera bhi usse batana bhool na", "en", "v2") == "en"
+    assert norm.line_language("Mera bhi usse batana bhool na", "en", "v3-sung") == "auto"
     assert prons("I live", "en", "v3-orthographic") == prons("I live", "en", "v2-orthographic")
 
 

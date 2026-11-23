@@ -39,9 +39,11 @@ FA_KARA_REVISION = "168ca5f01cecaa1290e31c0ce8dc44af8c7451bb"
 # minimum syllable durations and a +45 ms calibration).
 # v8: fast lead lines are no longer re-placed as backing lines (they overlapped their neighbours),
 # and backing lines before the first lead line are placed on the lead path.
-KARAOKE_PIPELINE_REVISION = "v8-echora-kara-mix"
-DEFAULT_MODEL_ID = "hcxlabs/echora-kara-300m"
-DEFAULT_MODEL_REVISION = "64087e1078b1aaf39cc1e6a9fc93874ca2f60e22"
+# v9: Echora Kara 700M MuQ (MuQ fusion that the model really uses), every line decides its own
+# language, and vocal loudness is read at each frame's true time.
+KARAOKE_PIPELINE_REVISION = "v9-echora-kara-mix"
+DEFAULT_MODEL_ID = "hcxlabs/echora-kara-700m-muq"
+DEFAULT_MODEL_REVISION = "7c0cda150c8be886ed5ff2f903460f112cf4c7a2"
 _DIALOGUE = re.compile(r"^Dialogue: [^,]*,([^,]+),([^,]+),(?:[^,]*,){6}(.*)$")
 _KARAOKE_TAG = re.compile(r"\{\\k(\d+)\}")
 _ASS_TAG = re.compile(r"\{[^}]*\}")
