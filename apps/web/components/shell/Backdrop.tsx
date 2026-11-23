@@ -17,6 +17,7 @@ import {
 } from "../player/playbackPreferences";
 import RootVisualizer from "../player/RootVisualizer";
 import SignalVisualizer from "../player/SignalVisualizer";
+import VoidTunnelVisualizer from "../player/VoidTunnelVisualizer";
 import CloudVisualizer from "../player/CloudVisualizer";
 import MeshGridVisualizer from "../player/MeshGridVisualizer";
 import LightningFallVisualizer from "../player/LightningFallVisualizer";
@@ -653,6 +654,7 @@ export default function Backdrop() {
       <canvas ref={sceneRef} className={styles.scene} />
       <RootVisualizer />
       <SignalVisualizer />
+      <VoidTunnelVisualizer />
       <CloudVisualizer />
       <LightningFallVisualizer />
       <MeshGridVisualizer />

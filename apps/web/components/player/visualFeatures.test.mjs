@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 const source = readFileSync(new URL('./visualFeatures.ts', import.meta.url), 'utf8');
-const { validateVisualFeatures: validate, visualFrameAt, neutralVisualFrame, publishVisualFrame, descriptorRhythm, validateStructure, validateVisualEnrichment } = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}`);
+const { validateVisualFeatures: validate, visualFrameAt, beatClockAt, neutralVisualFrame, publishVisualFrame, descriptorRhythm, validateStructure, validateVisualEnrichment } = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}`);
 function fixture() {
   const n = 5, hop = 512 / 22050;
   const vector = () => Array(n).fill(.2);
@@ -83,4 +83,21 @@ test('unified frame includes source units, ambiguity and bounded structural nove
   assert.equal(frame.source.sampleRate, 22050); assert.equal(frame.source.pitchMidiStart, 24);
   assert.deepEqual(frame.tempoCandidatesBpm, [60, 120, 240]); assert.equal(frame.structuralNovelty, .25);
   assert.equal(data.structureSummary.chroma_cosine, undefined);
+});
+
+test('beat clock follows a beat grid whose tempo changes', () => {
+  // Four beats at 0.5 s, then the song slows to 0.6 s per beat.
+  const beats = [1, 1.5, 2, 2.5, 3, 3.6, 4.2, 4.8, 5.4, 6, 6.6];
+  const at = time => beatClockAt(beats, time);
+  assert.equal(at(1.25).position, 0.5);
+  assert.equal(at(3.3).position, 4.5);
+  assert.ok(Math.abs(at(1.25).period - 0.5) < 1e-9);
+  assert.ok(Math.abs(at(6.3).period - 0.6) < 1e-9);
+  // One late beat in a steady grid does not move the local tempo.
+  const steady = [0, 0.5, 1, 1.62, 2, 2.5, 3, 3.5, 4];
+  assert.ok(Math.abs(beatClockAt(steady, 1.8).period - 0.5) < 1e-9);
+  // Before the first beat and after the last, the edge interval continues the grid.
+  assert.ok(Math.abs(at(0.5).position + 1) < 1e-9);
+  assert.ok(Math.abs(at(7.2).position - 11) < 1e-9);
+  assert.equal(beatClockAt([1], 1), null);
 });

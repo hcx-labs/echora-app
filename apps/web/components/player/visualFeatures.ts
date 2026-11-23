@@ -245,6 +245,8 @@ export type VisualFrame = {
   frameIndex: number;
   bpm: number | null;
   beat: boolean;
+  /** Where playback is on the song's own beat grid, so visuals can follow a tempo that changes. */
+  beatClock: BeatClock | null;
   features: {
     chroma: number[];
     pitch: number[];
@@ -280,6 +282,7 @@ export function neutralVisualFrame(timestamp = 0): VisualFrame {
     frameIndex: -1,
     bpm: null,
     beat: false,
+    beatClock: null,
     bands: Array(24).fill(0),
     waveform: Array(64).fill(0),
     bass: 0,
@@ -291,6 +294,33 @@ export function neutralVisualFrame(timestamp = 0): VisualFrame {
     midAttack: 0,
     trebleAttack: 0,
   };
+}
+/** position: beats since the first beat (fractional, negative before it); period: local seconds per beat. */
+export type BeatClock = { position: number; period: number };
+/** Position on a beat grid at a time, with the local beat period (median of the nearby intervals,
+ * so one late beat does not jolt the tempo). Before the first and after the last beat the edge
+ * interval continues the grid. */
+export function beatClockAt(beats: number[], time: number): BeatClock | null {
+  const n = beats.length;
+  if (n < 2 || !Number.isFinite(time)) return null;
+  let low = 0,
+    high = n;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (beats[middle] <= time) low = middle + 1;
+    else high = middle;
+  }
+  const index = Math.max(0, Math.min(n - 2, low - 1));
+  const nearby: number[] = [];
+  for (let i = Math.max(0, index - 4); i <= Math.min(n - 2, index + 4); i++)
+    nearby.push(beats[i + 1] - beats[i]);
+  nearby.sort((a, b) => a - b);
+  const period = nearby[nearby.length >> 1];
+  if (!(period > 0)) return null;
+  if (low === 0) return { position: (time - beats[0]) / (beats[1] - beats[0]), period };
+  if (low >= n) return { position: n - 1 + (time - beats[n - 1]) / period, period };
+  const interval = beats[index + 1] - beats[index];
+  return { position: index + (time - beats[index]) / interval, period };
 }
 function crossed(times: number[], from: number, to: number) {
   let low = 0,
@@ -381,6 +411,10 @@ export function visualFrameAt(
         previousTime,
         timestamp,
       ),
+    beatClock: beatClockAt(
+      timeline.rhythm?.beat_times_seconds ?? timeline.beat_times_seconds,
+      timestamp,
+    ),
     onset: continuous && crossed(timeline.onset_times_seconds, previousTime, timestamp),
     bands: timeline.bands[index],
     waveform: timeline.waveform[index],
