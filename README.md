@@ -104,7 +104,7 @@ Work runs in durable background batches. A failed track doesn't block the others
 | [Mel-Band RoFormer](https://github.com/KimberleyJensen/Mel-Band-Roformer-Vocal-Model) | Separating vocals from accompaniment |
 | Essentia MELODIA | Melody contours for hum search and the melody line |
 | [fastText LID-176](https://fasttext.cc/docs/en/language-identification.html) · [IndicLID](https://github.com/AI4Bharat/IndicLID) | Lyrics language, including romanized Indic text |
-| [Echora Kara 300M](https://huggingface.co/hcxlabs/echora-kara-300m) ([code](https://github.com/hcx-labs/echora-kara)) | Syllable timing for karaoke |
+| [Echora Kara 700M MuQ](https://huggingface.co/hcxlabs/echora-kara-700m-muq) ([code](https://github.com/hcx-labs/echora-kara)) | Syllable timing for karaoke |
 | [Echora Kiki](https://huggingface.co/hcxlabs/echora-kiki) | Writing lyrics for vocal tracks that have none (optional) |
 | [NMFP](https://github.com/raraz15/neural-music-fp) recording encoder | Identify song (opt-in) |
 | [LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) via ComfyUI | Motion artwork (optional, needs a 24 GB GPU) |

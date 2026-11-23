@@ -74,7 +74,7 @@ const models: {
     detail: "Detects lyrics language, including romanized Indic text.",
   },
   {
-    name: "Echora Kara 300M",
+    name: "Echora Kara 700M MuQ",
     phases: ["karaoke"],
     role: "Karaoke timing",
     detail: "Aligns lyrics to the song for syllable-timed karaoke.",
