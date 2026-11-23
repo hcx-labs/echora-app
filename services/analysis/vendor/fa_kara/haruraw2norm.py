@@ -920,6 +920,12 @@ def _latin_context(runs, index):
     return word(-1), word(1)
 
 
+def line_language(line, lang, rules=None):
+    """The language tag ``process_haruhi_line`` normalises this line with (the song's before v3)."""
+    lang = (lang or "auto").lower()
+    return label_rules.line_language(line, lang) if label_rules.resolve(rules).v3 else lang
+
+
 def process_haruhi_line(line, lang="jaen", sokuon_split=False, hatsuon_split=True, rules=None):
     """Script-local normalization using the existing acoustic spelling alphabet.
 
@@ -937,12 +943,12 @@ def process_haruhi_line(line, lang="jaen", sokuon_split=False, hatsuon_split=Tru
     reading, Indic and Tamil pronunciation transliteration, Arabic ʿayn/hamza vowels, the Japanese
     sokuon carry, Cantonese jyu, ñ → ny; ``"v2-orthographic"`` is v2 with spelled Latin words.
     ``"v3"`` / ``"v3-orthographic"`` add the v3 fixes (label_rules.py docstring), including the
-    per-line language of en/de/fr lines.
+    per-line language (label_rules.line_language).
     """
     lang = (lang or "auto").lower()
     rules = label_rules.resolve(rules)
     if rules.v3:
-        # v3: a line of an en/de/fr song in another language uses that language's rules (fastText).
+        # v3: every line decides its own language; the song's is only the default.
         lang = label_rules.line_language(line, lang)
     result = []
     # Line-level context: kana anywhere makes Han runs Japanese (explicit zh/yue/zhen keep
