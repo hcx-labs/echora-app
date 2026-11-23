@@ -61,6 +61,14 @@
   opacity: 0;
   transition: opacity 0.3s ease-out;
 }
+/* The text itself sits in a box with no padding, exactly over the line. Laid out directly in the
+   padded layer, a first line with furigana moved up: the annotation may use a block's padding
+   instead of pushing the line down, so the glow sat above the letters it belongs to. */
+.glowInner {
+  position: absolute;
+  inset: 0.5em;
+  display: block;
+}
 .glowText[data-on="true"] {
   opacity: 1;
 }

@@ -176,19 +176,23 @@ export function RubyText({ text, rubies }: { text: string; rubies: LineRuby[] })
   return <>{parts}</>;
 }
 
-/** The text node and offset holding character `offset` of the line's base text (furigana skipped). */
-function textPoint(root: Node, offset: number, atEnd: boolean): [Node, number] | null {
+/** The pieces of the line's base text (furigana skipped) between characters `from` and `to`:
+ *  each text node they touch, with the offsets inside it. */
+function baseRuns(root: Node, from: number, to: number): [Node, number, number][] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) =>
       node.parentElement?.closest("rt") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
   });
+  const runs: [Node, number, number][] = [];
   let seen = 0;
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+  for (let node = walker.nextNode(); node && seen < to; node = walker.nextNode()) {
     const length = node.textContent?.length || 0;
-    if (offset < seen + length || (atEnd && offset === seen + length)) return [node, offset - seen];
+    const start = Math.max(from, seen),
+      end = Math.min(to, seen + length);
+    if (start < end) runs.push([node, start - seen, end - seen]);
     seen += length;
   }
-  return null;
+  return runs;
 }
 
 /** Native text layout owns shaping, wrapping, punctuation, and bidirectional runs. */
@@ -224,14 +228,17 @@ export default function KaraokeLine({ fragments, now = 0, clock, active, highlig
         }));
       let offset = 0;
       const boxes = fragments.map((fragment) => {
-        const start = textPoint(node, offset, false);
+        const from = offset;
         offset += fragment.text.length;
-        const end = textPoint(node, offset, true);
-        if (!fragment.text.trim() || !start || !end) return [];
-        const range = document.createRange();
-        range.setStart(...start);
-        range.setEnd(...end);
-        return local(range);
+        if (!fragment.text.trim()) return [];
+        // One range per run of base text: a single range across a kanji and the kana after it
+        // ("拭き") would also return the furigana's boxes, and the fill and glow would climb onto them.
+        return baseRuns(node, from, offset).flatMap(([text, start, end]) => {
+          const range = document.createRange();
+          range.setStart(text, start);
+          range.setEnd(text, end);
+          return local(range).filter((box) => box.width > 0);
+        });
       });
       const ruby = rubies.flatMap((reading, index) => {
         const kana = node.querySelector(`rt[data-ruby="${index}"]`)?.firstChild;
@@ -351,7 +358,7 @@ export default function KaraokeLine({ fragments, now = 0, clock, active, highlig
           data-on={initial.edge ? "true" : "false"}
           style={initial.edge ? (glowBand(initial.edge) as CSSProperties) : undefined}
         >
-          {lineText}
+          <span className={styles.glowInner}>{lineText}</span>
         </span>
       )}
       <span ref={paintLayer} className={styles.paint} aria-hidden="true" style={paint}>
