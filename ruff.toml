@@ -1,0 +1,47 @@
+# Ruff for the Python projects: core/, worker/ and backend/ (formatter and linter, PEP 8 and 257).
+line-length = 100
+target-version = "py312"
+src = ["core", "worker", "backend"]
+extend-exclude = ["services", "data", "**/vendor"]
+
+[format]
+# PEP 8 through Ruff's Black-compatible style.
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true
+
+[lint]
+select = [
+    "E",    # pycodestyle errors (PEP 8)
+    "W",    # pycodestyle warnings (PEP 8)
+    "F",    # pyflakes
+    "I",    # import order and grouping (PEP 8)
+    "N",    # naming (PEP 8)
+    "D",    # docstrings (PEP 257)
+    "UP",   # modern syntax for the target version
+    "B",    # likely bugs
+    "BLE",  # blind except
+    "SIM",  # simpler equivalents
+    "C4",   # comprehensions
+    "RET",  # returns
+    "PIE",  # unnecessary statements
+    "PTH",  # pathlib over os.path
+]
+ignore = [
+    # PEP 257 asks every public module, package and class for a docstring; functions and methods
+    # document themselves by name and types unless they need more.
+    "D102", "D103", "D105", "D107",
+    "D401",  # summaries may be descriptive ("The song's ..."), as in the rest of the codebase
+    "E501",  # the formatter owns line length; long literals and URLs may exceed it
+]
+
+[lint.pydocstyle]
+convention = "pep257"
+
+[lint.isort]
+known-first-party = ["core", "worker", "echora_backend"]
+combine-as-imports = true
+
+[lint.per-file-ignores]
+"**/tests/**" = ["D100", "D101", "D103", "D104"]

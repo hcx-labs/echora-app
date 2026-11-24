@@ -1,0 +1,18 @@
+[project]
+name = "echora-worker"
+version = "0.1.0"
+description = "Echora's sync processing: library ingest, lyrics, karaoke, embeddings and more"
+requires-python = ">=3.12"
+dependencies = [
+  "echora-core",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.0.2", "ruff==0.15.6"]
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
