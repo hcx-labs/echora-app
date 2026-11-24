@@ -254,7 +254,7 @@ def test_backing_fixture_matches_current_export():
     ]
     fixture = (
         Path(__file__).resolve().parents[3]
-        / "plugins/navidrome/contract-tests/testdata/lyrics-backing.ttml"
+        / "navidrome/contract-tests/testdata/lyrics-backing.ttml"
     )
     assert exported == fixture.read_text(encoding="utf-8")
 
@@ -281,7 +281,7 @@ def test_native_parser_fixtures_match_current_export(format):
     ][0]["text"]
     fixture = (
         Path(__file__).resolve().parents[3]
-        / "plugins/navidrome/contract-tests/testdata"
+        / "navidrome/contract-tests/testdata"
         / f"lyrics.{format}"
     )
     assert exported == fixture.read_text(encoding="utf-8")
@@ -381,7 +381,7 @@ def test_identical_translation_line_is_omitted_without_shifting_remaining_timing
         assert len(root.findall(f".//{{{lyrics.TT}}}p")) == 2
         fixture = (
             Path(__file__).resolve().parents[3]
-            / "plugins/navidrome/contract-tests/testdata/lyrics-filtered.ttml"
+            / "navidrome/contract-tests/testdata/lyrics-filtered.ttml"
         )
         assert result["lyrics"][0]["text"] == fixture.read_text(encoding="utf-8")
     else:

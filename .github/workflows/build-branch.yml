@@ -54,7 +54,7 @@ jobs:
       matrix:
         include:
           - name: web
-            dockerfile: apps/web/Dockerfile
+            dockerfile: web/Dockerfile
           - name: analysis-cpu
             dockerfile: services/analysis/docker/Dockerfile.cpu
           - name: analysis-gpu

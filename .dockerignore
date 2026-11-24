@@ -14,7 +14,7 @@
 **/.mypy_cache
 **/.venv
 **/coverage
-plugins/navidrome/dist
+navidrome/dist
 **/htmlcov
 **/*.log
 data
@@ -23,5 +23,5 @@ results
 testdata/music
 docs
 CONTEXT.md
-apps/web/AGENTS.md
-apps/web/CLAUDE.md
+web/AGENTS.md
+web/CLAUDE.md

@@ -4,7 +4,7 @@ Every backdrop moves through the song as a journey instead of only following the
 
 ## Sections
 
-`planSongSections` in `apps/web/components/player/visualFeatures.ts` plans the sections once per track from the cached visual features (`structure`, revision 2). It needs no new analysis.
+`planSongSections` in `web/components/player/visualFeatures.ts` plans the sections once per track from the cached visual features (`structure`, revision 2). It needs no new analysis.
 
 1. **Boundaries.** Checkerboard novelty on the average of the chroma and MFCC self-similarity matrices (2 s bins, 4-bin kernel). Local peaks above a quarter of the strongest, at least 12 s apart, at most 20.
 2. **Scenes.** Each section is compared with every other. When its best match among earlier sections is at least one standard deviation above the song's own between-section similarity, it takes that section's scene. A returning chorus therefore returns to the chorus scene.
@@ -14,7 +14,7 @@ Only the bounded plan is kept on the timeline; the matrices never enter the anim
 
 ## Live state
 
-`SongJourney` in `apps/web/components/player/songJourney.ts` turns frames into a state each backdrop reads once per drawn frame:
+`SongJourney` in `web/components/player/songJourney.ts` turns frames into a state each backdrop reads once per drawn frame:
 
 | Field                                  | Meaning                                                                                           |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------- |

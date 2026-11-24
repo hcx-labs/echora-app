@@ -2,7 +2,7 @@
   "name": "echora",
   "private": true,
   "workspaces": [
-    "apps/*"
+    "web"
   ],
   "scripts": {
     "dev": "npm run dev --workspace @echora/web",
@@ -10,8 +10,8 @@
     "lint": "npm run lint --workspace @echora/web",
     "test:web": "npm run test --workspace @echora/web",
     "typecheck": "npm run typecheck --workspace @echora/web",
-    "format:ts": "prettier --write \"apps/**/*.{ts,tsx}\"",
-    "format:ts:check": "prettier --check \"apps/**/*.{ts,tsx}\"",
+    "format:ts": "prettier --write \"web/**/*.{ts,tsx}\"",
+    "format:ts:check": "prettier --check \"web/**/*.{ts,tsx}\"",
     "rebuild:web": "docker compose build web && docker compose up -d --no-deps web",
     "rebuild:analysis": "docker compose build analysis && docker compose up -d --no-deps analysis"
   },

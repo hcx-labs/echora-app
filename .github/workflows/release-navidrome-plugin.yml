@@ -62,8 +62,8 @@ jobs:
         with:
           go-version: '1.27.1'
           cache-dependency-path: |
-            plugins/navidrome/go.sum
-            plugins/navidrome/contract-tests/go.sum
+            navidrome/go.sum
+            navidrome/contract-tests/go.sum
 
       - name: Install TinyGo
         env:
@@ -76,19 +76,19 @@ jobs:
           echo "$TMPDIR/tinygo/bin" >> "$GITHUB_PATH"
 
       - name: Test plugin adapter
-        working-directory: plugins/navidrome
+        working-directory: navidrome
         run: make test
 
       - name: Test Navidrome contracts
-        working-directory: plugins/navidrome/contract-tests
+        working-directory: navidrome/contract-tests
         run: go test ./...
 
       - name: Build plugin module and package
-        working-directory: plugins/navidrome
+        working-directory: navidrome
         run: make package
 
       - name: Validate and prepare release artifacts
-        working-directory: plugins/navidrome
+        working-directory: navidrome
         env:
           PLUGIN_VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -116,8 +116,8 @@ jobs:
         with:
           name: echora-navidrome-${{ steps.version.outputs.version }}
           path: |
-            plugins/navidrome/dist/echora-navidrome-${{ steps.version.outputs.version }}.ndp
-            plugins/navidrome/dist/echora-navidrome-${{ steps.version.outputs.version }}.ndp.sha256
+            navidrome/dist/echora-navidrome-${{ steps.version.outputs.version }}.ndp
+            navidrome/dist/echora-navidrome-${{ steps.version.outputs.version }}.ndp.sha256
           if-no-files-found: error
 
       - name: Commit and tag the built plugin version
@@ -126,7 +126,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add plugins/navidrome/manifest.json
+          git add navidrome/manifest.json
           git commit -m "chore(plugin-release): ${TAG}"
           git tag -a "$TAG" -m "Release ${TAG}"
           git push --atomic origin HEAD:main "$TAG"
@@ -139,6 +139,6 @@ jobs:
         run: |
           gh release create "$TAG" --verify-tag --draft --latest=false --generate-notes \
             --title "Echora Navidrome plugin ${PLUGIN_VERSION}" \
-            "plugins/navidrome/dist/echora-navidrome-${PLUGIN_VERSION}.ndp" \
-            "plugins/navidrome/dist/echora-navidrome-${PLUGIN_VERSION}.ndp.sha256"
+            "navidrome/dist/echora-navidrome-${PLUGIN_VERSION}.ndp" \
+            "navidrome/dist/echora-navidrome-${PLUGIN_VERSION}.ndp.sha256"
           gh release edit "$TAG" --draft=false --latest=false
