@@ -73,7 +73,9 @@ class MuQMuLanModel(AudioEmbeddingModel):
         normalized = tuple(_normalize(item) for item in vectors)
         vector = _normalize(np.mean(normalized, axis=0))
         peak = torch.cuda.max_memory_allocated(self.device) if self.device.type == "cuda" else None
-        return EmbeddingResult(vector, round((time.perf_counter() - started) * 1000), peak, normalized)
+        return EmbeddingResult(
+            vector, round((time.perf_counter() - started) * 1000), peak, normalized
+        )
 
 
 class MertModel(AudioEmbeddingModel):
@@ -83,9 +85,11 @@ class MertModel(AudioEmbeddingModel):
         from transformers import AutoModel
 
         self.device = torch.device(device)
-        self.model = AutoModel.from_pretrained(
-            model_id, revision=revision, trust_remote_code=True
-        ).to(self.device).eval()
+        self.model = (
+            AutoModel.from_pretrained(model_id, revision=revision, trust_remote_code=True)
+            .to(self.device)
+            .eval()
+        )
         self.revision = getattr(self.model.config, "_commit_hash", None) or revision
 
     def embed_each(self, windows: list[np.ndarray]) -> list[np.ndarray]:
@@ -107,4 +111,6 @@ class MertModel(AudioEmbeddingModel):
         vectors = self.embed_each(windows)
         vector = _normalize(np.mean(vectors, axis=0))
         peak = torch.cuda.max_memory_allocated(self.device) if self.device.type == "cuda" else None
-        return EmbeddingResult(vector, round((time.perf_counter() - started) * 1000), peak, tuple(vectors))
+        return EmbeddingResult(
+            vector, round((time.perf_counter() - started) * 1000), peak, tuple(vectors)
+        )

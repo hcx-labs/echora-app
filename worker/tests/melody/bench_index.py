@@ -6,13 +6,21 @@ and full search_corpus-equivalent scans. Timing only: every code path here is
 the production one, and the correctness oracles in test_hum_search.py stay the
 source of truth for matching behavior.
 """
+
 from __future__ import annotations
 
 import time
 
 import numpy as np
 
-from worker.melody.index import _match_prepared_motifs, _motif_windows, _prepare_motifs, _relative, extract_hum_contour, match_contour
+from worker.melody.index import (
+    _match_prepared_motifs,
+    _motif_windows,
+    _prepare_motifs,
+    _relative,
+    extract_hum_contour,
+    match_contour,
+)
 
 CONTOUR_SECONDS = 240  # 4-minute track -> 2400 bins at 10 Hz
 CATALOG_TRACKS = 50
@@ -40,16 +48,23 @@ def bench(label: str, fn, repeat: int = 5) -> float:
 def main() -> None:
     rng = np.random.default_rng(42)
 
-    print(f"catalog: {CATALOG_TRACKS} tracks x {SOURCES_PER_TRACK} sources, "
-          f"{CONTOUR_SECONDS}s contours @10 Hz")
+    print(
+        f"catalog: {CATALOG_TRACKS} tracks x {SOURCES_PER_TRACK} sources, "
+        f"{CONTOUR_SECONDS}s contours @10 Hz"
+    )
 
     # --- Query-side prep --------------------------------------------------
     import io
     import wave
-    samples = (0.2 * np.sin(2 * np.pi * 220 * np.arange(int(15 * 24000)) / 24000) * 32767).astype(np.int16)
+
+    samples = (0.2 * np.sin(2 * np.pi * 220 * np.arange(int(15 * 24000)) / 24000) * 32767).astype(
+        np.int16
+    )
     with io.BytesIO() as buffer:
         with wave.open(buffer, "wb") as wav:
-            wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(24000)
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(24000)
             wav.writeframes(samples.tobytes())
         audio = buffer.getvalue()
     bench("extract_hum_contour (15 s synthetic tone)", lambda: extract_hum_contour(audio), repeat=3)
@@ -62,13 +77,20 @@ def main() -> None:
 
     # --- Single-contour match (one catalog source) ------------------------
     target, target_mask = _catalog_contour(rng, CONTOUR_SECONDS * 10)
-    bench("match_contour (single 2400-bin target)", lambda: match_contour(query, query_mask, target, target_mask))
-    bench("_match_prepared_motifs (batched, 2400-bin target)",
-          lambda: _match_prepared_motifs(prepared, target, target_mask))
+    bench(
+        "match_contour (single 2400-bin target)",
+        lambda: match_contour(query, query_mask, target, target_mask),
+    )
+    bench(
+        "_match_prepared_motifs (batched, 2400-bin target)",
+        lambda: _match_prepared_motifs(prepared, target, target_mask),
+    )
 
     # --- Full corpus scan (as in search_corpus thread pool) ---------------
-    contours = [_catalog_contour(rng, CONTOUR_SECONDS * 10)
-                for _ in range(CATALOG_TRACKS * SOURCES_PER_TRACK)]
+    contours = [
+        _catalog_contour(rng, CONTOUR_SECONDS * 10)
+        for _ in range(CATALOG_TRACKS * SOURCES_PER_TRACK)
+    ]
 
     def scan_serial() -> None:
         for target, target_mask in contours:

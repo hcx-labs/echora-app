@@ -20,7 +20,13 @@ from worker.library.descriptors import store_audio_descriptors
 from worker.library.waveforms import store_waveform
 from worker.library.visual_features import store_visual_features
 from worker.melody.index import create_sync_run, store_track_contours
-from core.embeddings.audio_models import AudioEmbeddingModel, EmbeddingResult, MertModel, MuQMuLanModel, release_model
+from core.embeddings.audio_models import (
+    AudioEmbeddingModel,
+    EmbeddingResult,
+    MertModel,
+    MuQMuLanModel,
+    release_model,
+)
 from worker.remote.session import RemoteModel, current as current_remote
 from core.integrations.navidrome import NavidromeClient, NavidromeTrack
 from worker.planning.audio import plan_audio, audio_prerequisites

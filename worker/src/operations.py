@@ -10,7 +10,12 @@ User identity belongs to the job envelope, not the payload.
 
 from __future__ import annotations
 
-from core.library.membership import attach_user_library, reconcile_user_tracks, relink_renumbered_sources, user_audio_track_ids
+from core.library.membership import (
+    attach_user_library,
+    reconcile_user_tracks,
+    relink_renumbered_sources,
+    user_audio_track_ids,
+)
 from core.library.connections import load_connection
 from core.settings import get_settings, require_database_url
 
@@ -196,7 +201,6 @@ def execute(job: dict, context) -> dict | None:
         context.check()
         context.report(update)
         context.check()
-
 
     credentials = None
     if operation not in {"audio_profiles", "semantic_fusion_build"}:

@@ -89,7 +89,7 @@ class LibraryScopingTests(unittest.TestCase):
         navidrome = MagicMock()
         navidrome.return_value.__enter__.return_value = client
         ns = load_functions(
-            f"{ {'karaoke': 'kara'}.get(kind, kind)}/pipeline.py",
+            f"{ {'karaoke': 'kara'}.get(kind, kind) }/pipeline.py",
             psycopg=SimpleNamespace(connect=connect),
             os=SimpleNamespace(environ={"DATABASE_URL": "fake"}),
             NavidromeClient=navidrome,

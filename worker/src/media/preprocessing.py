@@ -4,6 +4,7 @@ Only derived audio lives here. Source authorization/downloads remain with caller
 Entries are immutable by source bytes + recipe and published atomically under a
 process lock. Consumers receive independent arrays, never mutable shared buffers.
 """
+
 from __future__ import annotations
 
 from core.settings import get_settings
@@ -35,16 +36,26 @@ def get_check():
 class AudioArtifactCache:
     def __init__(self, directory=None, *, max_bytes=None, ttl_seconds=None, check=None):
         self.directory = Path(directory or get_settings().preprocess_dir)
-        self.max_bytes = int(max_bytes if max_bytes is not None else get_settings().preprocess_max_bytes)
-        self.ttl_seconds = float(ttl_seconds if ttl_seconds is not None else get_settings().preprocess_ttl_seconds)
+        self.max_bytes = int(
+            max_bytes if max_bytes is not None else get_settings().preprocess_max_bytes
+        )
+        self.ttl_seconds = float(
+            ttl_seconds if ttl_seconds is not None else get_settings().preprocess_ttl_seconds
+        )
         if self.max_bytes < 0 or self.ttl_seconds <= 0:
             raise ValueError("Preprocessing cache needs nonnegative max bytes and positive TTL")
         self.check = check or get_check()
 
     @staticmethod
     def key(source: bytes, recipe: dict) -> tuple[str, dict]:
-        metadata = {"schema": CACHE_SCHEMA, "source_sha256": hashlib.sha256(source).hexdigest(), "recipe": recipe}
-        digest = hashlib.sha256(json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        metadata = {
+            "schema": CACHE_SCHEMA,
+            "source_sha256": hashlib.sha256(source).hexdigest(),
+            "recipe": recipe,
+        }
+        digest = hashlib.sha256(
+            json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
         return digest, metadata
 
     @contextmanager
@@ -121,7 +132,9 @@ class AudioArtifactCache:
                 paths = []
                 try:
                     for suffix, payload in (("npy", content), ("json", encoded)):
-                        with tempfile.NamedTemporaryFile(dir=self.directory, prefix=f".{key}.", suffix=".tmp", delete=False) as stream:
+                        with tempfile.NamedTemporaryFile(
+                            dir=self.directory, prefix=f".{key}.", suffix=".tmp", delete=False
+                        ) as stream:
                             paths.append(Path(stream.name))
                             stream.write(payload)
                             stream.flush()
@@ -164,7 +177,10 @@ class AudioArtifactCache:
                         continue
                     # A reader may have touched the entry since the directory scan.
                     try:
-                        if total <= self.max_bytes and now - path.stat().st_mtime <= self.ttl_seconds:
+                        if (
+                            total <= self.max_bytes
+                            and now - path.stat().st_mtime <= self.ttl_seconds
+                        ):
                             continue
                     except FileNotFoundError:
                         continue
@@ -202,10 +218,12 @@ def active_cache():
 def _cache(check):
     # Compose explicit caller and job cancellation rather than losing either one.
     current = get_check()
+
     def combined():
         current()
         if check is not current:
             check()
+
     return AudioArtifactCache(check=combined)
 
 
@@ -213,42 +231,67 @@ def cached_decode(data, sample_rate, channels, produce):
     cache = active_cache()
     if cache is None:
         return produce()
-    return cache.array(data, {"kind": "decode", "revision": DECODE_REVISION,
-                              "sample_rate": sample_rate, "channels": channels}, produce)
+    return cache.array(
+        data,
+        {
+            "kind": "decode",
+            "revision": DECODE_REVISION,
+            "sample_rate": sample_rate,
+            "channels": channels,
+        },
+        produce,
+    )
 
 
 def _vocal_recipe():
     from worker.media.roformer import SEPARATION_REVISION
-    return {"kind": "vocals", "separator": SEPARATION_REVISION, "sample_rate": 44100,
-            "channels": 2, "decode_revision": DECODE_REVISION}
+
+    return {
+        "kind": "vocals",
+        "separator": SEPARATION_REVISION,
+        "sample_rate": 44100,
+        "channels": 2,
+        "decode_revision": DECODE_REVISION,
+    }
 
 
 def vocal_stereo(data: bytes, check=lambda: None, *, before_separate=None):
     from core.media.audio import decode_audio_channels
     from worker.media.roformer import separate_vocals
+
     cache = _cache(check)
     # Dependencies acquire distinct keys in mono -> stereo -> decode order.
     # On a cache hit, no decoding or GPU model loading is necessary.
     recipe = _vocal_recipe()
+
     def produce():
         channels = decode_audio_channels(data, 44100, 2)
         cache.check()
         if before_separate is not None:
             before_separate()
         return separate_vocals(channels, check=cache.check)
+
     return cache.array(data, recipe, produce)
 
 
 def vocal_waveform(data: bytes, sample_rate=16000, check=lambda: None, *, before_separate=None):
     import soxr
+
     cache = _cache(check)
-    recipe = {**_vocal_recipe(), "kind": "vocals-mono", "sample_rate": int(sample_rate),
-              "channels": 1, "resampler": f"soxr-{soxr.__version__}-HQ"}
+    recipe = {
+        **_vocal_recipe(),
+        "kind": "vocals-mono",
+        "sample_rate": int(sample_rate),
+        "channels": 1,
+        "resampler": f"soxr-{soxr.__version__}-HQ",
+    }
+
     def produce():
         vocals = vocal_stereo(data, check, before_separate=before_separate).mean(axis=1)
         if sample_rate != 44100:
             vocals = soxr.resample(vocals, 44100, sample_rate, quality="HQ")
         return np.asarray(vocals, dtype=np.float32)
+
     return cache.array(data, recipe, produce)
 
 
@@ -256,17 +299,27 @@ def vocal_reference_waveform(data: bytes, check=lambda: None):
     """Original mix on exactly the same sample grid as mono16k Roformer vocals."""
     import soxr
     from core.media.audio import decode_audio_channels
-    recipe = {"kind": "vocal-reference-mono", "revision": DECODE_REVISION,
-              "sample_rate": 16000, "channels": 1, "input_rate": 44100,
-              "resampler": f"soxr-{soxr.__version__}-HQ", "downmix": "stereo-mean-v1"}
+
+    recipe = {
+        "kind": "vocal-reference-mono",
+        "revision": DECODE_REVISION,
+        "sample_rate": 16000,
+        "channels": 1,
+        "input_rate": 44100,
+        "resampler": f"soxr-{soxr.__version__}-HQ",
+        "downmix": "stereo-mean-v1",
+    }
+
     def produce():
         mix = decode_audio_channels(data, 44100, 2).mean(axis=1)
         return np.asarray(soxr.resample(mix, 44100, 16000, quality="HQ"), dtype=np.float32)
+
     return _cache(check).array(data, recipe, produce)
 
 
 def vocal_audio_bytes(data: bytes, check=lambda: None, *, before_separate=None) -> bytes:
     import soundfile as sf
+
     waveform = vocal_waveform(data, 16000, check, before_separate=before_separate)
     buffer = io.BytesIO()
     sf.write(buffer, waveform, 16000, format="WAV", subtype="FLOAT")
@@ -276,25 +329,42 @@ def vocal_audio_bytes(data: bytes, check=lambda: None, *, before_separate=None) 
 def melody_waveforms(data: bytes, check=lambda: None):
     """Mono 44.1 kHz vocals and mix-minus-vocals, from the same cached stereo input."""
     from core.media.audio import decode_audio_channels
+
     cache = _cache(check)
     vocals = vocal_waveform(data, 44100, check)
-    recipe = {**_vocal_recipe(), "kind": "accompaniment-mono", "channels": 1,
-              "derivation": "stereo-mix-minus-vocals-then-mean-v1"}
+    recipe = {
+        **_vocal_recipe(),
+        "kind": "accompaniment-mono",
+        "channels": 1,
+        "derivation": "stereo-mix-minus-vocals-then-mean-v1",
+    }
+
     def produce():
         stem = vocal_stereo(data, check)
         mix = decode_audio_channels(data, 44100, 2)
         if stem.shape != mix.shape:
             raise ValueError("Vocal stem does not match the decoded source shape")
         return (mix - stem).mean(axis=1, dtype=np.float32)
+
     accompaniment = cache.array(data, recipe, produce)
     if vocals.shape != accompaniment.shape:
         raise ValueError("Melody sources differ in length")
     return vocals, accompaniment
 
 
-def prepare_audio(data: bytes, *, mono_rates=(), stereo_rates=(), stereo=False, vocals=False,
-                  melody=False, reference=False, check=lambda: None):
+def prepare_audio(
+    data: bytes,
+    *,
+    mono_rates=(),
+    stereo_rates=(),
+    stereo=False,
+    vocals=False,
+    melody=False,
+    reference=False,
+    check=lambda: None,
+):
     from core.media.audio import decode_audio, decode_audio_channels
+
     check()
     for sample_rate in sorted(set(mono_rates)):
         check()

@@ -1,4 +1,5 @@
 """Local pinned dummy artifacts and fake ORT; no production fake encoder."""
+
 import hashlib
 import json
 import sys
@@ -20,13 +21,22 @@ def manifest(tmp_path):
     (tmp_path / "model.onnx").write_bytes(b"local graph")
     (tmp_path / "parity.json").write_bytes(b"reviewed parity evidence")
     data = {
-        "schema_version": 1, "enabled": True, "license_acknowledged": True,
-        "parity_validated": True, "model_path": "model.onnx",
-        "model_sha256": digest(b"local graph"), "validation_report_path": "parity.json",
+        "schema_version": 1,
+        "enabled": True,
+        "license_acknowledged": True,
+        "parity_validated": True,
+        "model_path": "model.onnx",
+        "model_sha256": digest(b"local graph"),
+        "validation_report_path": "parity.json",
         "validation_report_sha256": digest(b"reviewed parity evidence"),
-        "frontend": "embedded-waveform-v1", "sample_rate": 8000,
-        "window_samples": 8000, "hop_samples": 4000, "embedding_dim": 128,
-        "input_name": "waveform", "output_name": "embedding", "batch_size": 2,
+        "frontend": "embedded-waveform-v1",
+        "sample_rate": 8000,
+        "window_samples": 8000,
+        "hop_samples": 4000,
+        "embedding_dim": 128,
+        "input_name": "waveform",
+        "output_name": "embedding",
+        "batch_size": 2,
     }
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps(data))
@@ -46,8 +56,13 @@ def ort(monkeypatch):
             state.loads.append(model)
 
         def get_inputs(self):
-            return [SimpleNamespace(name="waveform", type="tensor(float)",
-                                    shape=["batch", 7999 if state.bad_shape else 8000])]
+            return [
+                SimpleNamespace(
+                    name="waveform",
+                    type="tensor(float)",
+                    shape=["batch", 7999 if state.bad_shape else 8000],
+                )
+            ]
 
         def get_outputs(self):
             return [SimpleNamespace(name="embedding", type="tensor(float)", shape=[None, 128])]
@@ -63,7 +78,11 @@ def ort(monkeypatch):
             output[:, 0] = batch[:, 0]
             return [output]
 
-    monkeypatch.setitem(sys.modules, "onnxruntime", SimpleNamespace(InferenceSession=Session, SessionOptions=SimpleNamespace))
+    monkeypatch.setitem(
+        sys.modules,
+        "onnxruntime",
+        SimpleNamespace(InferenceSession=Session, SessionOptions=SimpleNamespace),
+    )
     return state
 
 
@@ -81,14 +100,27 @@ def test_metadata_without_ort(manifest, monkeypatch):
         config.config_hash = "changed"
 
 
-@pytest.mark.parametrize("field,value", [
-    ("enabled", False), ("license_acknowledged", False), ("parity_validated", False),
-    ("enabled", 1), ("sample_rate", 16000), ("window_samples", 7999),
-    ("hop_samples", 8000), ("embedding_dim", 64), ("frontend", "mel"),
-    ("batch_size", 0), ("batch_size", 257), ("batch_size", True),
-    ("schema_version", True), ("model_sha256", "bad"), ("input_name", ""),
-    ("unexpected", True),
-])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("enabled", False),
+        ("license_acknowledged", False),
+        ("parity_validated", False),
+        ("enabled", 1),
+        ("sample_rate", 16000),
+        ("window_samples", 7999),
+        ("hop_samples", 8000),
+        ("embedding_dim", 64),
+        ("frontend", "mel"),
+        ("batch_size", 0),
+        ("batch_size", 257),
+        ("batch_size", True),
+        ("schema_version", True),
+        ("model_sha256", "bad"),
+        ("input_name", ""),
+        ("unexpected", True),
+    ],
+)
 def test_manifest_rejected(manifest, field, value):
     path, data = manifest
     data[field] = value
@@ -135,7 +167,7 @@ def test_batching_timing_silence_and_tail(manifest, ort):
     assert result.shape == (6, 128)
     assert result.dtype == np.float32
     assert all(len(batch) <= 2 for batch in ort.calls)
-    expected = np.stack([audio[i * 4000:i * 4000 + 8000] for i in range(6)])
+    expected = np.stack([audio[i * 4000 : i * 4000 + 8000] for i in range(6)])
     active = np.any(expected != 0, axis=1)
     np.testing.assert_array_equal(np.concatenate(ort.calls), expected[active])
     np.testing.assert_array_equal(result[~active], 0)
@@ -149,10 +181,17 @@ def test_silence(manifest, ort):
     assert not ort.calls
 
 
-@pytest.mark.parametrize("audio", [
-    np.ones(7999, np.float32), np.ones(8000, np.float64), np.ones((8000, 1), np.float32),
-    np.full(8000, np.nan, np.float32), np.full(8000, np.inf, np.float32), [0] * 8000,
-])
+@pytest.mark.parametrize(
+    "audio",
+    [
+        np.ones(7999, np.float32),
+        np.ones(8000, np.float64),
+        np.ones((8000, 1), np.float32),
+        np.full(8000, np.nan, np.float32),
+        np.full(8000, np.inf, np.float32),
+        [0] * 8000,
+    ],
+)
 def test_invalid_audio(manifest, ort, audio):
     with pytest.raises(ValueError, match="finite mono"):
         encoder.encode(audio, encoder.load_config(manifest[0]))
@@ -166,9 +205,15 @@ def test_graph_shape(manifest, ort):
     assert not ort.calls
 
 
-@pytest.mark.parametrize("output", [np.zeros((1, 128), np.float32),
-    np.full((1, 128), np.nan, np.float32), np.ones((1, 127), np.float32),
-    np.ones((1, 128), np.float64)])
+@pytest.mark.parametrize(
+    "output",
+    [
+        np.zeros((1, 128), np.float32),
+        np.full((1, 128), np.nan, np.float32),
+        np.ones((1, 127), np.float32),
+        np.ones((1, 128), np.float64),
+    ],
+)
 def test_bad_outputs(manifest, ort, output):
     ort.bad_output = output
     with pytest.raises(ValueError):
@@ -200,17 +245,20 @@ def test_missing_and_duplicate_fields(manifest):
 
 def test_repeated_validation_does_not_reread_artifacts(manifest, monkeypatch):
     from pathlib import Path
+
     path, _ = manifest
     config = encoder.load_config(path)
     original = Path.open
     reads = []
+
     def opened(file, *args, **kwargs):
         reads.append(file.name)
         return original(file, *args, **kwargs)
-    monkeypatch.setattr(Path, 'open', opened)
+
+    monkeypatch.setattr(Path, "open", opened)
     encoder.load_config(path)
     encoder.validate_config(config)
-    assert reads == ['manifest.json']
+    assert reads == ["manifest.json"]
     assert len(encoder._VERIFIED) <= 8
 
 
@@ -224,20 +272,20 @@ def test_session_reused_and_silence_never_loads_it(manifest, ort):
     assert len(ort.loads) == 1
 
 
-@pytest.mark.parametrize('filename', ['model.onnx', 'parity.json'])
+@pytest.mark.parametrize("filename", ["model.onnx", "parity.json"])
 def test_same_path_replacement_invalidates_cached_session(manifest, ort, filename):
     path, _ = manifest
     config = encoder.load_config(path)
     samples = np.ones(8000, np.float32)
     encoder.encode(samples, config)
     artifact = path.parent / filename
-    replacement = path.parent / 'replacement'
+    replacement = path.parent / "replacement"
     replacement.write_bytes(artifact.read_bytes())
     replacement.replace(artifact)
     encoder.encode(samples, config)
     assert len(ort.loads) == 2
-    artifact.write_bytes(b'x' * artifact.stat().st_size)
-    with pytest.raises(ValueError, match='SHA256'):
+    artifact.write_bytes(b"x" * artifact.stat().st_size)
+    with pytest.raises(ValueError, match="SHA256"):
         encoder.encode(samples, config)
     assert len(ort.loads) == 2
 
@@ -246,8 +294,10 @@ def test_session_cache_keeps_only_current_configuration(manifest, ort):
     path, _ = manifest
     first = encoder.load_config(path)
     data = json.loads(first.manifest_json)
-    data['batch_size'] = 3
-    second = encoder.EncoderConfig(json.dumps(data), encoder._representation(data), encoder._hash(data))
+    data["batch_size"] = 3
+    second = encoder.EncoderConfig(
+        json.dumps(data), encoder._representation(data), encoder._hash(data)
+    )
     for config in [first, second, first]:
         encoder.encode(np.ones(8000, np.float32), config)
         assert encoder._SESSION[0][0] == config.config_hash

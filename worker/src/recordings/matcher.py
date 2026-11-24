@@ -41,16 +41,26 @@ class MatchPolicy:
 
     def __post_init__(self) -> None:
         for name in (
-            "window_similarity", "min_score", "min_coverage",
-            "min_temporal_spread", "min_margin", "repeat_similarity",
+            "window_similarity",
+            "min_score",
+            "min_coverage",
+            "min_temporal_spread",
+            "min_margin",
+            "repeat_similarity",
         ):
             value = getattr(self, name)
-            if (isinstance(value, bool) or not isinstance(value, (int, float))
-                    or not np.isfinite(value) or not 0 < value <= 1):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not np.isfinite(value)
+                or not 0 < value <= 1
+            ):
                 raise ValueError(f"{name} must be finite and in (0, 1]")
         for name, minimum in (
-            ("min_support", 2), ("shortlist_size", 2),
-            ("offset_radius", 0), ("block_size", 1),
+            ("min_support", 2),
+            ("shortlist_size", 2),
+            ("offset_radius", 0),
+            ("block_size", 1),
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
@@ -97,8 +107,9 @@ def match_recording(
         repeated = False
         for start in range(0, len(distinct), policy.block_size):
             check()
-            hits = np.flatnonzero(q[distinct[start:start + policy.block_size]] @ q[i]
-                                  >= policy.repeat_similarity)
+            hits = np.flatnonzero(
+                q[distinct[start : start + policy.block_size]] @ q[i] >= policy.repeat_similarity
+            )
             if len(hits):
                 occurrences[start + int(hits[0])].append(int(i))
                 repeated = True
@@ -119,6 +130,7 @@ def match_recording(
     def identity(item):
         group = item["recording_group_id"]
         return ("group", group) if group is not None else ("track", item["track_id"])
+
     for reference in references:
         check()
         track_id = reference["track_id"]
@@ -143,21 +155,27 @@ def match_recording(
                 check()
                 end = min(start + policy.block_size, m)
                 similarities = np.clip(r[start:end] @ q[i], -1, 1)
-                alignment_scores[start - i + n - 1:end - i + n - 1] += np.maximum(similarities, 0)
-                hits = np.flatnonzero((similarities >= retrieval_similarity)
-                                      & r_active[start:end]) + start
+                alignment_scores[start - i + n - 1 : end - i + n - 1] += np.maximum(similarities, 0)
+                hits = (
+                    np.flatnonzero((similarities >= retrieval_similarity) & r_active[start:end])
+                    + start
+                )
                 votes[hits - i + n - 1] += 1
         # Keep vote peaks for candidates plus exact score peaks for margin
         # competitors. Ties prefer smaller signed offsets in both rankings.
-        ranked = set(np.argsort(-votes, kind="stable")[:policy.shortlist_size])
-        ranked.update(np.argsort(-alignment_scores, kind="stable")[:policy.shortlist_size])
+        ranked = set(np.argsort(-votes, kind="stable")[: policy.shortlist_size])
+        ranked.update(np.argsort(-alignment_scores, kind="stable")[: policy.shortlist_size])
         offsets = set()
         for index in ranked:
             if alignment_scores[index] == 0:
                 continue
             center = int(index) - n + 1
-            offsets.update(range(max(1 - n, center - policy.offset_radius),
-                                 min(m - 1, center + policy.offset_radius) + 1))
+            offsets.update(
+                range(
+                    max(1 - n, center - policy.offset_radius),
+                    min(m - 1, center + policy.offset_radius) + 1,
+                )
+            )
         evidence = []
         for offset in sorted(offsets):
             check()
@@ -166,9 +184,9 @@ def match_recording(
             for start in range(lo, hi, policy.block_size):
                 check()
                 end = min(start + policy.block_size, hi)
-                similarities[start:end] = np.clip(np.einsum(
-                    "ij,ij->i", q[start:end], r[start + offset:end + offset]
-                ), -1, 1)
+                similarities[start:end] = np.clip(
+                    np.einsum("ij,ij->i", q[start:end], r[start + offset : end + offset]), -1, 1
+                )
             supported = similarities >= policy.window_similarity
             # Count repeated content once, but retain all supported occurrences
             # for timing and overlap. The first occurrence may be outside overlap.
@@ -177,13 +195,20 @@ def match_recording(
             coverage = float(len(hits) / n)
             spread = (hits[-1] - hits[0]) / (n - 1) if support > 1 else 0.0
             score = float(np.maximum(similarities, 0).sum() / n)
-            evidence.append({
-                "track_id": track_id, "recording_group_id": group,
-                "score": score, "offset_seconds": offset * HOP_SECONDS,
-                "support": support, "coverage": coverage,
-                "temporal_spread": float(spread), "overlap_windows": hi - lo,
-                "query_windows": n, "matched_windows": int(supported.sum()),
-            })
+            evidence.append(
+                {
+                    "track_id": track_id,
+                    "recording_group_id": group,
+                    "score": score,
+                    "offset_seconds": offset * HOP_SECONDS,
+                    "support": support,
+                    "coverage": coverage,
+                    "temporal_spread": float(spread),
+                    "overlap_windows": hi - lo,
+                    "query_windows": n,
+                    "matched_windows": int(supported.sum()),
+                }
+            )
         evidence.sort(key=lambda item: (-item["score"], item["offset_seconds"]))
         if evidence:
             # A runner-up just below an acceptance threshold still competes with
@@ -194,15 +219,19 @@ def match_recording(
                 if all(identity(candidate) != identity(item) for item in leaders):
                     leaders.append(candidate)
             del leaders[2:]
-            qualifying = [item for item in evidence
-                          if item["support"] >= policy.min_support
-                          and item["coverage"] >= policy.min_coverage
-                          and item["temporal_spread"] >= policy.min_temporal_spread]
+            qualifying = [
+                item
+                for item in evidence
+                if item["support"] >= policy.min_support
+                and item["coverage"] >= policy.min_coverage
+                and item["temporal_spread"] >= policy.min_temporal_spread
+            ]
             if qualifying:
                 best = qualifying[0]
                 best["offset_ambiguous"] = any(
                     best["score"] - other["score"] < policy.min_margin
-                    for other in evidence if other is not best
+                    for other in evidence
+                    if other is not best
                 )
                 matches.append(best)
                 matches.sort(key=rank)
@@ -213,12 +242,17 @@ def match_recording(
     runner = next((item for item in leaders if identity(item) != identity(winner)), None)
     margin = winner["score"] - runner["score"] if runner is not None else None
     winner["runner_up_margin"] = margin
-    ambiguous = (winner["score"] < policy.min_score or winner["offset_ambiguous"]
-                 or (margin is not None and margin < policy.min_margin))
+    ambiguous = (
+        winner["score"] < policy.min_score
+        or winner["offset_ambiguous"]
+        or (margin is not None and margin < policy.min_margin)
+    )
     for index, item in enumerate(matches):
         item["match_quality"] = (
-            "high" if index == 0 and not ambiguous
-            else "possible" if item["score"] >= min(policy.window_similarity, policy.min_score)
+            "high"
+            if index == 0 and not ambiguous
+            else "possible"
+            if item["score"] >= min(policy.window_similarity, policy.min_score)
             else "low"
         )
     return {"state": "ambiguous" if ambiguous else "identified", "matches": matches}

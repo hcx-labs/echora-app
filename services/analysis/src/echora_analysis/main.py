@@ -32,25 +32,59 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import RedirectResponse, StreamingResponse
 
-from .artists import fit_artist_profile, representative_indices, soft_chamfer_similarity, weighted_center
+from .artists import (
+    fit_artist_profile,
+    representative_indices,
+    soft_chamfer_similarity,
+    weighted_center,
+)
 from worker.library.descriptors import DESCRIPTOR_REVISION
 from worker.library.waveforms import WAVEFORM_REVISION
 from worker.library.visual_features import VISUAL_FEATURE_REVISION
 from .melody_preview import melody_preview
 from worker.profiles.pipeline import AUDIO_PROFILE_REVISION, SUPPORTED_PROFILE_MODELS
-from core.curation.concepts import combine_concept_percentiles, empirical_percentiles, predefined_concepts, score_concept
+from core.curation.concepts import (
+    combine_concept_percentiles,
+    empirical_percentiles,
+    predefined_concepts,
+    score_concept,
+)
 from core.db.session import session_scope
 from core.curation.preview import CurationRecipe, preview_curation as preview_recipe
-from core.errors import ConflictError, EchoraError, IntegrationError, InvalidQueryError, NotFoundError
+from core.errors import (
+    ConflictError,
+    EchoraError,
+    IntegrationError,
+    InvalidQueryError,
+    NotFoundError,
+)
 from core.library.connections import credential_cipher, load_connection
 from core.library.membership import attach_user_library, relink_renumbered_sources
 from . import sessions
 import core.jobs.queue as jobs
 from core.settings import get_settings
-from core.db.models import Curation, NavidromeConnection, OidcAllowedEmail, OidcSetting, User, UserPreference, UserSession
+from core.db.models import (
+    Curation,
+    NavidromeConnection,
+    OidcAllowedEmail,
+    OidcSetting,
+    User,
+    UserPreference,
+    UserSession,
+)
 from worker.melody.index import DEFAULT_CORPUS_SIZE, search_corpus
-from core.curation.journeys import normalize_rows as normalize_journey_rows, select_journey, spherical_targets
-from core.curation.listening import TOP_TRACK_PERIODS, match_navidrome_play_counts, match_top_tracks, navidrome_play_counts, top_tracks
+from core.curation.journeys import (
+    normalize_rows as normalize_journey_rows,
+    select_journey,
+    spherical_targets,
+)
+from core.curation.listening import (
+    TOP_TRACK_PERIODS,
+    match_navidrome_play_counts,
+    match_top_tracks,
+    navidrome_play_counts,
+    top_tracks,
+)
 from worker.kara.pipeline import KARAOKE_PIPELINE_REVISION
 from core.revisions import MELODY_CONTOUR_REVISION
 from .media_cache import cache_key, media_cache
@@ -83,6 +117,8 @@ async def _echora_error(request: Request, error: EchoraError) -> JSONResponse:
         if isinstance(error, kind):
             return JSONResponse({"detail": str(error)}, status_code=status)
     raise error
+
+
 # Browser-facing media (covers, streams) is served cross-origin from the web app
 # when NEXT_PUBLIC_ANALYSIS_ORIGIN is set; canvas palette extraction needs CORS.
 # Origins are explicit: reflecting arbitrary origins with credentials would let
@@ -223,10 +259,6 @@ class ConceptLensRequest(BaseModel):
     representation: str = Field(default="hybrid", pattern="^(semantic|lyrics|hybrid)$")
 
 
-
-
-
-
 class CurationCreateRequest(CurationRecipe):
     name: str = Field(min_length=1, max_length=120)
     refresh_enabled: bool = True
@@ -251,8 +283,6 @@ def _credentials(request: Credentials) -> tuple[str, str, str]:
     return str(request.url).rstrip("/"), request.username, request.password.get_secret_value()
 
 
-
-
 def _save_connection(credentials: tuple[str, str, str], user_id: uuid.UUID) -> str:
     url, username, password = credentials
     encrypted = credential_cipher().encrypt(password.encode())
@@ -274,14 +304,6 @@ def _save_connection(credentials: tuple[str, str, str], user_id: uuid.UUID) -> s
             stored.encrypted_password = encrypted
             stored.last_used_at = datetime.now(timezone.utc)
         return str(stored.id)
-
-
-
-
-
-
-
-
 
 
 def require_user(echora_session: str | None = Cookie(default=None)) -> dict[str, object]:
@@ -1055,8 +1077,6 @@ def navidrome_sync_status(
             for track in missing[:50]
         ],
     }
-
-
 
 
 def _enqueue_connection_job(
@@ -2412,18 +2432,6 @@ def concept_lens(
     }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 def _refresh_curation(curation_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, object]:
     import worker.curation.jobs as curation_jobs
 
@@ -3670,7 +3678,10 @@ def library_top_tracks(
         try:
             # Ask for more than we show: some top tracks are not in this library.
             entries = top_tracks(
-                username, credential_cipher().decrypt(encrypted_key).decode(), period, min(limit * 5, 200)
+                username,
+                credential_cipher().decrypt(encrypted_key).decode(),
+                period,
+                min(limit * 5, 200),
             )
         except Exception as error:
             raise HTTPException(

@@ -17,7 +17,12 @@ _settings = get_settings()
 if not _settings.database_url:
     raise RuntimeError("DATABASE_URL is required")
 _database_url = _settings.database_url.replace("postgresql://", "postgresql+psycopg://", 1)
-_engine = create_engine(_database_url, pool_pre_ping=True, pool_size=_settings.db_pool_size, max_overflow=_settings.db_max_overflow)
+_engine = create_engine(
+    _database_url,
+    pool_pre_ping=True,
+    pool_size=_settings.db_pool_size,
+    max_overflow=_settings.db_max_overflow,
+)
 SessionLocal = sessionmaker(_engine, expire_on_commit=False)
 
 

@@ -27,7 +27,7 @@ def full_coverage_window_ranges(
         starts.append(final_start)
     return [
         (
-            np.ascontiguousarray(waveform[start:start + size], dtype=np.float32),
+            np.ascontiguousarray(waveform[start : start + size], dtype=np.float32),
             start / sample_rate,
             (start + size) / sample_rate,
         )
@@ -37,14 +37,27 @@ def full_coverage_window_ranges(
 
 def decode_audio(data: bytes, sample_rate: int = 24_000) -> np.ndarray:
     from worker.media.preprocessing import cached_decode
+
     return cached_decode(data, sample_rate, 1, lambda: _decode_audio(data, sample_rate))
 
 
 def _decode_audio(data: bytes, sample_rate: int) -> np.ndarray:
     process = subprocess.run(
         [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
-            "-vn", "-ac", "1", "-ar", str(sample_rate), "-f", "f32le", "pipe:1",
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            "pipe:0",
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            str(sample_rate),
+            "-f",
+            "f32le",
+            "pipe:1",
         ],
         input=data,
         stdout=subprocess.PIPE,
@@ -62,19 +75,36 @@ def _decode_audio(data: bytes, sample_rate: int) -> np.ndarray:
 
 def decode_audio_channels(data: bytes, sample_rate: int = 44_100, channels: int = 2) -> np.ndarray:
     from worker.media.preprocessing import cached_decode
+
     if channels == 1:
         return decode_audio(data, sample_rate).reshape(-1, 1)
-    return cached_decode(data, sample_rate, channels,
-                         lambda: _decode_audio_channels(data, sample_rate, channels))
+    return cached_decode(
+        data, sample_rate, channels, lambda: _decode_audio_channels(data, sample_rate, channels)
+    )
 
 
 def _decode_audio_channels(data: bytes, sample_rate: int, channels: int) -> np.ndarray:
     process = subprocess.run(
         [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
-            "-vn", "-ac", str(channels), "-ar", str(sample_rate), "-f", "f32le", "pipe:1",
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            "pipe:0",
+            "-vn",
+            "-ac",
+            str(channels),
+            "-ar",
+            str(sample_rate),
+            "-f",
+            "f32le",
+            "pipe:1",
         ],
-        input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        input=data,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
     )
     if process.returncode != 0:
         message = process.stderr.decode(errors="replace").strip()
@@ -92,9 +122,15 @@ def full_coverage_windows(
     stride_seconds: int = 5,
 ) -> list[np.ndarray]:
     """Cover the complete waveform with overlapping fixed-duration windows."""
-    return [item[0] for item in full_coverage_window_ranges(
-        waveform, sample_rate, seconds, stride_seconds,
-    )]
+    return [
+        item[0]
+        for item in full_coverage_window_ranges(
+            waveform,
+            sample_rate,
+            seconds,
+            stride_seconds,
+        )
+    ]
 
 
 def deterministic_windows(

@@ -18,7 +18,9 @@ _MAX_ALIGNMENT_OFFSET = 10
 _MIN_OVERLAP = 50
 _MATCHER_REVISION = 1
 
-_POPCOUNT = np.unpackbits(np.arange(256, dtype=np.uint8)[:, None], axis=1).sum(axis=1).astype(np.uint8)
+_POPCOUNT = (
+    np.unpackbits(np.arange(256, dtype=np.uint8)[:, None], axis=1).sum(axis=1).astype(np.uint8)
+)
 
 
 def compute_chromaprint(audio: bytes) -> tuple[bytes, float, str]:
@@ -26,8 +28,11 @@ def compute_chromaprint(audio: bytes) -> tuple[bytes, float, str]:
         source.write(audio)
         source.flush()
         process = subprocess.run(
-            ["fpcalc", "-raw", "-json", source.name], capture_output=True, text=True,
-            timeout=get_settings().fingerprint_timeout_seconds, check=False,
+            ["fpcalc", "-raw", "-json", source.name],
+            capture_output=True,
+            text=True,
+            timeout=get_settings().fingerprint_timeout_seconds,
+            check=False,
         )
     if process.returncode != 0:
         raise ValueError(f"fpcalc failed: {process.stderr.strip()[-400:]}")
@@ -35,7 +40,11 @@ def compute_chromaprint(audio: bytes) -> tuple[bytes, float, str]:
     values = np.asarray(payload.get("fingerprint") or [], dtype=np.uint32)
     if not len(values):
         raise ValueError("fpcalc returned an empty fingerprint")
-    return zlib.compress(values.tobytes()), float(payload.get("duration") or 0), "chromaprint-fpcalc"
+    return (
+        zlib.compress(values.tobytes()),
+        float(payload.get("duration") or 0),
+        "chromaprint-fpcalc",
+    )
 
 
 def _decode(blob: bytes) -> np.ndarray:
@@ -53,13 +62,17 @@ def fingerprint_similarity(left_blob: bytes, right_blob: bytes) -> float | None:
         overlap = min(len(first), len(second))
         if overlap < _MIN_OVERLAP:
             continue
-        differing = int(_POPCOUNT[(first[:overlap] ^ second[:overlap]).view(np.uint8)].sum(dtype=np.int64))
+        differing = int(
+            _POPCOUNT[(first[:overlap] ^ second[:overlap]).view(np.uint8)].sum(dtype=np.int64)
+        )
         score = 1.0 - differing / (32.0 * overlap)
         best = score if best is None else max(best, score)
     return best
 
 
-def _embedding_similarity(cursor: psycopg.Cursor, left: uuid.UUID, right: uuid.UUID, model: str) -> float | None:
+def _embedding_similarity(
+    cursor: psycopg.Cursor, left: uuid.UUID, right: uuid.UUID, model: str
+) -> float | None:
     cursor.execute(
         """
         WITH latest AS (
@@ -78,7 +91,10 @@ def _embedding_similarity(cursor: psycopg.Cursor, left: uuid.UUID, right: uuid.U
 
 
 def store_and_match_fingerprint(
-    connection: psycopg.Connection, track_id: uuid.UUID, audio: bytes, metadata_duration: float,
+    connection: psycopg.Connection,
+    track_id: uuid.UUID,
+    audio: bytes,
+    metadata_duration: float,
 ) -> dict[str, object]:
     fingerprint, measured_duration, version = compute_chromaprint(audio)
     duration = measured_duration or metadata_duration
@@ -94,7 +110,11 @@ def store_and_match_fingerprint(
         cursor.execute(
             """SELECT track_id, fingerprint, duration_seconds FROM track_fingerprints
                WHERE track_id<>%s AND duration_seconds BETWEEN %s AND %s""",
-            (track_id, duration - _DURATION_TOLERANCE_SECONDS, duration + _DURATION_TOLERANCE_SECONDS),
+            (
+                track_id,
+                duration - _DURATION_TOLERANCE_SECONDS,
+                duration + _DURATION_TOLERANCE_SECONDS,
+            ),
         )
         candidates = cursor.fetchall()
         matches: list[tuple[uuid.UUID, float, float]] = []
@@ -123,16 +143,34 @@ def store_and_match_fingerprint(
                  semantic_similarity=EXCLUDED.semantic_similarity,
                  acoustic_similarity=EXCLUDED.acoustic_similarity
                RETURNING id""",
-            (left, right, score, duration_delta, semantic, acoustic, _MATCHER_REVISION,
-             Jsonb({"threshold": _MATCH_THRESHOLD, "duration_tolerance_seconds": _DURATION_TOLERANCE_SECONDS})),
+            (
+                left,
+                right,
+                score,
+                duration_delta,
+                semantic,
+                acoustic,
+                _MATCHER_REVISION,
+                Jsonb(
+                    {
+                        "threshold": _MATCH_THRESHOLD,
+                        "duration_tolerance_seconds": _DURATION_TOLERANCE_SECONDS,
+                    }
+                ),
+            ),
         )
         evidence_id = cursor.fetchone()[0]
-        cursor.execute("SELECT group_id FROM recording_group_members WHERE track_id=%s", (candidate_id,))
+        cursor.execute(
+            "SELECT group_id FROM recording_group_members WHERE track_id=%s", (candidate_id,)
+        )
         existing = cursor.fetchone()
         if existing:
             group_id = existing[0]
         else:
-            cursor.execute("INSERT INTO recording_groups (canonical_track_id) VALUES (%s) RETURNING id", (candidate_id,))
+            cursor.execute(
+                "INSERT INTO recording_groups (canonical_track_id) VALUES (%s) RETURNING id",
+                (candidate_id,),
+            )
             group_id = cursor.fetchone()[0]
             cursor.execute(
                 """INSERT INTO recording_group_members (group_id, track_id, confidence)
@@ -144,4 +182,9 @@ def store_and_match_fingerprint(
                VALUES (%s,%s,%s) ON CONFLICT (track_id) DO NOTHING""",
             (group_id, track_id, score),
         )
-    return {"matched": True, "group_id": str(group_id), "evidence_id": str(evidence_id), "confidence": score}
+    return {
+        "matched": True,
+        "group_id": str(group_id),
+        "evidence_id": str(evidence_id),
+        "confidence": score,
+    }

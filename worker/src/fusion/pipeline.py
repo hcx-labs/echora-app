@@ -25,7 +25,11 @@ import numpy as np
 import psycopg
 from psycopg.types.json import Jsonb
 
-from core.embeddings.representations import configure_representations, embedding_config, model_settings
+from core.embeddings.representations import (
+    configure_representations,
+    embedding_config,
+    model_settings,
+)
 
 MODEL_NAME = "semantic_fusion"
 MODEL_REVISION = "fusion-v1"

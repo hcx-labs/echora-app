@@ -337,7 +337,10 @@ def backfill_lyrics(
                     lyrics = {"text": stored[0], "status": stored[2], **(stored[1] or {})}
                 elif stored and (stored[1] or {}).get("forced_transcription"):
                     forced_language = str((stored[1] or {}).get("transcription_language") or "")
-                    from worker.transcription.config import transcription_model, transcription_enabled
+                    from worker.transcription.config import (
+                        transcription_model,
+                        transcription_enabled,
+                    )
 
                     config = transcription_model() if transcription_enabled(connection) else None
                     if not config:
@@ -388,7 +391,10 @@ def backfill_lyrics(
                                 "instrumental_evidence": evidence,
                             }
                         elif lyrics.get("status") != "instrumental":
-                            from worker.transcription.config import transcription_model, transcription_enabled
+                            from worker.transcription.config import (
+                                transcription_model,
+                                transcription_enabled,
+                            )
 
                             config = (
                                 transcription_model() if transcription_enabled(connection) else None

@@ -13,11 +13,19 @@ import psycopg
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
 from core.curation.concepts import expand_tag_groups
-from core.curation.ranking import CURATION_SCORING_REVISION, EXAMPLE_COMPONENT_WEIGHTS, MATCH_PERCENTILE, rank_curation
+from core.curation.ranking import (
+    CURATION_SCORING_REVISION,
+    EXAMPLE_COMPONENT_WEIGHTS,
+    MATCH_PERCENTILE,
+    rank_curation,
+)
 from core.db.session import session_scope
 from core.settings import get_settings
 from core.db.models import UserPreference
-from core.curation.journeys import normalize_rows as normalize_journey_rows, select_multistop_journey
+from core.curation.journeys import (
+    normalize_rows as normalize_journey_rows,
+    select_multistop_journey,
+)
 from core.curation.listening import recent_listens, track_listen_counts
 from core.lyrics.language import LANGUAGE_NAMES, PRIMARY_SHARE, language_affinity
 from core.embeddings.text import shared_lyrics_model
@@ -188,8 +196,7 @@ def curation_corpus(
             )
             mode_rows = cursor.fetchall()
     if not rows:
-        raise ConflictError("No semantic embeddings are available in this library"
-        )
+        raise ConflictError("No semantic embeddings are available in this library")
     matrix = np.stack([np.fromstring(row.pop("embedding").strip("[]"), sep=",") for row in rows])
     lyrics_available = np.asarray(
         [row.get("lyrics_embedding") is not None for row in rows], dtype=bool
@@ -344,8 +351,7 @@ def preview_sonic_journey(
     if not waypoints[0] or not waypoints[-1]:
         raise InvalidQueryError("Pick a start and an end track")
     if waypoints[0] == waypoints[-1]:
-        raise InvalidQueryError("Journey start and end must be different tracks"
-        )
+        raise InvalidQueryError("Journey start and end must be different tracks")
     indices: list[int] = []
     for waypoint in waypoints:
         index = identifiers.get(str(waypoint))
@@ -355,8 +361,7 @@ def preview_sonic_journey(
     if len(set(indices)) != len(indices):
         raise InvalidQueryError("Each journey stop must be a different track")
     if acoustic_matrix is None:
-        raise ConflictError("MERT analysis has not run for this library yet"
-        )
+        raise ConflictError("MERT analysis has not run for this library yet")
 
     def _norm(values: np.ndarray) -> np.ndarray:
         return normalize_journey_rows(np.asarray(values, dtype=np.float32))
@@ -498,14 +503,14 @@ def preview_curation(
         or request.themes_prompts
         or request.target_language
     ):
-        raise InvalidQueryError("Pick a language or add a positive direction for this language curation",
+        raise InvalidQueryError(
+            "Pick a language or add a positive direction for this language curation",
         )
     if request.curation_type == "examples" and not request.positive_track_ids:
         raise InvalidQueryError("Add at least one Songs like track")
     overlap = set(request.positive_track_ids) & set(request.negative_track_ids)
     if overlap:
-        raise InvalidQueryError("A track cannot appear in both Songs like and Songs not like"
-        )
+        raise InvalidQueryError("A track cannot appear in both Songs like and Songs not like")
     with session_scope() as session:
         preference = session.get(UserPreference, user_id)
         if preference is None:
@@ -538,10 +543,10 @@ def preview_curation(
             listen_counts = period_counts if time_of_day_enabled else all_counts
             recent_ids = set(all_counts)
         except Exception as error:
-            raise IntegrationError("Could not read Last.fm listening history"
-            ) from error
+            raise IntegrationError("Could not read Last.fm listening history") from error
     elif time_of_day_enabled:
-        raise ConflictError("Connect Last.fm in Settings before creating a time-of-day curation",
+        raise ConflictError(
+            "Connect Last.fm in Settings before creating a time-of-day curation",
         )
     sound_profile = request.sound_profile.model_dump(exclude_none=True, exclude_defaults=True)
     instrumental_only = bool(sound_profile.pop("instrumental_only", False))
@@ -550,7 +555,8 @@ def preview_curation(
     if time_of_day_enabled:
         time_of_day_track_ids = [uuid.UUID(identifier) for identifier in period_counts]
         if not time_of_day_track_ids:
-            raise ConflictError("No matched listens were found in that time period during the lookback window",
+            raise ConflictError(
+                "No matched listens were found in that time period during the lookback window",
             )
     sound_tags = [tag.strip() for tag in request.sound_prompts if tag.strip()]
     theme_tags = [tag.strip() for tag in request.themes_prompts if tag.strip()]
@@ -579,8 +585,7 @@ def preview_curation(
             str(value) in visible_ids for value in [*effective_positive_ids, *time_of_day_track_ids]
         )
     ):
-        raise InvalidQueryError("None of the Songs like tracks are available in this library"
-        )
+        raise InvalidQueryError("None of the Songs like tracks are available in this library")
     lyrics_model = shared_lyrics_model()
 
     def _tag_query_centers(tags: list[str]) -> list[np.ndarray]:
@@ -613,7 +618,8 @@ def preview_curation(
             >= PRIMARY_SHARE
         }
         if not language_eligible_ids:
-            raise ConflictError((
+            raise ConflictError(
+                (
                     "No tracks with confident "
                     f"{LANGUAGE_NAMES.get(request.target_language, request.target_language)} "
                     "lyrics were found in this library"
@@ -804,4 +810,3 @@ def preview_curation(
             "matched_listens": sum((listen_counts or {}).values()),
         },
     }
-

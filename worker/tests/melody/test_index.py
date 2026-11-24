@@ -1,6 +1,13 @@
 import numpy as np
 
-from worker.melody.index import CONTOUR_HZ, _coarse_match, _match_prepared_motifs, _motif_windows, _prepare_motifs, match_contour
+from worker.melody.index import (
+    CONTOUR_HZ,
+    _coarse_match,
+    _match_prepared_motifs,
+    _motif_windows,
+    _prepare_motifs,
+    match_contour,
+)
 
 
 def _melody(notes: list[float], frames: int = 8) -> tuple[np.ndarray, np.ndarray]:
@@ -48,13 +55,20 @@ def _reference_coarse_match(query, query_mask, target, target_mask):
         deltas = np.minimum(np.abs(q_relative - c_relative), 6.0)
         voiced_counts = overlaps.sum(axis=1)
         coarse = np.divide(
-            np.where(overlaps, deltas, 0).sum(axis=1), voiced_counts,
-            out=np.full(len(starts), np.inf), where=voiced_counts > 0,
+            np.where(overlaps, deltas, 0).sum(axis=1),
+            voiced_counts,
+            out=np.full(len(starts), np.inf),
+            where=voiced_counts > 0,
         ) + (1 - overlaps.mean(axis=1))
         coarse[~valid] = np.inf
         index = int(np.argmin(coarse))
         if np.isfinite(coarse[index]) and (best is None or coarse[index] < best[0]):
-            best = (float(coarse[index]), int(starts[index]), candidates[index], candidate_masks[index])
+            best = (
+                float(coarse[index]),
+                int(starts[index]),
+                candidates[index],
+                candidate_masks[index],
+            )
     return best
 
 
@@ -121,8 +135,9 @@ def test_unrelated_contour_scores_worse():
 def test_melody_sources_use_shared_roformer_audio(monkeypatch):
     from unittest.mock import Mock
     import worker.melody.index as h
+
     vocals = np.ones(100, dtype=np.float32)
-    accompaniment = np.full(100, .5, dtype=np.float32)
+    accompaniment = np.full(100, 0.5, dtype=np.float32)
     prepare = Mock(return_value=(vocals, accompaniment))
     monkeypatch.setattr(h, "melody_waveforms", prepare)
     result = h.separate_melody_sources(b"mix")
@@ -138,8 +153,11 @@ def test_separation_failure_does_not_publish_incomplete_recipe(monkeypatch):
     from unittest.mock import Mock
     import pytest
     import worker.melody.index as h
+
     monkeypatch.setattr(h, "extract_catalog_contour", Mock(return_value=_melody([60] * 10)))
-    monkeypatch.setattr(h, "separate_melody_sources", Mock(side_effect=ValueError("no cached weights")))
+    monkeypatch.setattr(
+        h, "separate_melody_sources", Mock(side_effect=ValueError("no cached weights"))
+    )
     connection = Mock()
     with pytest.raises(ValueError, match="no cached weights"):
         h.store_track_contours(connection, "track", "run", b"mix")
@@ -150,8 +168,10 @@ def test_melody_cancellation_propagates(monkeypatch):
     from unittest.mock import Mock
     import pytest
     import worker.melody.index as h
+
     class Cancel(BaseException):
         pass
+
     monkeypatch.setattr(h, "extract_catalog_contour", Mock(return_value=_melody([60] * 10)))
     monkeypatch.setattr(h, "separate_melody_sources", Mock(side_effect=Cancel()))
     connection = Mock()
@@ -163,10 +183,14 @@ def test_melody_cancellation_propagates(monkeypatch):
 def test_runs_record_roformer_and_residual_provenance():
     from unittest.mock import MagicMock
     import worker.melody.index as h
+
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     cursor.fetchone.return_value = {"id": "run"}
-    for create in (lambda: h.create_sync_run(connection), lambda: h._create_run(connection, "corpus")):
+    for create in (
+        lambda: h.create_sync_run(connection),
+        lambda: h._create_run(connection, "corpus"),
+    ):
         assert create() == "run"
         sql, params = cursor.execute.call_args.args
         assert params[0] == h.MELODY_CONTOUR_REVISION
@@ -180,6 +204,7 @@ def test_runs_record_roformer_and_residual_provenance():
 def test_search_loads_only_current_recipe_and_owned_tracks(monkeypatch):
     from unittest.mock import MagicMock
     import worker.melody.index as h
+
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     cursor.fetchone.return_value = (0, "")

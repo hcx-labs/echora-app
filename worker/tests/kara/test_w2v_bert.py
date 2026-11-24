@@ -12,7 +12,12 @@ torch = pytest.importorskip("torch")
 VENDOR = Path(__file__).resolve().parents[2] / "src" / "kara" / "vendor" / "fa_kara"
 sys.path.insert(0, str(VENDOR))
 
-from ctc_segmentation import conv_frame_count, frame_count, stitched_frame_times, w2v_bert_frame_count  # noqa: E402
+from ctc_segmentation import (
+    conv_frame_count,
+    frame_count,
+    stitched_frame_times,
+    w2v_bert_frame_count,
+)  # noqa: E402
 
 SR = 16000
 

@@ -1,4 +1,5 @@
 """No live services: transactional fake DB and a fault-injectable remote client."""
+
 from copy import deepcopy
 from types import SimpleNamespace
 from uuid import uuid4
@@ -25,8 +26,14 @@ class Result:
 
 class Database:
     def __init__(self):
-        self.curation = dict(id=uuid4(), user_id=uuid4(), navidrome_connection_id=uuid4(),
-                             navidrome_playlist_id=None, status="draft", due=True)
+        self.curation = dict(
+            id=uuid4(),
+            user_id=uuid4(),
+            navidrome_connection_id=uuid4(),
+            navidrome_playlist_id=None,
+            status="draft",
+            due=True,
+        )
         self.publication = None
         self.revisions = []
         self.events = []
@@ -59,7 +66,9 @@ class Database:
             self.lock_held = "unlock" not in sql
             return Result([{"locked": True}])
         if sql.startswith("SELECT id FROM curations"):
-            return Result([{"id": self.curation["id"]}] if self.curation and self.curation["due"] else [])
+            return Result(
+                [{"id": self.curation["id"]}] if self.curation and self.curation["due"] else []
+            )
         if sql.startswith("SELECT * FROM curations"):
             found = self.curation and self.curation["id"] == args[0]
             if "AND user_id" in sql:
@@ -72,8 +81,14 @@ class Database:
             found = p and (p["state"] != "complete" or (len(args) > 1 and p["job_id"] == args[1]))
             return Result([p] if found else [])
         if sql.startswith("INSERT INTO curation_publications"):
-            self.publication = dict(id=args[0], curation_id=args[1], job_id=args[2],
-                                    state="prepared", plan=deepcopy(args[3].obj), playlist_id=args[4])
+            self.publication = dict(
+                id=args[0],
+                curation_id=args[1],
+                job_id=args[2],
+                state="prepared",
+                plan=deepcopy(args[3].obj),
+                playlist_id=args[4],
+            )
             return Result([self.publication])
         if sql.startswith("UPDATE curation_publications"):
             if "state='publishing'" in sql:
@@ -109,9 +124,16 @@ class Database:
 def env(monkeypatch, library_helpers):
     db = Database()
     remote = SimpleNamespace(calls=[], error=None)
-    plan = {"name": "Mix", "source_ids": ["b", "a", "b"], "recipe": {"shuffle_seed": 123},
-            "revision_number": 1, "tracks": [dict(id=str(uuid4()), source_id=s, score=1,
-             percentile=90, retained=False) for s in ["b", "a", "b"]]}
+    plan = {
+        "name": "Mix",
+        "source_ids": ["b", "a", "b"],
+        "recipe": {"shuffle_seed": 123},
+        "revision_number": 1,
+        "tracks": [
+            dict(id=str(uuid4()), source_id=s, score=1, percentile=90, retained=False)
+            for s in ["b", "a", "b"]
+        ],
+    }
     selections = []
 
     def prepare(*args):
@@ -140,13 +162,21 @@ def env(monkeypatch, library_helpers):
                 raise remote.error
             return playlist_id or "created-id"
 
-    main = SimpleNamespace(_load_connection=lambda _: ("url", "user", "secret"), NavidromeClient=Client)
+    main = SimpleNamespace(
+        _load_connection=lambda _: ("url", "user", "secret"), NavidromeClient=Client
+    )
     library_helpers(main)
     monkeypatch.setattr(cj, "_connect", lambda: db)
     monkeypatch.setattr(cj, "_prepare", prepare)
-    job = {"id": uuid4(), "user_id": db.curation["user_id"], "payload": {"curation_id": str(db.curation["id"])}}
+    job = {
+        "id": uuid4(),
+        "user_id": db.curation["user_id"],
+        "payload": {"curation_id": str(db.curation["id"])},
+    }
     context = SimpleNamespace(check=lambda: None, report=lambda _: None)
-    return SimpleNamespace(db=db, remote=remote, plan=plan, selections=selections, job=job, context=context)
+    return SimpleNamespace(
+        db=db, remote=remote, plan=plan, selections=selections, job=job, context=context
+    )
 
 
 def test_publication_committed_before_remote_and_complete_is_idempotent(env):
@@ -246,6 +276,7 @@ def test_lock_released_on_error(env):
 
 def test_schedule_advances_only_after_enqueue(env, monkeypatch):
     import core.jobs.queue as jobs
+
     calls = []
 
     def enqueue(**kw):
@@ -275,19 +306,33 @@ def test_enqueue_failure_keeps_due_work(env, monkeypatch):
 
 def test_manual_enqueue_returns_contract_and_closes_draft_window(env, monkeypatch):
     import core.jobs.queue as jobs
+
     job_id = uuid4()
-    monkeypatch.setattr(jobs, "enqueue", lambda **kw: {"id": job_id, "status": "queued", "existing": True})
+    monkeypatch.setattr(
+        jobs, "enqueue", lambda **kw: {"id": job_id, "status": "queued", "existing": True}
+    )
     result = cj.enqueue(env.db.curation["id"], env.job["user_id"])
-    assert result == {"job_id": str(job_id), "status": "queued", "curation_id": env.job["payload"]["curation_id"]}
+    assert result == {
+        "job_id": str(job_id),
+        "status": "queued",
+        "curation_id": env.job["payload"]["curation_id"],
+    }
     assert env.db.curation["status"] == "pending"
 
 
 def test_routes_share_lock_and_refresh_is_202():
-    tree = ast.parse((Path(__file__).resolve().parents[3] / "services/analysis/src/echora_analysis/main.py").read_text())
+    tree = ast.parse(
+        (
+            Path(__file__).resolve().parents[3] / "services/analysis/src/echora_analysis/main.py"
+        ).read_text()
+    )
     functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
     for name in ["update_curation", "delete_curation"]:
-        assert any(isinstance(n, ast.With) and any("curation_jobs.locked" in ast.unparse(i.context_expr)
-                   for i in n.items) for n in ast.walk(functions[name]))
+        assert any(
+            isinstance(n, ast.With)
+            and any("curation_jobs.locked" in ast.unparse(i.context_expr) for i in n.items)
+            for n in ast.walk(functions[name])
+        )
     decorator = ast.unparse(functions["refresh_curation"].decorator_list[0])
     assert "status_code=202" in decorator
     assert "enqueue" in ast.unparse(functions["_refresh_curation"])
@@ -295,6 +340,7 @@ def test_routes_share_lock_and_refresh_is_202():
 
 def test_due_poll_skips_locked_curation_without_blocking(env, monkeypatch):
     import core.jobs.queue as jobs
+
     env.db.acquired = False
     calls = []
     monkeypatch.setattr(jobs, "enqueue", lambda **kw: calls.append(kw))
@@ -305,6 +351,7 @@ def test_due_poll_skips_locked_curation_without_blocking(env, monkeypatch):
 
 def test_schedule_crash_after_enqueue_reuses_dedupe_key(env, monkeypatch):
     import core.jobs.queue as jobs
+
     queued = {}
     calls = []
 
@@ -364,7 +411,8 @@ def test_deleted_curation_job_is_noop(env):
     env.db.curation = None
     env.db.commit()
     assert cj.execute(env.job, env.context) == {
-        "curation_id": env.job["payload"]["curation_id"], "deleted": True,
+        "curation_id": env.job["payload"]["curation_id"],
+        "deleted": True,
     }
     assert not env.remote.calls
     assert not env.selections

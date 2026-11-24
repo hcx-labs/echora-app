@@ -31,7 +31,12 @@ def test_journey_reserves_both_endpoint_recording_groups():
     groups = ["start", None, None, None, None, None, "end", "end"]
 
     steps = select_journey(
-        tracks, targets, 0, 7, [f"artist-{i}" for i in range(8)], groups,
+        tracks,
+        targets,
+        0,
+        7,
+        [f"artist-{i}" for i in range(8)],
+        groups,
     )
 
     indices = [step[0] for step in steps]

@@ -32,9 +32,7 @@ AUDIO = "/echora-audio"
 MANIFEST = f"{MODELS}/.echora-model-manifest"
 
 # The worker's packages, by import name (they live in core/src and worker/src in a checkout).
-PACKAGES = {
-    name: Path(__import__(name).__file__).resolve().parent for name in ("core", "worker")
-}
+PACKAGES = {name: Path(__import__(name).__file__).resolve().parent for name in ("core", "worker")}
 
 IMAGE = os.environ.get("ECHORA_MODAL_IMAGE") or "ghcr.io/hackslashx/echora-analysis-gpu:latest"
 GPU = os.environ.get("ECHORA_MODAL_GPU") or "L40S"
@@ -42,26 +40,25 @@ if GPU not in GPU_TYPES:
     raise ValueError(f"Unsupported Modal GPU type: {GPU}")
 DEPLOYMENT = json.dumps({"image": IMAGE, "gpu": GPU}, sort_keys=True)
 
-image = (
-    modal.Image.from_registry(IMAGE)
-    .env(
-        {
-            "HF_HOME": f"{MODELS}/huggingface",
-            "TORCH_HOME": f"{MODELS}/torch",
-            "HF_HUB_OFFLINE": "0",
-            # Some pinned revisions fail over Xet (404 on the read token); plain HTTP works.
-            "HF_HUB_DISABLE_XET": "1",
-            "ESSENTIA_MODELS_DIR": f"{MODELS}/essentia",
-            "ECHORA_PREPROCESS_DIR": "/tmp/echora-preprocessed",
-            "ECHORA_MODAL_DEPLOYMENT": DEPLOYMENT,
-            # A fresh path, not the image's own, so no file of the image's source version can
-            # mix with the worker's.
-            "PYTHONPATH": "/echora/packages",
-        }
-    )
+image = modal.Image.from_registry(IMAGE).env(
+    {
+        "HF_HOME": f"{MODELS}/huggingface",
+        "TORCH_HOME": f"{MODELS}/torch",
+        "HF_HUB_OFFLINE": "0",
+        # Some pinned revisions fail over Xet (404 on the read token); plain HTTP works.
+        "HF_HUB_DISABLE_XET": "1",
+        "ESSENTIA_MODELS_DIR": f"{MODELS}/essentia",
+        "ECHORA_PREPROCESS_DIR": "/tmp/echora-preprocessed",
+        "ECHORA_MODAL_DEPLOYMENT": DEPLOYMENT,
+        # A fresh path, not the image's own, so no file of the image's source version can
+        # mix with the worker's.
+        "PYTHONPATH": "/echora/packages",
+    }
 )
 for _name, _directory in PACKAGES.items():
-    image = image.add_local_dir(_directory, f"/echora/packages/{_name}", ignore=["**/__pycache__/**"])
+    image = image.add_local_dir(
+        _directory, f"/echora/packages/{_name}", ignore=["**/__pycache__/**"]
+    )
 
 models_volume = modal.Volume.from_name(MODELS_VOLUME, create_if_missing=True)
 # Source audio of running batches, uploaded by the worker and named by SHA-256.

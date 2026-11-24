@@ -1,6 +1,11 @@
 import numpy as np
 
-from worker.profiles.pipeline import AudioProfileParameters, WindowVector, derive_audio_profile, infer_window_ranges
+from worker.profiles.pipeline import (
+    AudioProfileParameters,
+    WindowVector,
+    derive_audio_profile,
+    infer_window_ranges,
+)
 
 
 def _windows(vectors: list[list[float]]) -> list[WindowVector]:
@@ -56,7 +61,10 @@ def test_repeated_identity_produces_disjoint_mode_intervals() -> None:
 
 def test_legacy_range_reconstruction_preserves_exact_final_window() -> None:
     assert infer_window_ranges(4, 23.0, 10.0, 5.0) == [
-        (0.0, 10.0), (5.0, 15.0), (10.0, 20.0), (13.0, 23.0),
+        (0.0, 10.0),
+        (5.0, 15.0),
+        (10.0, 20.0),
+        (13.0, 23.0),
     ]
 
 

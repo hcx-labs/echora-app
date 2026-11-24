@@ -1,4 +1,5 @@
 """Measured audio descriptors. These are not embedding scores or calibrated labels."""
+
 from __future__ import annotations
 
 import logging
@@ -28,14 +29,16 @@ def energy_curve(stereo: np.ndarray, sample_rate: int) -> list[dict[str, object]
     """One-second channel-energy windows, without cancellation from mono mixing."""
     curve = []
     for start in range(0, len(stereo), sample_rate):
-        block = stereo[start:start + sample_rate].astype(np.float64)
+        block = stereo[start : start + sample_rate].astype(np.float64)
         rms = float(np.sqrt(np.mean(block * block)))
-        curve.append({
-            "start_seconds": start / sample_rate,
-            "end_seconds": min(start + sample_rate, len(stereo)) / sample_rate,
-            "rms_dbfs": level_dbfs(rms),
-            "sample_peak_dbfs": level_dbfs(float(np.max(np.abs(block)))),
-        })
+        curve.append(
+            {
+                "start_seconds": start / sample_rate,
+                "end_seconds": min(start + sample_rate, len(stereo)) / sample_rate,
+                "rms_dbfs": level_dbfs(rms),
+                "sample_peak_dbfs": level_dbfs(float(np.max(np.abs(block)))),
+            }
+        )
     return curve
 
 
@@ -50,7 +53,7 @@ def spectral_curve(mono: np.ndarray, sample_rate: int) -> list[dict[str, object]
     buckets: dict[int, list[tuple[float, float]]] = {}
     previous = None
     for start in range(0, len(mono), hop):
-        block = mono[start:start + frame_size]
+        block = mono[start : start + frame_size]
         if len(block) < frame_size:
             block = np.pad(block, (0, frame_size - len(block)))
         spectrum = np.abs(np.fft.rfft(block * window))
@@ -64,9 +67,12 @@ def spectral_curve(mono: np.ndarray, sample_rate: int) -> list[dict[str, object]
         previous = normalized
         buckets.setdefault(start // sample_rate, []).append((centroid, flux))
     return [
-        {"start_seconds": second, "end_seconds": min(second + 1, len(mono) / sample_rate),
-         "centroid_hz": float(np.mean([item[0] for item in values])),
-         "positive_spectral_flux": float(np.mean([item[1] for item in values]))}
+        {
+            "start_seconds": second,
+            "end_seconds": min(second + 1, len(mono) / sample_rate),
+            "centroid_hz": float(np.mean([item[0] for item in values])),
+            "positive_spectral_flux": float(np.mean([item[1] for item in values])),
+        }
         for second, values in sorted(buckets.items())
     ]
 
@@ -84,14 +90,19 @@ def analyze_waveform(stereo: np.ndarray, sample_rate: int = SAMPLE_RATE) -> dict
     mono = stereo.mean(axis=1)
     peak = float(np.max(np.abs(stereo)))
     result: dict[str, object] = {
-        "revision": DESCRIPTOR_REVISION, "sample_rate": sample_rate,
+        "revision": DESCRIPTOR_REVISION,
+        "sample_rate": sample_rate,
         "duration_seconds": duration,
-        "sample_peak_dbfs": level_dbfs(peak), "true_peak_dbtp": None,
+        "sample_peak_dbfs": level_dbfs(peak),
+        "true_peak_dbtp": None,
         "rms_dbfs": level_dbfs(float(np.sqrt(np.mean(stereo.astype(np.float64) ** 2)))),
         "energy_curve": energy_curve(stereo, sample_rate),
         "spectral_curve": spectral_curve(mono, sample_rate),
-        "loudness": None, "rhythm": None, "key": None,
-        "warnings": [], "confidence_calibrated": False,
+        "loudness": None,
+        "rhythm": None,
+        "key": None,
+        "warnings": [],
+        "confidence_calibrated": False,
     }
     warnings = result["warnings"]
     if peak == 0:
@@ -118,8 +129,12 @@ def analyze_waveform(stereo: np.ndarray, sample_rate: int = SAMPLE_RATE) -> dict
         errors.append("loudness")
     if duration >= 10 and np.any(mono):
         try:
-            bpm, ticks, confidence, estimates, _ = es.RhythmExtractor2013(method="multifeature")(mono)
-            valid_ticks = [float(t) for t in ticks if 0 <= t <= duration and math.isfinite(float(t))]
+            bpm, ticks, confidence, estimates, _ = es.RhythmExtractor2013(method="multifeature")(
+                mono
+            )
+            valid_ticks = [
+                float(t) for t in ticks if 0 <= t <= duration and math.isfinite(float(t))
+            ]
             result["rhythm"] = {
                 "bpm": finite_number(bpm) if bpm > 0 and confidence > 0 else None,
                 "beat_times_seconds": valid_ticks,
@@ -141,7 +156,8 @@ def analyze_waveform(stereo: np.ndarray, sample_rate: int = SAMPLE_RATE) -> dict
                 "scale": scale if strength > 0 else None,
                 "strength_raw": finite_number(strength),
                 "confidence_scale": "profile_correlation_uncalibrated",
-                "scope": "whole_track", "key_changes_analyzed": False,
+                "scope": "whole_track",
+                "key_changes_analyzed": False,
             }
         except Exception:
             logger.exception("Key extraction failed")

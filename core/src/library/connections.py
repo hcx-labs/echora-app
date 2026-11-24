@@ -44,4 +44,3 @@ def load_connection(
     except InvalidToken as error:
         raise RuntimeError("Stored Navidrome credentials cannot be decrypted") from error
     return url, username, password
-

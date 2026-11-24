@@ -4,6 +4,7 @@ No model downloads or inference in the API. Fingerprint artifacts are immutable
 per representation and become searchable in the same transaction as publication.
 The exact reader deliberately precedes ANN so recall has a testable baseline.
 """
+
 from __future__ import annotations
 
 from core.settings import get_settings
@@ -30,6 +31,7 @@ class QueueFull(ValueError):
 
 def search_configuration():
     from worker.recordings.encoder import config_from_env
+
     config = config_from_env()
     if config is None:
         raise ValueError("Recording encoder is disabled")
@@ -43,14 +45,18 @@ def search_configuration():
 def load_match_policy(config, path):
     """Validate a policy against a verified encoder without changing process env."""
     from worker.recordings.matcher import MatchPolicy, MATCHER_REVISION
+
     payload = Path(path).read_bytes()
     data = json.loads(payload)
-    if (not isinstance(data, dict) or data.get("representation_id") != config.representation_id
-            or data.get("matcher_revision") != MATCHER_REVISION
-            or data.get("calibrated") is not True
-            or not isinstance(data.get("validation_dataset"), str)
-            or not data["validation_dataset"].strip()
-            or not isinstance(data.get("thresholds"), dict)):
+    if (
+        not isinstance(data, dict)
+        or data.get("representation_id") != config.representation_id
+        or data.get("matcher_revision") != MATCHER_REVISION
+        or data.get("calibrated") is not True
+        or not isinstance(data.get("validation_dataset"), str)
+        or not data["validation_dataset"].strip()
+        or not isinstance(data.get("thresholds"), dict)
+    ):
         raise ValueError("A calibrated, representation-bound match policy is required")
     try:
         policy = MatchPolicy(**data["thresholds"])
@@ -62,28 +68,45 @@ def load_match_policy(config, path):
 def status(user_id):
     from worker.recordings.encoder import config_from_env
     from worker.recordings.calibration import enabled as calibration_enabled
+
     calibration = calibration_enabled()
-    unavailable = {"enabled": calibration, "recognition_enabled": False,
-                   "calibration_enabled": calibration}
+    unavailable = {
+        "enabled": calibration,
+        "recognition_enabled": False,
+        "calibration_enabled": calibration,
+    }
     try:
         config = config_from_env()
     except (ValueError, OSError):
         config = None
     if config is None:
-        return {**unavailable, "indexed_tracks": 0,
-                "reason": "Recording search needs a validated local model."}
+        return {
+            **unavailable,
+            "indexed_tracks": 0,
+            "reason": "Recording search needs a validated local model.",
+        }
     with jobs._db() as db:
-        count = db.execute("""SELECT count(*) AS n FROM recording_fingerprints f
+        count = db.execute(
+            """SELECT count(*) AS n FROM recording_fingerprints f
             WHERE f.representation_id=%s AND f.segment_count>0 AND EXISTS (
                 SELECT 1 FROM user_track_links u WHERE u.track_id=f.track_id AND u.user_id=%s)
-            """, (config.representation_id, user_id)).fetchone()["n"]
+            """,
+            (config.representation_id, user_id),
+        ).fetchone()["n"]
     try:
         search_configuration()
     except (ValueError, OSError):
-        return {**unavailable, "indexed_tracks": count,
-                "reason": "Recording search needs a calibrated recognition policy."}
-    return {"enabled": True, "recognition_enabled": True,
-            "calibration_enabled": calibration, "indexed_tracks": count}
+        return {
+            **unavailable,
+            "indexed_tracks": count,
+            "reason": "Recording search needs a calibrated recognition policy.",
+        }
+    return {
+        "enabled": True,
+        "recognition_enabled": True,
+        "calibration_enabled": calibration,
+        "indexed_tracks": count,
+    }
 
 
 def index_status(connection, namespace, external_ids, user_id):
@@ -94,9 +117,15 @@ def index_status(connection, namespace, external_ids, user_id):
     This does not require, or enable, a recognition policy.
     """
     from worker.recordings.encoder import config_from_env
+
     ids = list(dict.fromkeys(external_ids))
-    result = {"enabled": False, "total": len(ids), "indexed": 0,
-              "unsupported": 0, "missing": len(ids)}
+    result = {
+        "enabled": False,
+        "total": len(ids),
+        "indexed": 0,
+        "unsupported": 0,
+        "missing": len(ids),
+    }
     try:
         config = config_from_env()
     except (ValueError, OSError):
@@ -104,23 +133,32 @@ def index_status(connection, namespace, external_ids, user_id):
     if config is None:
         return {**result, "reason": "Recording fingerprinting needs a validated local model."}
     with connection.cursor() as cursor:
-        cursor.execute("""SELECT count(DISTINCT ts.external_id) FILTER (WHERE f.segment_count>0),
+        cursor.execute(
+            """SELECT count(DISTINCT ts.external_id) FILTER (WHERE f.segment_count>0),
                    count(DISTINCT ts.external_id) FILTER (WHERE f.segment_count=0)
             FROM track_sources ts JOIN libraries l ON l.id=ts.library_id
             JOIN recording_fingerprints f ON f.track_id=ts.track_id AND f.representation_id=%s
             WHERE l.namespace=%s AND ts.source_type='subsonic' AND ts.external_id=ANY(%s)
               AND EXISTS (SELECT 1 FROM user_track_links u WHERE u.user_id=%s
                   AND u.library_id=ts.library_id AND u.track_id=ts.track_id)""",
-                       (config.representation_id, namespace, ids, user_id))
+            (config.representation_id, namespace, ids, user_id),
+        )
         indexed, unsupported = cursor.fetchone()
-    return {**result, "enabled": True, "indexed": indexed, "unsupported": unsupported,
-            "missing": len(ids) - indexed - unsupported}
+    return {
+        **result,
+        "enabled": True,
+        "indexed": indexed,
+        "unsupported": unsupported,
+        "missing": len(ids) - indexed - unsupported,
+    }
 
 
 def cleanup():
     """Worker maintenance also expires abandoned uploads when no queries run."""
     with jobs._db() as db:
-        db.execute("UPDATE recording_searches SET audio=NULL WHERE audio IS NOT NULL AND audio_expires_at<=now()")
+        db.execute(
+            "UPDATE recording_searches SET audio=NULL WHERE audio IS NOT NULL AND audio_expires_at<=now()"
+        )
         db.execute("DELETE FROM recording_searches WHERE expires_at<=now()")
         db.execute("DELETE FROM recording_diagnostic_captures WHERE expires_at<=now()")
 
@@ -131,27 +169,46 @@ def enqueue(user_id, audio: bytes, representation_id: str, policy_id: str):
     with jobs._db() as db:
         # Serialize admission, including the global cap, across API replicas.
         db.execute("SELECT pg_advisory_xact_lock(hashtextextended('recording-search-admission',0))")
-        active = db.execute("""SELECT count(*) AS total,
+        active = db.execute(
+            """SELECT count(*) AS total,
             count(*) FILTER (WHERE user_id=%s) AS owned FROM jobs
             WHERE kind='recording_search' AND status IN ('queued','running','waiting')""",
-                            (user_id,)).fetchone()
-        recent = db.execute("""SELECT count(*) AS n FROM jobs WHERE kind='recording_search'
-            AND user_id=%s AND created_at>now()-interval '1 minute'""", (user_id,)).fetchone()["n"]
-        if active["total"] >= get_settings().recording_max_active or active["owned"] >= get_settings().recording_max_active_per_user or recent >= get_settings().recording_uploads_per_minute:
+            (user_id,),
+        ).fetchone()
+        recent = db.execute(
+            """SELECT count(*) AS n FROM jobs WHERE kind='recording_search'
+            AND user_id=%s AND created_at>now()-interval '1 minute'""",
+            (user_id,),
+        ).fetchone()["n"]
+        if (
+            active["total"] >= get_settings().recording_max_active
+            or active["owned"] >= get_settings().recording_max_active_per_user
+            or recent >= get_settings().recording_uploads_per_minute
+        ):
             raise QueueFull()
         public = jobs._insert(db, "recording_search", "analysis", user_id, None, {}, None, None)
         db.execute("UPDATE jobs SET max_attempts=1 WHERE id=%s", (public["id"],))
-        db.execute("""INSERT INTO recording_searches(job_id,representation_id,policy_id,audio,audio_expires_at,expires_at)
+        db.execute(
+            """INSERT INTO recording_searches(job_id,representation_id,policy_id,audio,audio_expires_at,expires_at)
             VALUES (%s,%s,%s,%s,now()+%s*interval '1 second',now()+%s*interval '1 second')""",
-                   (public["id"], representation_id, policy_id, audio,
-                    get_settings().recording_audio_retention_seconds, get_settings().recording_result_retention_seconds))
+            (
+                public["id"],
+                representation_id,
+                policy_id,
+                audio,
+                get_settings().recording_audio_retention_seconds,
+                get_settings().recording_result_retention_seconds,
+            ),
+        )
         # Operator-armed only after explicit user consent. Consume the one-shot
         # reservation in the same transaction as admission, never on rejected
         # uploads. Later searches retain the usual terminal audio erasure.
-        db.execute("""UPDATE recording_diagnostic_captures
+        db.execute(
+            """UPDATE recording_diagnostic_captures
             SET audio=%s,job_id=%s,captured_at=now(),expires_at=now()+%s*interval '1 second'
             WHERE user_id=%s AND captured_at IS NULL AND expires_at>now()""",
-                   (audio, public["id"], get_settings().recording_diagnostic_retention_seconds, user_id))
+            (audio, public["id"], get_settings().recording_diagnostic_retention_seconds, user_id),
+        )
         return {"job_id": public["id"]}
 
 
@@ -161,12 +218,36 @@ def decode_query(audio: bytes, check=lambda: None) -> np.ndarray:
         raise ValueError("Invalid recording upload size")
     check()
     deadline = time.monotonic() + get_settings().recording_decode_timeout_seconds
-    with subprocess.Popen([
-            "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
-            "-protocol_whitelist", "pipe", "-threads", "1", "-i", "pipe:0",
-            "-t", str(MAX_CLIP_SECONDS + 1), "-vn", "-sn", "-dn",
-            "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "f32le", "pipe:1",
-        ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
+    with subprocess.Popen(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-protocol_whitelist",
+            "pipe",
+            "-threads",
+            "1",
+            "-i",
+            "pipe:0",
+            "-t",
+            str(MAX_CLIP_SECONDS + 1),
+            "-vn",
+            "-sn",
+            "-dn",
+            "-ac",
+            "1",
+            "-ar",
+            str(SAMPLE_RATE),
+            "-f",
+            "f32le",
+            "pipe:1",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    ) as process:
         pending_input = audio
         try:
             while True:
@@ -175,7 +256,10 @@ def decode_query(audio: bytes, check=lambda: None) -> np.ndarray:
                 if remaining <= 0:
                     raise ValueError("Recording decode timed out")
                 try:
-                    output, _ = process.communicate(input=pending_input, timeout=min(get_settings().recording_cancel_poll_seconds, remaining))
+                    output, _ = process.communicate(
+                        input=pending_input,
+                        timeout=min(get_settings().recording_cancel_poll_seconds, remaining),
+                    )
                     break
                 except subprocess.TimeoutExpired:
                     # communicate resumes partially written input and captured
@@ -193,7 +277,7 @@ def decode_query(audio: bytes, check=lambda: None) -> np.ndarray:
     # bounded capture jitter, then trim to the advertised search duration.
     if samples.size > (MAX_CLIP_SECONDS + 0.75) * SAMPLE_RATE:
         raise ValueError("Recordings must be at most 20 seconds")
-    samples = samples[:MAX_CLIP_SECONDS * SAMPLE_RATE]
+    samples = samples[: MAX_CLIP_SECONDS * SAMPLE_RATE]
     if not samples.size or not np.isfinite(samples).all():
         raise ValueError("Recording has no usable audio")
     return samples
@@ -202,26 +286,40 @@ def decode_query(audio: bytes, check=lambda: None) -> np.ndarray:
 def store_fingerprints(connection, track_id, audio: bytes, config, check=lambda: None):
     from core.media.audio import decode_audio
     from worker.recordings.encoder import encode
+
     check()
     with connection.cursor() as cursor:
-        cursor.execute("SELECT 1 FROM recording_fingerprints WHERE track_id=%s AND representation_id=%s",
-                       (track_id, config.representation_id))
+        cursor.execute(
+            "SELECT 1 FROM recording_fingerprints WHERE track_id=%s AND representation_id=%s",
+            (track_id, config.representation_id),
+        )
         if cursor.fetchone():
             return False
         cursor.execute("SELECT audio_hash FROM tracks WHERE id=%s", (track_id,))
         track = cursor.fetchone()
         if track is None or track[0] != hashlib.sha256(audio).hexdigest():
-            raise ValueError("Recording source bytes changed; track identity must be refreshed before indexing")
+            raise ValueError(
+                "Recording source bytes changed; track identity must be refreshed before indexing"
+            )
     samples = decode_audio(audio, SAMPLE_RATE)
-    fingerprints = (encode(samples, config, check=check) if len(samples) >= SAMPLE_RATE
-                    else np.empty((0, 128), dtype=np.float32))
+    fingerprints = (
+        encode(samples, config, check=check)
+        if len(samples) >= SAMPLE_RATE
+        else np.empty((0, 128), dtype=np.float32)
+    )
     check()
     with connection.cursor() as cursor:
-        cursor.execute("""INSERT INTO recording_fingerprints
+        cursor.execute(
+            """INSERT INTO recording_fingerprints
             (track_id,representation_id,segment_count,fingerprints) VALUES (%s,%s,%s,%s)
             ON CONFLICT (track_id,representation_id) DO NOTHING""",
-                       (track_id, config.representation_id, len(fingerprints),
-                        np.asarray(fingerprints, dtype="<f4").tobytes()))
+            (
+                track_id,
+                config.representation_id,
+                len(fingerprints),
+                np.asarray(fingerprints, dtype="<f4").tobytes(),
+            ),
+        )
         return cursor.rowcount == 1
 
 
@@ -229,25 +327,31 @@ def _references(db, user_id, representation_id, check):
     # Server-side cursor bounds memory. Access is scoped BEFORE similarity search.
     with db.cursor(name="recording_references") as cursor:
         cursor.itersize = 8
-        cursor.execute("""SELECT f.track_id,f.segment_count,f.fingerprints,g.group_id
+        cursor.execute(
+            """SELECT f.track_id,f.segment_count,f.fingerprints,g.group_id
             FROM recording_fingerprints f
             LEFT JOIN recording_group_members g ON g.track_id=f.track_id
             WHERE f.representation_id=%s AND f.segment_count>0 AND EXISTS (
                 SELECT 1 FROM user_track_links u WHERE u.track_id=f.track_id AND u.user_id=%s)
-            ORDER BY f.track_id""", (representation_id, user_id))
+            ORDER BY f.track_id""",
+            (representation_id, user_id),
+        )
         for row in cursor:
             check()
             values = np.frombuffer(bytes(row["fingerprints"]), dtype="<f4")
             if values.size != row["segment_count"] * 128:
                 raise ValueError("Corrupt recording fingerprint artifact")
-            yield {"track_id": str(row["track_id"]),
-                   "recording_group_id": str(row["group_id"]) if row["group_id"] else None,
-                   "fingerprints": values.reshape(-1, 128)}
+            yield {
+                "track_id": str(row["track_id"]),
+                "recording_group_id": str(row["group_id"]) if row["group_id"] else None,
+                "fingerprints": values.reshape(-1, 128),
+            }
 
 
 def execute(job, context):
     from worker.recordings.encoder import encode
     from worker.recordings.matcher import match_recording
+
     started = time.monotonic()
     deadline = started + get_settings().recording_processing_timeout_seconds
     last_lease_check = started
@@ -265,37 +369,54 @@ def execute(job, context):
     config, policy, policy_id = search_configuration()
     check()
     with jobs._db() as db:
-        query = db.execute("""SELECT q.* FROM recording_searches q JOIN jobs j ON j.id=q.job_id
+        query = db.execute(
+            """SELECT q.* FROM recording_searches q JOIN jobs j ON j.id=q.job_id
             WHERE q.job_id=%s AND j.user_id=%s AND q.audio_expires_at>now()""",
-                           (job["id"], job["user_id"])).fetchone()
-    if (not query or query["audio"] is None or query["representation_id"] != config.representation_id
-            or query["policy_id"] != policy_id):
+            (job["id"], job["user_id"]),
+        ).fetchone()
+    if (
+        not query
+        or query["audio"] is None
+        or query["representation_id"] != config.representation_id
+        or query["policy_id"] != policy_id
+    ):
         raise ValueError("Recording expired or recognition configuration changed")
     context.report({"phase": "recording_decode", "message": "Preparing recording"})
     samples = decode_query(bytes(query["audio"]), check=check)
     check()
     context.check()
     context.report({"phase": "recording_encode", "message": "Analyzing recording"})
-    fingerprints = (encode(samples, config, check=check) if len(samples) >= SAMPLE_RATE
-                    else np.empty((0, 128), dtype=np.float32))
+    fingerprints = (
+        encode(samples, config, check=check)
+        if len(samples) >= SAMPLE_RATE
+        else np.empty((0, 128), dtype=np.float32)
+    )
     del samples, query
     check()
     context.report({"phase": "recording_match", "message": "Searching your indexed recordings"})
     with jobs._db() as db:
-        result_value = match_recording(fingerprints,
-                                      _references(db, job["user_id"], config.representation_id, check),
-                                      policy, check=check)
+        result_value = match_recording(
+            fingerprints,
+            _references(db, job["user_id"], config.representation_id, check),
+            policy,
+            check=check,
+        )
     context.check()
     with jobs._db() as db:
         # Lock the live job claim while publishing. A cancelled/expired executor
         # cannot overwrite a newer attempt's result or expose incomplete output.
-        owned = db.execute("""SELECT id FROM jobs WHERE id=%s AND token=%s
+        owned = db.execute(
+            """SELECT id FROM jobs WHERE id=%s AND token=%s
             AND status='running' AND NOT cancel_requested AND lease_until>now()
-            FOR UPDATE""", (job["id"], context.token)).fetchone()
+            FOR UPDATE""",
+            (job["id"], context.token),
+        ).fetchone()
         if not owned:
             raise jobs.JobCancelled()
-        db.execute("UPDATE recording_searches SET result=%s WHERE job_id=%s",
-                   (Jsonb(result_value), job["id"]))
+        db.execute(
+            "UPDATE recording_searches SET result=%s WHERE job_id=%s",
+            (Jsonb(result_value), job["id"]),
+        )
     # Results live outside public job summaries, because access can later change.
     return {"state": result_value["state"]}
 
@@ -304,7 +425,8 @@ def _visible_matches(db, matches, user_id):
     if not matches:
         return []
     ids = [UUID(item["track_id"]) for item in matches]
-    rows = db.execute("""SELECT t.id,t.title,t.artist,t.album,t.duration_seconds,
+    rows = db.execute(
+        """SELECT t.id,t.title,t.artist,t.album,t.duration_seconds,
         CASE WHEN u.connection_id IS NOT NULL THEN u.external_id END AS source_id,
         u.connection_id::text AS connection_id,
         CASE WHEN u.connection_id IS NOT NULL THEN ts.source_data->>'coverArt' END AS cover_art
@@ -321,19 +443,28 @@ def _visible_matches(db, matches, user_id):
         ) u ON true
         LEFT JOIN track_sources ts ON ts.track_id=t.id AND ts.library_id=u.library_id
             AND ts.external_id=u.external_id AND ts.source_type='subsonic'
-        WHERE t.id=ANY(%s)""", (user_id, ids)).fetchall()
+        WHERE t.id=ANY(%s)""",
+        (user_id, ids),
+    ).fetchall()
     visible = {str(row["id"]): row for row in rows}
-    return [{**{key: value for key, value in match.items() if key != "recording_group_id"},
-             **{key: value for key, value in visible[match["track_id"]].items() if key != "id"}}
-            for match in matches if match["track_id"] in visible]
+    return [
+        {
+            **{key: value for key, value in match.items() if key != "recording_group_id"},
+            **{key: value for key, value in visible[match["track_id"]].items() if key != "id"},
+        }
+        for match in matches
+        if match["track_id"] in visible
+    ]
 
 
 def result(job_id, user_id):
     with jobs._db() as db:
-        row = db.execute("""SELECT j.status,j.error,q.result FROM jobs j
+        row = db.execute(
+            """SELECT j.status,j.error,q.result FROM jobs j
             LEFT JOIN recording_searches q ON q.job_id=j.id AND q.expires_at>now()
             WHERE j.id=%s AND j.user_id=%s AND j.kind='recording_search'""",
-                         (job_id, user_id)).fetchone()
+            (job_id, user_id),
+        ).fetchone()
         if not row:
             return None
         response = {"status": row["status"]}
@@ -346,7 +477,9 @@ def result(job_id, user_id):
             visible = _visible_matches(db, value.get("matches", []), user_id)
             state = value["state"]
             # Never promote an old runner-up after the identified track is revoked.
-            if value.get("matches") and (not visible or visible[0]["track_id"] != value["matches"][0]["track_id"]):
+            if value.get("matches") and (
+                not visible or visible[0]["track_id"] != value["matches"][0]["track_id"]
+            ):
                 state = "no_match"
                 visible = []
             response["result"] = {"state": state, "matches": visible}

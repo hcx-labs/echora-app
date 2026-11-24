@@ -73,4 +73,3 @@ def relink_renumbered_sources(connection, url: str, tracks) -> int:
     relinked = relink_sources(connection, library[0], {track.id: track.raw for track in tracks})
     connection.commit()
     return relinked
-

@@ -9,14 +9,24 @@ parity; the report checksum pins the evidence reviewed by that operator.
 
 ECHORA_RECORDING_MODEL_MANIFEST points to JSON with exactly these fields::
 
-    {"schema_version": 1, "enabled": true, "license_acknowledged": true,
-     "parity_validated": true, "model_path": "encoder.onnx",
-     "model_sha256": "<64 lowercase hex>",
-     "validation_report_path": "parity.json",
-     "validation_report_sha256": "<64 lowercase hex>",
-     "frontend": "embedded-waveform-v1", "sample_rate": 8000,
-     "window_samples": 8000, "hop_samples": 4000, "embedding_dim": 128,
-     "input_name": "waveform", "output_name": "embedding", "batch_size": 32}
+    {
+        "schema_version": 1,
+        "enabled": true,
+        "license_acknowledged": true,
+        "parity_validated": true,
+        "model_path": "encoder.onnx",
+        "model_sha256": "<64 lowercase hex>",
+        "validation_report_path": "parity.json",
+        "validation_report_sha256": "<64 lowercase hex>",
+        "frontend": "embedded-waveform-v1",
+        "sample_rate": 8000,
+        "window_samples": 8000,
+        "hop_samples": 4000,
+        "embedding_dim": 128,
+        "input_name": "waveform",
+        "output_name": "embedding",
+        "batch_size": 32,
+    }
 
 Paths are local, relative to the manifest (absolute paths also accepted). Missing
 environment variable disables this feature; present but invalid manifests raise
@@ -47,27 +57,47 @@ import numpy as np
 
 
 _FIXED = {
-    "schema_version": 1, "frontend": "embedded-waveform-v1", "sample_rate": 8000,
-    "window_samples": 8000, "hop_samples": 4000, "embedding_dim": 128,
+    "schema_version": 1,
+    "frontend": "embedded-waveform-v1",
+    "sample_rate": 8000,
+    "window_samples": 8000,
+    "hop_samples": 4000,
+    "embedding_dim": 128,
 }
 _GATES = ("enabled", "license_acknowledged", "parity_validated")
 _PATHS = ("model_path", "validation_report_path")
 _DIGESTS = ("model_sha256", "validation_report_sha256")
-_FIELDS = set(_FIXED) | set(_GATES) | set(_PATHS) | set(_DIGESTS) | {
-    "input_name", "output_name", "batch_size",
-}
+_FIELDS = (
+    set(_FIXED)
+    | set(_GATES)
+    | set(_PATHS)
+    | set(_DIGESTS)
+    | {
+        "input_name",
+        "output_name",
+        "batch_size",
+    }
+)
 
 
 def _hash(value: dict) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                     allow_nan=False).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()
 
 
 def _representation(data: dict) -> str:
     keys = set(_FIXED) | {"model_sha256", "input_name", "output_name"}
-    return _hash({**{k: data[k] for k in keys}, "encoder_revision": 1,
-                  "normalization": "l2-float64", "silence": "exact-zero-preserve-row",
-                  "tail": "drop-incomplete", "waveform": "mono-float32-no-scaling"})
+    return _hash(
+        {
+            **{k: data[k] for k in keys},
+            "encoder_revision": 1,
+            "normalization": "l2-float64",
+            "silence": "exact-zero-preserve-row",
+            "tail": "drop-incomplete",
+            "waveform": "mono-float32-no-scaling",
+        }
+    )
 
 
 def _validate_manifest(data: dict) -> None:
@@ -112,7 +142,7 @@ def _verify_file(path: str, digest: str, check: Callable[[], None]) -> tuple:
             return signature
         value = hashlib.sha256()
         try:
-            with Path(path).open('rb') as source:
+            with Path(path).open("rb") as source:
                 while block := source.read(1024 * 1024):
                     check()
                     value.update(block)
@@ -130,23 +160,33 @@ def _session(data: dict, check: Callable[[], None]):
     global _SESSION
     with _CACHE_LOCK:
         check()
-        key = (_hash(data), tuple(_verify_file(data[path], data[digest], check)
-                                 for path, digest in zip(_PATHS, _DIGESTS)))
+        key = (
+            _hash(data),
+            tuple(
+                _verify_file(data[path], data[digest], check)
+                for path, digest in zip(_PATHS, _DIGESTS)
+            ),
+        )
         if _SESSION is not None and _SESSION[0] == key:
             return _SESSION[1]
         # Drop the old generation before allocating the next model.
         _SESSION = None
-        model = _verified_bytes(data['model_path'], data['model_sha256'])
+        model = _verified_bytes(data["model_path"], data["model_sha256"])
         check()
         import onnxruntime as ort
+
         options = ort.SessionOptions()
-        options.intra_op_num_threads = min(get_settings().recording_intra_op_threads, os.cpu_count() or 1)
+        options.intra_op_num_threads = min(
+            get_settings().recording_intra_op_threads, os.cpu_count() or 1
+        )
         options.inter_op_num_threads = get_settings().recording_inter_op_threads
-        session = ort.InferenceSession(model, sess_options=options, providers=['CPUExecutionProvider'])
+        session = ort.InferenceSession(
+            model, sess_options=options, providers=["CPUExecutionProvider"]
+        )
         check()
         _check_graph(session, data)
         if tuple(_signature(data[path]) for path in _PATHS) != key[1]:
-            raise ValueError('Artifact replaced during session initialization')
+            raise ValueError("Artifact replaced during session initialization")
         _SESSION = (key, session)
         return session
 
@@ -221,8 +261,11 @@ def load_config(manifest_path: str | Path) -> EncoderConfig:
 def config_from_env(environ: Mapping[str, str] | None = None) -> EncoderConfig | None:
     """Absent/empty env disables; an invalid configured path fails closed."""
 
-    path = (get_settings().recording_model_manifest if environ is None
-            else environ.get("ECHORA_RECORDING_MODEL_MANIFEST"))
+    path = (
+        get_settings().recording_model_manifest
+        if environ is None
+        else environ.get("ECHORA_RECORDING_MODEL_MANIFEST")
+    )
     if path is None or not path.strip():
         return None
     return load_config(path)
@@ -237,18 +280,29 @@ def _check_graph(session, data: dict) -> None:
             raise ValueError("Graph must have exactly one input and one output")
         node = nodes[0]
         shape = node.shape
-        if (node.name != name or node.type != "tensor(float)" or len(shape) != 2
-                or shape[1] != width or not (shape[0] is None or isinstance(shape[0], str))):
+        if (
+            node.name != name
+            or node.type != "tensor(float)"
+            or len(shape) != 2
+            or shape[1] != width
+            or not (shape[0] is None or isinstance(shape[0], str))
+        ):
             raise ValueError("Graph requires dynamic-batch float32 waveform [B,8000] -> [B,128]")
 
 
-def encode(samples: np.ndarray, config: EncoderConfig,
-           check: Callable[[], None] = lambda: None) -> np.ndarray:
+def encode(
+    samples: np.ndarray, config: EncoderConfig, check: Callable[[], None] = lambda: None
+) -> np.ndarray:
     """Run bounded CPU batches. check() may raise to cancel before/between ORT calls."""
     check()
     data = _config_data(config)
-    if (not isinstance(samples, np.ndarray) or samples.dtype != np.float32
-            or samples.ndim != 1 or samples.size < 8000 or not np.isfinite(samples).all()):
+    if (
+        not isinstance(samples, np.ndarray)
+        or samples.dtype != np.float32
+        or samples.ndim != 1
+        or samples.size < 8000
+        or not np.isfinite(samples).all()
+    ):
         raise ValueError("Expected finite mono float32 8 kHz samples, at least 8000 samples")
     validate_config(config, check)
     session = None
@@ -257,7 +311,7 @@ def encode(samples: np.ndarray, config: EncoderConfig,
     for start in range(0, count, data["batch_size"]):
         check()
         stop = min(count, start + data["batch_size"])
-        batch = np.stack([samples[i * 4000:i * 4000 + 8000] for i in range(start, stop)])
+        batch = np.stack([samples[i * 4000 : i * 4000 + 8000] for i in range(start, stop)])
         active = np.any(batch != 0, axis=1)
         if not active.any():
             continue
@@ -267,8 +321,12 @@ def encode(samples: np.ndarray, config: EncoderConfig,
             session = _session(data, check)
         output = session.run([data["output_name"]], {data["input_name"]: batch[active]})[0]
         check()
-        if (not isinstance(output, np.ndarray) or output.dtype != np.float32
-                or output.shape != (int(active.sum()), 128) or not np.isfinite(output).all()):
+        if (
+            not isinstance(output, np.ndarray)
+            or output.dtype != np.float32
+            or output.shape != (int(active.sum()), 128)
+            or not np.isfinite(output).all()
+        ):
             raise ValueError("Invalid encoder output")
         values = output.astype(np.float64)
         norms = np.linalg.norm(values, axis=1, keepdims=True)

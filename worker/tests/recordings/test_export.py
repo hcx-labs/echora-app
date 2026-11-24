@@ -1,4 +1,5 @@
 """Export provenance checks require no model runtime or network access."""
+
 import hashlib
 import importlib.util
 from pathlib import Path
@@ -16,13 +17,19 @@ _spec.loader.exec_module(exporter)
 def archive(tmp_path, monkeypatch):
     folder = tmp_path / "checkpoint"
     folder.mkdir()
-    files = [folder / "config.yaml", folder / "ckpt-100.index", folder / "ckpt-100.data-00000-of-00001"]
+    files = [
+        folder / "config.yaml",
+        folder / "ckpt-100.index",
+        folder / "ckpt-100.data-00000-of-00001",
+    ]
     bundle = tmp_path / "model.zip"
     with zipfile.ZipFile(bundle, "w") as writer:
         for index, path in enumerate(files):
             path.write_bytes(f"fixture-{index}".encode())
             writer.write(path, "nmfp-triplet/" + path.name)
-    monkeypatch.setattr(exporter, "CHECKPOINT_ARCHIVE_MD5", hashlib.md5(bundle.read_bytes()).hexdigest())
+    monkeypatch.setattr(
+        exporter, "CHECKPOINT_ARCHIVE_MD5", hashlib.md5(bundle.read_bytes()).hexdigest()
+    )
     return bundle, folder, files
 
 
@@ -51,6 +58,6 @@ def test_missing_archive_member_fails_closed(archive):
 
 def test_validation_tolerances_and_pins_are_explicit():
     assert len(exporter.SOURCE_COMMIT) == 40
-    assert exporter.FRONTEND_MAX_ERROR <= .005
-    assert exporter.EMBEDDING_MAX_ERROR <= .0005
-    assert exporter.EMBEDDING_MIN_COSINE >= .99999
+    assert exporter.FRONTEND_MAX_ERROR <= 0.005
+    assert exporter.EMBEDDING_MAX_ERROR <= 0.0005
+    assert exporter.EMBEDDING_MIN_COSINE >= 0.99999

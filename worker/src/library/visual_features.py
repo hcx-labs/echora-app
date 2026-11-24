@@ -1,4 +1,5 @@
 """Versioned, measured DSP timelines; no browser FFT or learned feature claims."""
+
 from __future__ import annotations
 
 import librosa
@@ -39,21 +40,29 @@ def _structure(mfcc: np.ndarray, chroma: np.ndarray, active: np.ndarray, duratio
     # Exclude MFCC0 (level); standardize timbral dimensions across the track.
     std = pooled_mfcc.std(axis=0)
     timbre = (pooled_mfcc - pooled_mfcc.mean(axis=0)) / np.maximum(std, 1.0)
-    distance = np.maximum(0, (timbre ** 2).sum(1)[:, None] + (timbre ** 2).sum(1)[None, :] - 2 * timbre @ timbre.T)
+    distance = np.maximum(
+        0, (timbre**2).sum(1)[:, None] + (timbre**2).sum(1)[None, :] - 2 * timbre @ timbre.T
+    )
     rbf = np.exp(-distance / (2 * mfcc.shape[0]))
     norms = np.linalg.norm(pooled_chroma, axis=1, keepdims=True)
     unit = pooled_chroma / np.maximum(norms, 1e-8)
     cosine = np.clip(unit @ unit.T, 0, 1)
     mask = valid[:, None] & valid[None, :]
     return {
-        "method": "pooled_mfcc_rbf_chroma_cosine_nonlearned", "max_bins": MAX_STRUCTURE_BINS,
-        "edges_seconds": _rounded(np.array([indices[0] * HOP_SECONDS for indices in partitions] + [duration]), 6),
-        "chroma_cosine": _rounded(cosine * mask), "mfcc_rbf": _rounded(rbf * mask),
+        "method": "pooled_mfcc_rbf_chroma_cosine_nonlearned",
+        "max_bins": MAX_STRUCTURE_BINS,
+        "edges_seconds": _rounded(
+            np.array([indices[0] * HOP_SECONDS for indices in partitions] + [duration]), 6
+        ),
+        "chroma_cosine": _rounded(cosine * mask),
+        "mfcc_rbf": _rounded(rbf * mask),
         "novelty": _rounded(np.r_[0, 1 - ((cosine + rbf) / 2).diagonal(1)] * valid),
     }
 
 
-def extract_visual_features(samples: np.ndarray, sample_rate: int = SAMPLE_RATE) -> dict[str, object]:
+def extract_visual_features(
+    samples: np.ndarray, sample_rate: int = SAMPLE_RATE
+) -> dict[str, object]:
     """Analyze full mono audio up to ten minutes; reject rather than silently truncate.
 
     Frame i is centered at source sample i*512, with zero padding at boundaries.
@@ -73,23 +82,33 @@ def extract_visual_features(samples: np.ndarray, sample_rate: int = SAMPLE_RATE)
     duration = len(samples) / sample_rate
     frame_count = (len(samples) - 1) // HOP_LENGTH + 1
     stft_samples = np.pad(samples, (0, max(0, FRAME_LENGTH - len(samples))))
-    magnitude = np.abs(librosa.stft(stft_samples, n_fft=FRAME_LENGTH, hop_length=HOP_LENGTH,
-                                   center=True, pad_mode="constant"))[:, :frame_count]
-    power = magnitude ** 2
+    magnitude = np.abs(
+        librosa.stft(
+            stft_samples,
+            n_fft=FRAME_LENGTH,
+            hop_length=HOP_LENGTH,
+            center=True,
+            pad_mode="constant",
+        )
+    )[:, :frame_count]
+    power = magnitude**2
     rms = librosa.feature.rms(S=magnitude, frame_length=FRAME_LENGTH)[0]
     active = rms > 1e-7
-    mel = librosa.feature.melspectrogram(S=power, sr=sample_rate, n_mels=BAND_COUNT, fmin=30, fmax=10_000)
+    mel = librosa.feature.melspectrogram(
+        S=power, sr=sample_rate, n_mels=BAND_COUNT, fmin=30, fmax=10_000
+    )
     log_mel = librosa.power_to_db(mel, ref=1.0, amin=1e-10, top_db=80)
     # Track-global reference, 80 dB display range. Silent frames remain exactly zero.
     band_reference_db = max(float(log_mel.max()), -80)
     bands = np.clip((log_mel - band_reference_db + 80) / 80, 0, 1).T
     bands[~active] = 0
     flux = _unit(np.r_[0, np.maximum(0, np.diff(np.log1p(magnitude), axis=1)).mean(axis=0)])
-    onset_raw = librosa.onset.onset_strength(S=log_mel, sr=sample_rate, hop_length=HOP_LENGTH,
-                                            n_fft=FRAME_LENGTH, center=True)
+    onset_raw = librosa.onset.onset_strength(
+        S=log_mel, sr=sample_rate, hop_length=HOP_LENGTH, n_fft=FRAME_LENGTH, center=True
+    )
     # Ignore sub-dB leakage fluctuations before relative normalization; otherwise
     # a sustained pure tone can acquire a spurious beat from numerical noise.
-    onset_raw = np.maximum(onset_raw - .3, 0)
+    onset_raw = np.maximum(onset_raw - 0.3, 0)
     onset_raw[~active] = 0
     flux[~active] = 0
     level = _unit(rms)
@@ -99,11 +118,13 @@ def extract_visual_features(samples: np.ndarray, sample_rate: int = SAMPLE_RATE)
     beat_frames = np.array([], dtype=int)
     bpm = None
     if active.any() and frame_count >= 4 and onset_raw.max() > 1e-8:
-        onset_frames = librosa.onset.onset_detect(onset_envelope=onset_raw, sr=sample_rate,
-                                                hop_length=HOP_LENGTH, backtrack=False)
+        onset_frames = librosa.onset.onset_detect(
+            onset_envelope=onset_raw, sr=sample_rate, hop_length=HOP_LENGTH, backtrack=False
+        )
         if duration >= 3 and len(onset_frames) >= 3:
-            tempo, beat_frames = librosa.beat.beat_track(onset_envelope=onset_raw, sr=sample_rate,
-                                                        hop_length=HOP_LENGTH, trim=True)
+            tempo, beat_frames = librosa.beat.beat_track(
+                onset_envelope=onset_raw, sr=sample_rate, hop_length=HOP_LENGTH, trim=True
+            )
             candidate = float(np.asarray(tempo).reshape(-1)[0])
             if np.isfinite(candidate) and candidate > 0 and len(beat_frames) >= 2:
                 bpm = candidate
@@ -111,25 +132,39 @@ def extract_visual_features(samples: np.ndarray, sample_rate: int = SAMPLE_RATE)
     pitch = np.zeros((frame_count, 84), dtype=np.float32)
     if active.any():
         padded = np.pad(samples, (0, max(0, 16_384 - len(samples))))
-        cqt = np.abs(librosa.cqt(padded, sr=sample_rate, hop_length=HOP_LENGTH,
-                                fmin=librosa.midi_to_hz(24), n_bins=84, tuning=0,
-                                pad_mode="constant"))[:, :frame_count].T
+        cqt = np.abs(
+            librosa.cqt(
+                padded,
+                sr=sample_rate,
+                hop_length=HOP_LENGTH,
+                fmin=librosa.midi_to_hz(24),
+                n_bins=84,
+                tuning=0,
+                pad_mode="constant",
+            )
+        )[:, :frame_count].T
         pitch = _unit(cqt)
         pitch[~active] = 0
     chroma = pitch.reshape(frame_count, 7, 12).sum(axis=1)
     chroma /= np.maximum(chroma.max(axis=1, keepdims=True), 1e-8)
     frequencies = librosa.fft_frequencies(sr=sample_rate, n_fft=FRAME_LENGTH)
-    energies = np.stack([np.sqrt(power[(frequencies >= lo) & (frequencies < hi)].sum(axis=0))
-                         for lo, hi in zip(REACTIVITY_EDGES_HZ[:-1], REACTIVITY_EDGES_HZ[1:])], axis=1)
+    energies = np.stack(
+        [
+            np.sqrt(power[(frequencies >= lo) & (frequencies < hi)].sum(axis=0))
+            for lo, hi in zip(REACTIVITY_EDGES_HZ[:-1], REACTIVITY_EDGES_HZ[1:])
+        ],
+        axis=1,
+    )
     reactivity = _unit(energies)  # shared scale preserves bass/mid/treble balance
     reactivity[~active] = 0
     attacks = np.maximum(0, np.diff(reactivity, axis=0, prepend=reactivity[:1]))
     centroid = librosa.feature.spectral_centroid(S=magnitude, sr=sample_rate)[0]
     bandwidth = librosa.feature.spectral_bandwidth(S=magnitude, sr=sample_rate)[0]
-    rolloff = librosa.feature.spectral_rolloff(S=magnitude, sr=sample_rate, roll_percent=.85)[0]
+    rolloff = librosa.feature.spectral_rolloff(S=magnitude, sr=sample_rate, roll_percent=0.85)[0]
     flatness = librosa.feature.spectral_flatness(S=magnitude)[0]
-    zcr = librosa.feature.zero_crossing_rate(samples, frame_length=FRAME_LENGTH,
-                                           hop_length=HOP_LENGTH, center=True)[0, :frame_count]
+    zcr = librosa.feature.zero_crossing_rate(
+        samples, frame_length=FRAME_LENGTH, hop_length=HOP_LENGTH, center=True
+    )[0, :frame_count]
     for values in (centroid, bandwidth, rolloff, flatness, zcr):
         values[~active] = 0
     # Genuine signed PCM samples, not an oscillator or an inferred envelope.
@@ -141,34 +176,70 @@ def extract_visual_features(samples: np.ndarray, sample_rate: int = SAMPLE_RATE)
     temporal = np.diff(bands, axis=0, prepend=bands[:1])
     slope = np.diff(bands, axis=1)
     curvature = np.diff(bands, n=2, axis=1)
-    kernels = np.stack([np.maximum(temporal, 0).mean(1), np.maximum(-temporal, 0).mean(1),
-                        slope.mean(1), np.abs(curvature).mean(1) / 2], axis=1)
+    kernels = np.stack(
+        [
+            np.maximum(temporal, 0).mean(1),
+            np.maximum(-temporal, 0).mean(1),
+            slope.mean(1),
+            np.abs(curvature).mean(1) / 2,
+        ],
+        axis=1,
+    )
     mfcc = librosa.feature.mfcc(S=log_mel, n_mfcc=14)[1:]
     return {
-        "revision": VISUAL_FEATURE_REVISION, "sample_rate": sample_rate,
-        "hop_length": HOP_LENGTH, "hop_seconds": HOP_SECONDS, "frame_count": frame_count,
-        "duration_seconds": duration, "source_offset_seconds": 0,
-        "frame_alignment": "centered_zero_padded", "frame_length": FRAME_LENGTH,
-        "normalization": "track_relative_not_loudness_calibrated", "silence_rms_threshold": 1e-7,
-        "band_reference_db": round(band_reference_db, 4), "band_dynamic_range_db": 80,
-        "onset_floor_db": .3,
-        "band_centers_hz": _rounded(librosa.mel_frequencies(n_mels=BAND_COUNT + 2, fmin=30, fmax=10_000)[1:-1], 2),
-        "bands": _rounded(bands), "level": _rounded(level),
-        "centroid": _rounded(centroid / (sample_rate / 2)), "flux": _rounded(flux),
-        "onset": _rounded(onset), "chroma": _rounded(chroma), "pitch": _rounded(pitch),
-        "pitch_midi_start": 24, "pitch_bins_per_octave": 12,
-        "waveform": _rounded(waveform), "waveform_offsets_samples": offsets.tolist(),
+        "revision": VISUAL_FEATURE_REVISION,
+        "sample_rate": sample_rate,
+        "hop_length": HOP_LENGTH,
+        "hop_seconds": HOP_SECONDS,
+        "frame_count": frame_count,
+        "duration_seconds": duration,
+        "source_offset_seconds": 0,
+        "frame_alignment": "centered_zero_padded",
+        "frame_length": FRAME_LENGTH,
+        "normalization": "track_relative_not_loudness_calibrated",
+        "silence_rms_threshold": 1e-7,
+        "band_reference_db": round(band_reference_db, 4),
+        "band_dynamic_range_db": 80,
+        "onset_floor_db": 0.3,
+        "band_centers_hz": _rounded(
+            librosa.mel_frequencies(n_mels=BAND_COUNT + 2, fmin=30, fmax=10_000)[1:-1], 2
+        ),
+        "bands": _rounded(bands),
+        "level": _rounded(level),
+        "centroid": _rounded(centroid / (sample_rate / 2)),
+        "flux": _rounded(flux),
+        "onset": _rounded(onset),
+        "chroma": _rounded(chroma),
+        "pitch": _rounded(pitch),
+        "pitch_midi_start": 24,
+        "pitch_bins_per_octave": 12,
+        "waveform": _rounded(waveform),
+        "waveform_offsets_samples": offsets.tolist(),
         "waveform_window_samples": FRAME_LENGTH,
-        "reactivity_edges_hz": REACTIVITY_EDGES_HZ, "reactivity": _rounded(reactivity), "attacks": _rounded(attacks),
-        "timbre": {"centroid_hz": _rounded(centroid, 2), "bandwidth_hz": _rounded(bandwidth, 2),
-                   "rolloff_hz": _rounded(rolloff, 2), "flatness": _rounded(flatness), "zcr": _rounded(zcr)},
+        "reactivity_edges_hz": REACTIVITY_EDGES_HZ,
+        "reactivity": _rounded(reactivity),
+        "attacks": _rounded(attacks),
+        "timbre": {
+            "centroid_hz": _rounded(centroid, 2),
+            "bandwidth_hz": _rounded(bandwidth, 2),
+            "rolloff_hz": _rounded(rolloff, 2),
+            "flatness": _rounded(flatness),
+            "zcr": _rounded(zcr),
+        },
         "onset_times_seconds": _rounded(onset_frames * HOP_SECONDS, 6),
         "beat_times_seconds": _rounded(beat_frames * HOP_SECONDS, 6),
-        "tempo": {"bpm": round(bpm, 3) if bpm else None,
-                  "candidates_bpm": [round(bpm * factor, 3) for factor in (.5, 1, 2)] if bpm else [],
-                  "half_double_tempo_ambiguity": True, "method": "librosa_onset_beat_track", "confidence_calibrated": False},
-        "kernels": {"kind": "fixed_nonlearned", "names": ["temporal_rise", "temporal_fall", "spectral_slope", "spectral_curvature"],
-                    "values": _rounded(kernels)},
+        "tempo": {
+            "bpm": round(bpm, 3) if bpm else None,
+            "candidates_bpm": [round(bpm * factor, 3) for factor in (0.5, 1, 2)] if bpm else [],
+            "half_double_tempo_ambiguity": True,
+            "method": "librosa_onset_beat_track",
+            "confidence_calibrated": False,
+        },
+        "kernels": {
+            "kind": "fixed_nonlearned",
+            "names": ["temporal_rise", "temporal_fall", "spectral_slope", "spectral_curvature"],
+            "values": _rounded(kernels),
+        },
         "structure": _structure(mfcc, chroma, active, duration),
     }
 
@@ -187,8 +258,11 @@ def store_visual_features(connection, track_id, audio: bytes) -> dict[str, objec
                      hop_seconds=EXCLUDED.hop_seconds, features=EXCLUDED.features, created_at=now()""",
                 (track_id, VISUAL_FEATURE_REVISION, duration, HOP_SECONDS),
             )
-        return {"revision": VISUAL_FEATURE_REVISION, "status": "unsupported",
-                "duration_seconds": duration}
+        return {
+            "revision": VISUAL_FEATURE_REVISION,
+            "status": "unsupported",
+            "duration_seconds": duration,
+        }
     features = extract_visual_features(samples)
     with connection.cursor() as cursor:
         cursor.execute(
@@ -197,6 +271,12 @@ def store_visual_features(connection, track_id, audio: bytes) -> dict[str, objec
                ON CONFLICT (track_id) DO UPDATE SET revision=EXCLUDED.revision,
                  status=EXCLUDED.status, duration_seconds=EXCLUDED.duration_seconds,
                  hop_seconds=EXCLUDED.hop_seconds, features=EXCLUDED.features, created_at=now()""",
-            (track_id, VISUAL_FEATURE_REVISION, features["duration_seconds"], HOP_SECONDS, Jsonb(features)),
+            (
+                track_id,
+                VISUAL_FEATURE_REVISION,
+                features["duration_seconds"],
+                HOP_SECONDS,
+                Jsonb(features),
+            ),
         )
     return features

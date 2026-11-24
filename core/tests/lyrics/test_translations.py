@@ -1,4 +1,5 @@
 """Opt-in isolated-schema PostgreSQL persistence/migration tests, as in test_jobs."""
+
 import os
 from pathlib import Path
 import runpy
@@ -24,10 +25,17 @@ def database(monkeypatch):
         db.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
     scoped = make_conninfo(url, options=f"-c search_path={schema}")
     monkeypatch.setattr(storage, "require_database_url", lambda: scoped)
-    migration = runpy.run_path(str(Path(__file__).resolve().parents[2] / "src/db/migrations/versions/0051_external_ai_translations.py"))
+    migration = runpy.run_path(
+        str(
+            Path(__file__).resolve().parents[2]
+            / "src/db/migrations/versions/0051_external_ai_translations.py"
+        )
+    )
     try:
         with psycopg.connect(scoped) as db:
-            db.execute("CREATE TABLE tracks(id uuid PRIMARY KEY); CREATE TABLE lyrics(track_id uuid PRIMARY KEY, text text)")
+            db.execute(
+                "CREATE TABLE tracks(id uuid PRIMARY KEY); CREATE TABLE lyrics(track_id uuid PRIMARY KEY, text text)"
+            )
             with patch("alembic.op.execute", side_effect=db.execute):
                 migration["upgrade"]()
         yield scoped, migration
@@ -54,12 +62,21 @@ def test_translation_staleness_provenance_and_rollback(database):
         db.execute("INSERT INTO tracks VALUES (%s);", (track,))
         db.execute("INSERT INTO lyrics VALUES (%s, 'original')", (track,))
     for provenance in ["ai", "provider"]:
-        storage.save_translation(track, pair, ["original"], [{"id": 0, "text": "translation"}],
-                                 model="local", prompt="prompt", provenance=provenance)
+        storage.save_translation(
+            track,
+            pair,
+            ["original"],
+            [{"id": 0, "text": "translation"}],
+            model="local",
+            prompt="prompt",
+            provenance=provenance,
+        )
     rows = storage.load_translations(track, ["original"])
     assert len(rows) == 2 and all(row["status"] == "ready" for row in rows)
     assert all(row["status"] == "stale" for row in storage.load_translations(track, ["changed"]))
-    storage.save_translation(track, pair, ["changed"], [{"id": 0, "text": "new"}], model="local", prompt="prompt")
+    storage.save_translation(
+        track, pair, ["changed"], [{"id": 0, "text": "new"}], model="local", prompt="prompt"
+    )
     rows = storage.load_translations(track, ["changed"])
     assert {r["provenance"]: r["status"] for r in rows} == {"ai": "ready", "provider": "stale"}
     with psycopg.connect(url) as db:

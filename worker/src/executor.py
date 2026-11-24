@@ -1,4 +1,5 @@
 """Separate analysis and scheduled workers: python -m worker.executor analysis."""
+
 from __future__ import annotations
 
 import argparse
@@ -22,7 +23,9 @@ logger = logging.getLogger(__name__)
 def _has_failures(value: object) -> bool:
     if isinstance(value, dict):
         return any(
-            (key == "failed" or key.endswith("_failed")) and isinstance(item, (int, float)) and item > 0
+            (key == "failed" or key.endswith("_failed"))
+            and isinstance(item, (int, float))
+            and item > 0
             or _has_failures(item)
             for key, item in value.items()
         )
@@ -30,41 +33,52 @@ def _has_failures(value: object) -> bool:
 
 
 # Translations can be filled in later on their own; one failed request shouldn't re-run a batch.
-RETRY_EXEMPT = {'translations'}
+RETRY_EXEMPT = {"translations"}
 
 
 def _failed_stages(summary: dict) -> list[str]:
-    return [key.replace('_', ' ') for key, item in summary.items()
-            if (key == 'failed' and isinstance(item, (int, float)) and item > 0) or (key != 'failed' and _has_failures(item))]
+    return [
+        key.replace("_", " ")
+        for key, item in summary.items()
+        if (key == "failed" and isinstance(item, (int, float)) and item > 0)
+        or (key != "failed" and _has_failures(item))
+    ]
 
 
 def _failure_note(stages: list[str], retrying: bool) -> str:
     # Built from summary keys only, never exception text.
-    named = [s for s in stages if s != 'failed'] or ['songs']
-    return f"Some songs failed in {', '.join(named)}." + (' Retrying.' if retrying else '')
+    named = [s for s in stages if s != "failed"] or ["songs"]
+    return f"Some songs failed in {', '.join(named)}." + (" Retrying." if retrying else "")
 
 
-def execute(job: dict, work_directory: str | None = None, supervisor_pid: int | None = None,
-            lease_seconds: int | None = None) -> None:
+def execute(
+    job: dict,
+    work_directory: str | None = None,
+    supervisor_pid: int | None = None,
+    lease_seconds: int | None = None,
+) -> None:
     """Run one claim in an isolated process so model memory dies with the claim."""
     # Pipeline subprocesses inherit this group, allowing the supervisor to stop all work.
     if hasattr(os, "setsid"):
         os.setsid()
+
     def cancelled(*_):
         raise jobs.JobCancelled()
+
     signal.signal(signal.SIGTERM, cancelled)
-    if sys.platform == 'linux' and supervisor_pid is not None:
+    if sys.platform == "linux" and supervisor_pid is not None:
         # Stop an orphaned executor when its supervisor is killed, even by SIGKILL.
         import ctypes
+
         if ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGTERM, 0, 0, 0) != 0:
-            raise RuntimeError('Could not install parent-death signal')
+            raise RuntimeError("Could not install parent-death signal")
         if os.getppid() != supervisor_pid:
             return
     if work_directory is not None:
-        os.environ['TMPDIR'] = work_directory
+        os.environ["TMPDIR"] = work_directory
         tempfile.tempdir = work_directory
-    previous_job_id = os.environ.get('ECHORA_JOB_ID')
-    os.environ['ECHORA_JOB_ID'] = str(job['id'])
+    previous_job_id = os.environ.get("ECHORA_JOB_ID")
+    os.environ["ECHORA_JOB_ID"] = str(job["id"])
     context = jobs.JobContext(job, lease_seconds=lease_seconds)
     try:
         context.check()
@@ -77,12 +91,16 @@ def execute(job: dict, work_directory: str | None = None, supervisor_pid: int | 
         if summary is not None:
             partial = _has_failures(summary)
             retry = [s for s in _failed_stages(summary) if s not in RETRY_EXEMPT]
-            if retry and job.get('attempts', 1) < job.get('max_attempts', get_settings().job_max_attempts):
+            if retry and job.get("attempts", 1) < job.get(
+                "max_attempts", get_settings().job_max_attempts
+            ):
                 # Per-song failures are swallowed by pipelines to preserve the rest
                 # of the batch. Retry that batch using its committed artifact plan.
                 note = _failure_note(retry, retrying=True)
-                context.report({'message': note, 'summary': summary})
-                jobs.fail(job['id'], job['claim_token'], 'Incomplete analysis', retryable=True, note=note)
+                context.report({"message": note, "summary": summary})
+                jobs.fail(
+                    job["id"], job["claim_token"], "Incomplete analysis", retryable=True, note=note
+                )
             else:
                 context.complete(summary, status="partial" if partial else "complete")
     except jobs.JobCancelled:
@@ -93,9 +111,9 @@ def execute(job: dict, work_directory: str | None = None, supervisor_pid: int | 
         jobs.fail(job["id"], job["claim_token"], "Execution failed", retryable=True)
     finally:
         if previous_job_id is None:
-            os.environ.pop('ECHORA_JOB_ID', None)
+            os.environ.pop("ECHORA_JOB_ID", None)
         else:
-            os.environ['ECHORA_JOB_ID'] = previous_job_id
+            os.environ["ECHORA_JOB_ID"] = previous_job_id
 
 
 def _terminate(process) -> None:
@@ -123,9 +141,10 @@ def _terminate(process) -> None:
 
 def supervise(job: dict, stop: threading.Event, lease_seconds: int) -> None:
     # The supervisor owns cleanup even when an executor cannot run its finally blocks.
-    directory = tempfile.TemporaryDirectory(prefix='echora-worker-')
+    directory = tempfile.TemporaryDirectory(prefix="echora-worker-")
     process = multiprocessing.get_context("spawn").Process(
-        target=execute, args=(job, directory.name, os.getpid(), lease_seconds))
+        target=execute, args=(job, directory.name, os.getpid(), lease_seconds)
+    )
     try:
         process.start()
     except BaseException:
@@ -156,7 +175,13 @@ def supervise(job: dict, stop: threading.Event, lease_seconds: int) -> None:
         directory.cleanup()
 
 
-def run(worker_type: str, *, once: bool = False, poll_seconds: float | None = None, lease_seconds: int | None = None) -> None:
+def run(
+    worker_type: str,
+    *,
+    once: bool = False,
+    poll_seconds: float | None = None,
+    lease_seconds: int | None = None,
+) -> None:
     settings = get_settings()
     poll_seconds = settings.worker_poll_seconds if poll_seconds is None else poll_seconds
     lease_seconds = settings.worker_lease_seconds if lease_seconds is None else lease_seconds
@@ -171,6 +196,7 @@ def run(worker_type: str, *, once: bool = False, poll_seconds: float | None = No
             if worker_type == "analysis" and time.monotonic() >= next_recording_cleanup:
                 from worker.recordings.search import cleanup
                 from worker.recordings.calibration import cleanup as cleanup_calibration
+
                 next_recording_cleanup = time.monotonic() + settings.worker_cleanup_interval_seconds
                 for maintenance in (cleanup, cleanup_calibration):
                     try:
@@ -181,6 +207,7 @@ def run(worker_type: str, *, once: bool = False, poll_seconds: float | None = No
                         logger.error("Recording retention maintenance failed; will retry")
             if worker_type == "scheduled" and time.monotonic() >= next_schedule_check:
                 from worker.curation.jobs import enqueue_due
+
                 enqueue_due()
                 next_schedule_check = time.monotonic() + settings.worker_schedule_check_seconds
             job = jobs.claim(worker_type, worker_id, lease_seconds)
@@ -207,7 +234,12 @@ def main() -> None:
     if args.poll_seconds <= 0 or args.lease_seconds < 15:
         parser.error("poll seconds must be positive and lease seconds must be at least 15")
     logging.basicConfig(level=logging.INFO)
-    run(args.worker_type, once=args.once, poll_seconds=args.poll_seconds, lease_seconds=args.lease_seconds)
+    run(
+        args.worker_type,
+        once=args.once,
+        poll_seconds=args.poll_seconds,
+        lease_seconds=args.lease_seconds,
+    )
 
 
 if __name__ == "__main__":

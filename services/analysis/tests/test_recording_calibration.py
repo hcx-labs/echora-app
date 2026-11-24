@@ -53,8 +53,9 @@ def owner(db_factory):
 
 
 def capture(user_id, **kw):
-    return calibration.save(user_id, _wav(2), not_in_library=True,
-                            consent=calibration.CONSENT_VERSION, **kw)
+    return calibration.save(
+        user_id, _wav(2), not_in_library=True, consent=calibration.CONSENT_VERSION, **kw
+    )
 
 
 def client(user_id):
@@ -84,19 +85,48 @@ def test_api_requires_consent_label_and_size_before_saving(monkeypatch):
     headers = {"X-Echora-Calibration-Consent": calibration.CONSENT_VERSION}
     assert api.post(url + "?not_in_library=true", content=b"audio").status_code == 422
     assert api.post(url, content=b"audio", headers=headers).status_code == 422
-    assert api.post(url + f"?not_in_library=true&expected_track_id={uuid4()}", content=b"audio", headers=headers).status_code == 422
-    assert api.post(url + "?not_in_library=true", content=b"x" * (get_settings().recording_max_upload_bytes + 1), headers=headers).status_code == 413
+    assert (
+        api.post(
+            url + f"?not_in_library=true&expected_track_id={uuid4()}",
+            content=b"audio",
+            headers=headers,
+        ).status_code
+        == 422
+    )
+    assert (
+        api.post(
+            url + "?not_in_library=true",
+            content=b"x" * (get_settings().recording_max_upload_bytes + 1),
+            headers=headers,
+        ).status_code
+        == 413
+    )
     save.assert_not_called()
-    assert api.post(url + "?not_in_library=true", content=b"audio", headers=headers).status_code == 201
+    assert (
+        api.post(url + "?not_in_library=true", content=b"audio", headers=headers).status_code == 201
+    )
     assert save.call_args.kwargs["consent"] == calibration.CONSENT_VERSION
     encoded_headers = {**headers, "X-Echora-Calibration-Notes": "%E9%9F%B3%E6%A5%BD%20speaker"}
-    assert api.post(url + "?not_in_library=true", content=b"audio", headers=encoded_headers).status_code == 201
+    assert (
+        api.post(
+            url + "?not_in_library=true", content=b"audio", headers=encoded_headers
+        ).status_code
+        == 201
+    )
     assert save.call_args.kwargs["notes"] == "音楽 speaker"
-    assert api.post(url + "?not_in_library=true", content=b"audio",
-                    headers={**headers, "X-Echora-Calibration-Notes": "x" * 301}).status_code == 422
+    assert (
+        api.post(
+            url + "?not_in_library=true",
+            content=b"audio",
+            headers={**headers, "X-Echora-Calibration-Notes": "x" * 301},
+        ).status_code
+        == 422
+    )
     monkeypatch.setenv("ECHORA_RECORDING_CALIBRATION_ENABLED", "false")
     get_settings.cache_clear()
-    assert api.post(url + "?not_in_library=true", content=b"audio", headers=headers).status_code == 503
+    assert (
+        api.post(url + "?not_in_library=true", content=b"audio", headers=headers).status_code == 503
+    )
 
 
 def test_private_file_and_owner_only_list_delete(calibration_db):
@@ -123,11 +153,19 @@ def test_known_track_label_requires_current_visibility(calibration_db):
     user, other = owner(calibration_db), owner(calibration_db)
     track = uuid4()
     with calibration_db() as db:
-        db.execute("INSERT INTO tracks(id,title,artist) VALUES (%s,'Actual song','Artist')", (track,))
-        db.execute("INSERT INTO user_track_links VALUES (%s,%s,'source',%s)", (user, track, uuid4()))
+        db.execute(
+            "INSERT INTO tracks(id,title,artist) VALUES (%s,'Actual song','Artist')", (track,)
+        )
+        db.execute(
+            "INSERT INTO user_track_links VALUES (%s,%s,'source',%s)", (user, track, uuid4())
+        )
     with pytest.raises(calibration.TrackUnavailable):
-        calibration.save(other, _wav(2), expected_track_id=track, consent=calibration.CONSENT_VERSION)
-    sample = calibration.save(user, _wav(2), expected_track_id=track, consent=calibration.CONSENT_VERSION)
+        calibration.save(
+            other, _wav(2), expected_track_id=track, consent=calibration.CONSENT_VERSION
+        )
+    sample = calibration.save(
+        user, _wav(2), expected_track_id=track, consent=calibration.CONSENT_VERSION
+    )
     assert sample["expected_track_id"] == str(track)
     assert calibration.list_samples(user)["samples"][0]["expected_title"] == "Actual song"
     with calibration_db() as db:
@@ -147,7 +185,10 @@ def test_expiry_and_orphan_cleanup_without_touching_other_files(calibration_db):
     unrelated = root / "notes.txt"
     unrelated.write_text("keep")
     with calibration_db() as db:
-        db.execute("UPDATE recording_calibration_samples SET expires_at=now()-interval '1 second' WHERE id=%s", (expired["id"],))
+        db.execute(
+            "UPDATE recording_calibration_samples SET expires_at=now()-interval '1 second' WHERE id=%s",
+            (expired["id"],),
+        )
     calibration.cleanup()
     assert not (root / f"{expired['id']}.audio").exists()
     assert not old_orphan.exists()

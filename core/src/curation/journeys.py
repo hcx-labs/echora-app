@@ -14,16 +14,21 @@ def spherical_targets(start: np.ndarray, end: np.ndarray, length: int) -> np.nda
     angle = float(np.arccos(cosine))
     amounts = np.linspace(0, 1, length)
     if angle < 1e-6 or abs(np.sin(angle)) < 1e-6:
-        return normalize_rows(np.stack([(1 - amount) * first + amount * last for amount in amounts]))
+        return normalize_rows(
+            np.stack([(1 - amount) * first + amount * last for amount in amounts])
+        )
     sine = np.sin(angle)
-    return np.stack([
-        np.sin((1 - amount) * angle) / sine * first + np.sin(amount * angle) / sine * last
-        for amount in amounts
-    ]).astype(np.float32)
+    return np.stack(
+        [
+            np.sin((1 - amount) * angle) / sine * first + np.sin(amount * angle) / sine * last
+            for amount in amounts
+        ]
+    ).astype(np.float32)
 
 
-def multi_stop_targets(embeddings: np.ndarray, waypoint_indices: list[int],
-                       length: int) -> np.ndarray:
+def multi_stop_targets(
+    embeddings: np.ndarray, waypoint_indices: list[int], length: int
+) -> np.ndarray:
     """Spherical interpolation through ordered waypoints.
 
     Each leg's share of the playlist tracks is proportional to its angular
@@ -31,8 +36,10 @@ def multi_stop_targets(embeddings: np.ndarray, waypoint_indices: list[int],
     """
     matrix = normalize_rows(embeddings)
     points = matrix[waypoint_indices]
-    angles = [float(np.arccos(float(np.clip(points[i] @ points[i + 1], -1, 1))))
-              for i in range(len(points) - 1)]
+    angles = [
+        float(np.arccos(float(np.clip(points[i] @ points[i + 1], -1, 1))))
+        for i in range(len(points) - 1)
+    ]
     total = sum(angles)
     if total < 1e-9:
         counts = [0] * len(angles)
@@ -66,8 +73,10 @@ def select_multistop_journey(
     """
     matrix = normalize_rows(embeddings)
     points = matrix[waypoint_indices]
-    angles = [float(np.arccos(float(np.clip(points[i] @ points[i + 1], -1, 1))))
-              for i in range(len(points) - 1)]
+    angles = [
+        float(np.arccos(float(np.clip(points[i] @ points[i + 1], -1, 1))))
+        for i in range(len(points) - 1)
+    ]
     total = sum(angles)
     intermediates = max(length - len(waypoint_indices), 0)
     if total < 1e-9:
@@ -86,8 +95,16 @@ def select_multistop_journey(
     for leg, (start_index, end_index) in enumerate(zip(waypoint_indices, waypoint_indices[1:])):
         targets = spherical_targets(matrix[start_index], matrix[end_index], shares[leg] + 2)
         leg_steps = _select_leg(
-            matrix, targets, start_index, end_index, artists, recording_groups,
-            used, artist_counts, used_groups, is_first=leg == 0,
+            matrix,
+            targets,
+            start_index,
+            end_index,
+            artists,
+            recording_groups,
+            used,
+            artist_counts,
+            used_groups,
+            is_first=leg == 0,
         )
         all_steps.extend(leg_steps if leg == 0 else leg_steps[1:])
     return all_steps
@@ -110,7 +127,9 @@ def _select_leg(
     used.add(start_index)
     used.add(end_index)
     if artists[start_index]:
-        artist_counts[artists[start_index].casefold()] = artist_counts.get(artists[start_index].casefold(), 0) + 1
+        artist_counts[artists[start_index].casefold()] = (
+            artist_counts.get(artists[start_index].casefold(), 0) + 1
+        )
     for group in (recording_groups[start_index], recording_groups[end_index]):
         if group:
             used_groups.add(group)
@@ -120,8 +139,12 @@ def _select_leg(
         target_scores = matrix @ target
         previous_scores = matrix @ matrix[previous]
         progress = position / (len(targets) - 1)
-        endpoint_axis = matrix @ normalize_rows((matrix[end_index] - matrix[start_index])[None, :])[0]
-        candidates = np.argsort(target_scores + 0.12 * previous_scores + 0.04 * progress * endpoint_axis)[::-1]
+        endpoint_axis = (
+            matrix @ normalize_rows((matrix[end_index] - matrix[start_index])[None, :])[0]
+        )
+        candidates = np.argsort(
+            target_scores + 0.12 * previous_scores + 0.04 * progress * endpoint_axis
+        )[::-1]
         choice = None
         for candidate_value in candidates:
             candidate = int(candidate_value)
@@ -143,7 +166,9 @@ def _select_leg(
             artist_counts[artist] = artist_counts.get(artist, 0) + 1
         if recording_groups[choice]:
             used_groups.add(recording_groups[choice])
-        steps.append((choice, float(target_scores[choice]), float(matrix[previous] @ matrix[choice])))
+        steps.append(
+            (choice, float(target_scores[choice]), float(matrix[previous] @ matrix[choice]))
+        )
         previous = choice
     steps.append((end_index, 1.0, float(matrix[previous] @ matrix[end_index])))
     if artists[end_index]:
@@ -176,8 +201,12 @@ def select_journey(
         target_scores = matrix @ target
         previous_scores = matrix @ matrix[previous]
         progress = position / (len(targets) - 1)
-        endpoint_axis = matrix @ normalize_rows((matrix[end_index] - matrix[start_index])[None, :])[0]
-        candidates = np.argsort(target_scores + 0.12 * previous_scores + 0.04 * progress * endpoint_axis)[::-1]
+        endpoint_axis = (
+            matrix @ normalize_rows((matrix[end_index] - matrix[start_index])[None, :])[0]
+        )
+        candidates = np.argsort(
+            target_scores + 0.12 * previous_scores + 0.04 * progress * endpoint_axis
+        )[::-1]
         choice = None
         for candidate_value in candidates:
             candidate = int(candidate_value)
@@ -193,13 +222,16 @@ def select_journey(
             break
         if choice is None:
             continue
-        used.add(choice); selected.append(choice)
+        used.add(choice)
+        selected.append(choice)
         artist = artists[choice].casefold() if artists[choice] else None
         if artist:
             artist_counts[artist] = artist_counts.get(artist, 0) + 1
         if recording_groups[choice]:
             used_groups.add(recording_groups[choice])
-        steps.append((choice, float(target_scores[choice]), float(matrix[previous] @ matrix[choice])))
+        steps.append(
+            (choice, float(target_scores[choice]), float(matrix[previous] @ matrix[choice]))
+        )
         previous = choice
     steps.append((end_index, 1.0, float(matrix[previous] @ matrix[end_index])))
     return steps

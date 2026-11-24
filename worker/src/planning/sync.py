@@ -103,7 +103,12 @@ def select_sync_tracks(
             selected.update(row[0] for row in cursor.fetchall())
 
     # Share the exact karaoke compatibility contract with the executing pipeline.
-    from worker.kara.pipeline import KARAOKE_PIPELINE_REVISION, DEFAULT_MODEL_REVISION, _stored_model_revision, current_model_revision
+    from worker.kara.pipeline import (
+        KARAOKE_PIPELINE_REVISION,
+        DEFAULT_MODEL_REVISION,
+        _stored_model_revision,
+        current_model_revision,
+    )
 
     karaoke = plan_karaoke(
         connection,

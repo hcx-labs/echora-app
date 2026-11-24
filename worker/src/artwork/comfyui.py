@@ -35,7 +35,14 @@ def model_paths_config() -> str:
     """
     import os
 
-    from worker.artwork.render import CAMERA_LORA_REPOSITORY, CAMERA_LORA_REVISION, GEMMA_REPOSITORY, GEMMA_REVISION, LTX_REPOSITORY, LTX_REVISION
+    from worker.artwork.render import (
+        CAMERA_LORA_REPOSITORY,
+        CAMERA_LORA_REVISION,
+        GEMMA_REPOSITORY,
+        GEMMA_REVISION,
+        LTX_REPOSITORY,
+        LTX_REVISION,
+    )
 
     hub = Path(os.environ.get("HF_HOME", "/models/huggingface")) / "hub"
 

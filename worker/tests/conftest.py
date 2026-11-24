@@ -62,7 +62,9 @@ def library_helpers(monkeypatch):
                 if not hasattr(fakes, name):
                     continue
                 for module in list(sys.modules.values()):
-                    if getattr(module, "__name__", "").startswith("worker.") and hasattr(module, new):
+                    if getattr(module, "__name__", "").startswith("worker.") and hasattr(
+                        module, new
+                    ):
                         monkeypatch.setattr(module, new, getattr(fakes, name))
 
     return install

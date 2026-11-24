@@ -64,21 +64,30 @@ class LyricsEmbeddingModel:
         started = time.perf_counter()
         with torch.inference_mode():
             encoded = self.model.encode(
-                chunks, batch_size=get_settings().lyrics_window_batch_size, normalize_embeddings=True,
-                convert_to_numpy=True, show_progress_bar=False,
+                chunks,
+                batch_size=get_settings().lyrics_window_batch_size,
+                normalize_embeddings=True,
+                convert_to_numpy=True,
+                show_progress_bar=False,
             )
         vectors = [_normalize(row) for row in encoded]
         aggregate = _normalize(np.mean(vectors, axis=0))
         peak = torch.cuda.max_memory_allocated(self.device) if self.device.type == "cuda" else None
         return LyricsEmbeddingResult(
-            aggregate=aggregate, windows=vectors, token_ranges=ranges,
-            inference_ms=round((time.perf_counter() - started) * 1000), peak_vram_bytes=peak,
+            aggregate=aggregate,
+            windows=vectors,
+            token_ranges=ranges,
+            inference_ms=round((time.perf_counter() - started) * 1000),
+            peak_vram_bytes=peak,
         )
 
     def embed_queries(self, texts: list[str]) -> np.ndarray:
         matrix = self.model.encode(
-            [text.strip() for text in texts], batch_size=get_settings().lyrics_track_batch_size, normalize_embeddings=True,
-            convert_to_numpy=True, show_progress_bar=False,
+            [text.strip() for text in texts],
+            batch_size=get_settings().lyrics_track_batch_size,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+            show_progress_bar=False,
         )
         return np.asarray(matrix, dtype=np.float32)
 

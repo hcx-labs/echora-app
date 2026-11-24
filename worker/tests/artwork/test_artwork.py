@@ -24,7 +24,22 @@ import worker.artwork.pipeline as motion_artwork_jobs
 from worker.artwork.comfyui import ComfyUIUnavailable, launch
 from worker.artwork.settings import MotionArtworkSettings, artwork_path
 from worker.artwork.prompts import CAMERA_RETRY, I2V_SYSTEM_PROMPT
-from worker.artwork.render import CAMERA_LORA, CAMERA_LORA_STRENGTH, DEFAULT_INSTRUCTIONS, NEGATIVE, REFINE_SIGMAS, UPSCALER, Recipe, build_encode_graph, build_graph, build_prompt_graph, clean_prompt, encoding_file, finish, zooms
+from worker.artwork.render import (
+    CAMERA_LORA,
+    CAMERA_LORA_STRENGTH,
+    DEFAULT_INSTRUCTIONS,
+    NEGATIVE,
+    REFINE_SIGMAS,
+    UPSCALER,
+    Recipe,
+    build_encode_graph,
+    build_graph,
+    build_prompt_graph,
+    clean_prompt,
+    encoding_file,
+    finish,
+    zooms,
+)
 
 VERSIONS = Path(__file__).resolve().parents[3] / "core/src/db/migrations/versions"
 
@@ -888,9 +903,7 @@ def test_external_prompts_skip_the_prompt_comfyui_and_every_loop_is_pinned(
     database, batch, monkeypatch
 ):
     _enable(database, prompt_mode="external")
-    monkeypatch.setattr(
-        "core.lyrics.translations.load_settings", lambda: (_external_ai(), None)
-    )
+    monkeypatch.setattr("core.lyrics.translations.load_settings", lambda: (_external_ai(), None))
     people = {b"same image": 4, b"other image": 1}
     monkeypatch.setattr(
         "worker.artwork.writer.write_prompt",
@@ -976,9 +989,7 @@ def test_external_prompts_are_written_before_the_batch_and_used_by_render(
     database, batch, monkeypatch
 ):
     _enable(database, prompt_mode="external")
-    monkeypatch.setattr(
-        "core.lyrics.translations.load_settings", lambda: (_external_ai(), None)
-    )
+    monkeypatch.setattr("core.lyrics.translations.load_settings", lambda: (_external_ai(), None))
     written = []
 
     def write_prompt(settings, key, data, content_type, instructions, **song):
@@ -1008,9 +1019,7 @@ def test_external_prompts_are_written_before_the_batch_and_used_by_render(
 
 def test_a_prompt_prepared_for_other_settings_is_written_again(database, batch, monkeypatch):
     _enable(database, prompt_mode="external")
-    monkeypatch.setattr(
-        "core.lyrics.translations.load_settings", lambda: (_external_ai(), None)
-    )
+    monkeypatch.setattr("core.lyrics.translations.load_settings", lambda: (_external_ai(), None))
     written = []
 
     def write_prompt(settings, key, data, content_type, instructions, **song):

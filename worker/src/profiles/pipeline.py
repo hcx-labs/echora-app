@@ -109,7 +109,9 @@ def _centroid(matrix: np.ndarray) -> np.ndarray:
 
 
 def infer_window_ranges(
-    count: int, duration_seconds: float, window_seconds: float = 10.0,
+    count: int,
+    duration_seconds: float,
+    window_seconds: float = 10.0,
     stride_seconds: float = 5.0,
 ) -> list[tuple[float, float]]:
     """Reconstruct legacy ranges using the same full-coverage rule as ingestion."""
@@ -149,16 +151,23 @@ def _segment_cost(prefix: np.ndarray, start: int, end: int) -> float:
 
 
 def _temporal_segments(
-    windows: Sequence[WindowVector], duration_seconds: float,
+    windows: Sequence[WindowVector],
+    duration_seconds: float,
     parameters: AudioProfileParameters,
 ) -> tuple[TemporalSegment, ...]:
     matrix = np.stack([window.vector for window in windows])
     count = len(windows)
     if count == 1:
-        return (TemporalSegment(
-            0, windows[0].start_seconds, windows[0].end_seconds, matrix[0], 1.0,
-            windows[0].index,
-        ),)
+        return (
+            TemporalSegment(
+                0,
+                windows[0].start_seconds,
+                windows[0].end_seconds,
+                matrix[0],
+                1.0,
+                windows[0].index,
+            ),
+        )
 
     boundaries = _interval_boundaries(windows, duration_seconds)
     maximum = min(
@@ -166,7 +175,9 @@ def _temporal_segments(
         max(1, int(duration_seconds // parameters.minimum_segment_seconds)),
         count,
     )
-    prefix = np.vstack([np.zeros((1, matrix.shape[1]), dtype=np.float32), np.cumsum(matrix, axis=0)])
+    prefix = np.vstack(
+        [np.zeros((1, matrix.shape[1]), dtype=np.float32), np.cumsum(matrix, axis=0)]
+    )
     costs = np.full((maximum + 1, count + 1), np.inf, dtype=np.float64)
     previous = np.full((maximum + 1, count + 1), -1, dtype=int)
     costs[0, 0] = 0.0
@@ -177,7 +188,9 @@ def _temporal_segments(
                     continue
                 duration = boundaries[end] - boundaries[start]
                 if duration + 1e-6 < parameters.minimum_segment_seconds and not (
-                    start == 0 and end == count and duration_seconds < parameters.minimum_segment_seconds
+                    start == 0
+                    and end == count
+                    and duration_seconds < parameters.minimum_segment_seconds
                 ):
                     continue
                 value = costs[segment_count - 1, start] + _segment_cost(prefix, start, end)
@@ -203,14 +216,22 @@ def _temporal_segments(
         centroid = _centroid(matrix[start:end])
         similarities = matrix[start:end] @ centroid
         representative = start + int(np.argmax(similarities))
-        result.append(TemporalSegment(
-            segment_index, float(boundaries[start]), float(boundaries[end]), centroid,
-            float(np.mean(similarities)), windows[representative].index,
-        ))
+        result.append(
+            TemporalSegment(
+                segment_index,
+                float(boundaries[start]),
+                float(boundaries[end]),
+                centroid,
+                float(np.mean(similarities)),
+                windows[representative].index,
+            )
+        )
     return tuple(result)
 
 
-def _spherical_kmeans(matrix: np.ndarray, clusters: int, seed: int) -> tuple[np.ndarray, np.ndarray, float]:
+def _spherical_kmeans(
+    matrix: np.ndarray, clusters: int, seed: int
+) -> tuple[np.ndarray, np.ndarray, float]:
     rng = np.random.default_rng(seed)
     centers = [matrix[int(rng.integers(len(matrix)))]]
     while len(centers) < clusters:
@@ -238,7 +259,8 @@ def _spherical_kmeans(matrix: np.ndarray, clusters: int, seed: int) -> tuple[np.
 
 
 def _mode_solution(
-    windows: Sequence[WindowVector], duration_seconds: float,
+    windows: Sequence[WindowVector],
+    duration_seconds: float,
     parameters: AudioProfileParameters,
 ) -> tuple[np.ndarray, np.ndarray]:
     selected_indices = _decorrelated_indices(windows)
@@ -253,15 +275,16 @@ def _mode_solution(
         labels, centers, dispersion = min(runs, key=lambda item: item[2])
         comparisons = [
             adjusted_rand_score(runs[left][0], runs[right][0])
-            for left in range(len(runs)) for right in range(left + 1, len(runs))
+            for left in range(len(runs))
+            for right in range(left + 1, len(runs))
         ]
         stability = float(np.mean(comparisons)) if comparisons else 1.0
-        selected_durations = np.asarray([
-            windows[index].duration_seconds for index in selected_indices
-        ])
-        supports = np.asarray([
-            selected_durations[labels == cluster].sum() for cluster in range(clusters)
-        ])
+        selected_durations = np.asarray(
+            [windows[index].duration_seconds for index in selected_indices]
+        )
+        supports = np.asarray(
+            [selected_durations[labels == cluster].sum() for cluster in range(clusters)]
+        )
         minimum_support = max(
             parameters.minimum_mode_seconds,
             duration_seconds * parameters.minimum_mode_share,
@@ -271,7 +294,9 @@ def _mode_solution(
             valid = False
         if clusters > 1:
             similarities = centers @ centers.T
-            if np.any(similarities[np.triu_indices(clusters, 1)] >= parameters.mode_merge_similarity):
+            if np.any(
+                similarities[np.triu_indices(clusters, 1)] >= parameters.mode_merge_similarity
+            ):
                 valid = False
         if valid or clusters == 1:
             score = dispersion + parameters.mode_penalty * (clusters - 1)
@@ -283,7 +308,8 @@ def _mode_solution(
 
 
 def _musical_modes(
-    windows: Sequence[WindowVector], duration_seconds: float,
+    windows: Sequence[WindowVector],
+    duration_seconds: float,
     parameters: AudioProfileParameters,
 ) -> tuple[MusicalMode, ...]:
     labels, centers = _mode_solution(windows, duration_seconds, parameters)
@@ -301,25 +327,40 @@ def _musical_modes(
             if belongs and run_start is None:
                 run_start = index
             if not belongs and run_start is not None:
-                intervals.append(ModeInterval(float(boundaries[run_start]), float(boundaries[index])))
+                intervals.append(
+                    ModeInterval(float(boundaries[run_start]), float(boundaries[index]))
+                )
                 run_start = None
         support = sum(interval.end_seconds - interval.start_seconds for interval in intervals)
-        modes.append(MusicalMode(
-            mode_index, center, support / max(duration_seconds, 1e-8),
-            float(np.mean(similarities)), windows[representative].index, tuple(intervals),
-        ))
+        modes.append(
+            MusicalMode(
+                mode_index,
+                center,
+                support / max(duration_seconds, 1e-8),
+                float(np.mean(similarities)),
+                windows[representative].index,
+                tuple(intervals),
+            )
+        )
     modes.sort(key=lambda mode: (-mode.duration_weight, mode.index))
     remapped = []
     for index, mode in enumerate(modes):
-        remapped.append(MusicalMode(
-            index, mode.vector, mode.duration_weight, mode.cohesion,
-            mode.representative_window_index, mode.intervals,
-        ))
+        remapped.append(
+            MusicalMode(
+                index,
+                mode.vector,
+                mode.duration_weight,
+                mode.cohesion,
+                mode.representative_window_index,
+                mode.intervals,
+            )
+        )
     return tuple(remapped)
 
 
 def derive_audio_profile(
-    windows: Sequence[WindowVector], duration_seconds: float,
+    windows: Sequence[WindowVector],
+    duration_seconds: float,
     timestamps_exact: bool = True,
     parameters: AudioProfileParameters = DEFAULT_PARAMETERS,
 ) -> TrackAudioProfile:
@@ -361,7 +402,8 @@ def _vector_literal(vector: np.ndarray) -> str:
 
 
 def _profile_config(
-    model_name: str, parameters: AudioProfileParameters,
+    model_name: str,
+    parameters: AudioProfileParameters,
 ) -> dict[str, object]:
     return {
         "algorithm": "echora_audio_profile",
@@ -389,7 +431,8 @@ def _profile_config(
 
 
 def _create_profile_run(
-    connection: psycopg.Connection, model_name: str,
+    connection: psycopg.Connection,
+    model_name: str,
     parameters: AudioProfileParameters,
 ) -> uuid.UUID:
     if model_name not in SUPPORTED_PROFILE_MODELS:
@@ -409,16 +452,23 @@ def _create_profile_run(
                DO UPDATE SET id=analysis_runs.id
                RETURNING id""",
             (
-                model_name, AUDIO_PROFILE_REVISION, config_hash,
-                Jsonb(config), Jsonb(environment),
+                model_name,
+                AUDIO_PROFILE_REVISION,
+                config_hash,
+                Jsonb(config),
+                Jsonb(environment),
             ),
         )
         return cursor.fetchone()["id"]
 
 
 def _store_profile(
-    connection: psycopg.Connection, track_id: uuid.UUID, source_run_id: uuid.UUID,
-    profile_run_id: uuid.UUID, model_name: str, profile: TrackAudioProfile,
+    connection: psycopg.Connection,
+    track_id: uuid.UUID,
+    source_run_id: uuid.UUID,
+    profile_run_id: uuid.UUID,
+    model_name: str,
+    profile: TrackAudioProfile,
 ) -> None:
     dimension = len(profile.global_overlap)
     with connection.cursor() as cursor:
@@ -444,11 +494,20 @@ def _store_profile(
                  created_at=now()
                RETURNING id""",
             (
-                track_id, profile_run_id, source_run_id, model_name, dimension,
-                _vector_literal(profile.global_overlap), _vector_literal(profile.global_decorrelated),
-                profile.resultant_length, profile.mean_global_similarity,
-                profile.p05_global_similarity, profile.adjacent_change_mean,
-                profile.adjacent_change_p95, profile.timestamps_exact, len(profile.modes),
+                track_id,
+                profile_run_id,
+                source_run_id,
+                model_name,
+                dimension,
+                _vector_literal(profile.global_overlap),
+                _vector_literal(profile.global_decorrelated),
+                profile.resultant_length,
+                profile.mean_global_similarity,
+                profile.p05_global_similarity,
+                profile.adjacent_change_mean,
+                profile.adjacent_change_p95,
+                profile.timestamps_exact,
+                len(profile.modes),
             ),
         )
         profile_id = cursor.fetchone()["id"]
@@ -467,8 +526,13 @@ def _store_profile(
                VALUES (%s,%s,%s,%s,%s,%s::vector,%s,%s)""",
             [
                 (
-                    profile_id, item.index, item.start_seconds, item.end_seconds,
-                    len(item.vector), _vector_literal(item.vector), item.cohesion,
+                    profile_id,
+                    item.index,
+                    item.start_seconds,
+                    item.end_seconds,
+                    len(item.vector),
+                    _vector_literal(item.vector),
+                    item.cohesion,
                     item.representative_window_index,
                 )
                 for item in profile.segments
@@ -481,8 +545,12 @@ def _store_profile(
                       duration_weight, cohesion, representative_window_index)
                    VALUES (%s,%s,%s,%s::vector,%s,%s,%s) RETURNING id""",
                 (
-                    profile_id, item.index, len(item.vector),
-                    _vector_literal(item.vector), item.duration_weight, item.cohesion,
+                    profile_id,
+                    item.index,
+                    len(item.vector),
+                    _vector_literal(item.vector),
+                    item.duration_weight,
+                    item.cohesion,
                     item.representative_window_index,
                 ),
             )
@@ -507,8 +575,11 @@ def build_audio_profiles(
 
     report = progress or (lambda _: None)
     summary: dict[str, object] = {
-        "model": model_name, "total": 0, "profiled": 0,
-        "failed": 0, "profile_run_id": None,
+        "model": model_name,
+        "total": 0,
+        "profiled": 0,
+        "failed": 0,
+        "profile_run_id": None,
     }
     with psycopg.connect(require_database_url(), row_factory=dict_row) as connection:
         configure_representations(connection)
@@ -558,26 +629,31 @@ def build_audio_profiles(
                     raise ValueError(f"{model_name} run has no stored window embeddings")
                 duration = float(track["duration_seconds"])
                 exact = all(
-                    row["window_start_seconds"] is not None and row["window_end_seconds"] is not None
+                    row["window_start_seconds"] is not None
+                    and row["window_end_seconds"] is not None
                     for row in rows
                 )
                 window_seconds = float(track["window_seconds"] or 10)
                 stride_seconds = float(track["stride_seconds"] or 5)
                 if exact:
                     duration = max(
-                        duration, max(float(row["window_end_seconds"]) for row in rows),
+                        duration,
+                        max(float(row["window_end_seconds"]) for row in rows),
                     )
                 elif len(rows) > 1:
                     # With the ingestion rule, the penultimate window is still
                     # stride-aligned even when the final window has an irregular start.
-                    minimum_compatible_duration = (
-                        window_seconds + stride_seconds * max(0, len(rows) - 2)
+                    minimum_compatible_duration = window_seconds + stride_seconds * max(
+                        0, len(rows) - 2
                     )
                     duration = max(duration, minimum_compatible_duration)
                 elif duration <= 0:
                     duration = window_seconds
                 inferred = infer_window_ranges(
-                    len(rows), duration, window_seconds, stride_seconds,
+                    len(rows),
+                    duration,
+                    window_seconds,
+                    stride_seconds,
                 )
                 windows = [
                     WindowVector(
@@ -590,8 +666,12 @@ def build_audio_profiles(
                 ]
                 profile = derive_audio_profile(windows, duration, exact, parameters)
                 _store_profile(
-                    connection, track["track_id"], track["source_run_id"],
-                    profile_run_id, model_name, profile,
+                    connection,
+                    track["track_id"],
+                    track["source_run_id"],
+                    profile_run_id,
+                    model_name,
+                    profile,
                 )
                 connection.commit()
                 summary["profiled"] = int(summary["profiled"]) + 1
@@ -599,12 +679,16 @@ def build_audio_profiles(
                 connection.rollback()
                 summary["failed"] = int(summary["failed"]) + 1
                 logger.exception("Failed to derive audio profile for track %s", track["track_id"])
-            report({
-                "phase": "audio_profiles",
-                "message": f"Deriving {model_name} multi-vector audio profiles",
-                "completed": completed + 1, "total": len(tracks), "unit": "tracks",
-                "summary": summary,
-            })
+            report(
+                {
+                    "phase": "audio_profiles",
+                    "message": f"Deriving {model_name} multi-vector audio profiles",
+                    "completed": completed + 1,
+                    "total": len(tracks),
+                    "unit": "tracks",
+                    "summary": summary,
+                }
+            )
         with connection.cursor() as cursor:
             cursor.execute(
                 "UPDATE analysis_runs SET status='complete', finished_at=now() WHERE id=%s",

@@ -27,13 +27,19 @@ _cache_lock = threading.Lock()
 
 
 def _normalize(value: str | None) -> str:
-    folded = unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode().casefold()
+    folded = (
+        unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode().casefold()
+    )
     return re.sub(r"[^a-z0-9]+", " ", folded).strip()
 
 
 def recent_listens(username: str, api_key: str, since: datetime) -> list[Listen]:
     since_unix = int(since.timestamp())
-    cache_key = (username.casefold(), hashlib.sha256(api_key.encode()).hexdigest(), since_unix // 3600)
+    cache_key = (
+        username.casefold(),
+        hashlib.sha256(api_key.encode()).hexdigest(),
+        since_unix // 3600,
+    )
     with _cache_lock:
         cached = _cache.get(cache_key)
         if cached and time.monotonic() - cached[0] < 300:
@@ -42,25 +48,37 @@ def recent_listens(username: str, api_key: str, since: datetime) -> list[Listen]
     page = 1
     with httpx.Client(timeout=get_settings().listening_history_timeout_seconds) as client:
         while page <= 20:
-            response = client.get("https://ws.audioscrobbler.com/2.0/", params={
-                "method": "user.getrecenttracks", "user": username, "api_key": api_key,
-                "format": "json", "from": since_unix, "limit": 200, "page": page,
-            })
+            response = client.get(
+                "https://ws.audioscrobbler.com/2.0/",
+                params={
+                    "method": "user.getrecenttracks",
+                    "user": username,
+                    "api_key": api_key,
+                    "format": "json",
+                    "from": since_unix,
+                    "limit": 200,
+                    "page": page,
+                },
+            )
             response.raise_for_status()
             payload = response.json()
             if payload.get("error"):
-                raise RuntimeError(str(payload.get("message") or "Last.fm rejected the history request"))
+                raise RuntimeError(
+                    str(payload.get("message") or "Last.fm rejected the history request")
+                )
             recent = payload.get("recenttracks", {})
             tracks = recent.get("track", [])
             for track in tracks:
                 timestamp = track.get("date", {}).get("uts")
                 if not timestamp:
                     continue
-                listens.append(Listen(
-                    artist=str(track.get("artist", {}).get("#text") or ""),
-                    title=str(track.get("name") or ""),
-                    played_at=datetime.fromtimestamp(int(timestamp), tz=timezone.utc),
-                ))
+                listens.append(
+                    Listen(
+                        artist=str(track.get("artist", {}).get("#text") or ""),
+                        title=str(track.get("name") or ""),
+                        played_at=datetime.fromtimestamp(int(timestamp), tz=timezone.utc),
+                    )
+                )
             pages = int(recent.get("@attr", {}).get("totalPages") or 1)
             if page >= pages:
                 break
@@ -71,8 +89,11 @@ def recent_listens(username: str, api_key: str, since: datetime) -> list[Listen]
 
 
 def track_listen_counts(
-    rows: list[dict[str, object]], listens: list[Listen], timezone_name: str,
-    period_start: str | None = None, period_end: str | None = None,
+    rows: list[dict[str, object]],
+    listens: list[Listen],
+    timezone_name: str,
+    period_start: str | None = None,
+    period_end: str | None = None,
 ) -> tuple[dict[str, int], dict[str, int]]:
     exact: dict[tuple[str, str], str] = {}
     title_ids: dict[str, list[str]] = {}
@@ -97,7 +118,11 @@ def track_listen_counts(
         if start_minutes is not None and end_minutes is not None:
             local = listen.played_at.astimezone(zone)
             minute = local.hour * 60 + local.minute
-            in_period = start_minutes <= minute < end_minutes if start_minutes < end_minutes else minute >= start_minutes or minute < end_minutes
+            in_period = (
+                start_minutes <= minute < end_minutes
+                if start_minutes < end_minutes
+                else minute >= start_minutes or minute < end_minutes
+            )
             if in_period:
                 period_counts[identifier] += 1
     return dict(all_counts), dict(period_counts)
@@ -124,10 +149,17 @@ def top_tracks(username: str, api_key: str, period: str, limit: int) -> list[Top
         if cached and time.monotonic() - cached[0] < 600:
             return list(cached[1])
     with httpx.Client(timeout=get_settings().listening_history_timeout_seconds) as client:
-        response = client.get("https://ws.audioscrobbler.com/2.0/", params={
-            "method": "user.gettoptracks", "user": username, "api_key": api_key,
-            "format": "json", "period": period, "limit": limit,
-        })
+        response = client.get(
+            "https://ws.audioscrobbler.com/2.0/",
+            params={
+                "method": "user.gettoptracks",
+                "user": username,
+                "api_key": api_key,
+                "format": "json",
+                "period": period,
+                "limit": limit,
+            },
+        )
         response.raise_for_status()
         payload = response.json()
     if payload.get("error"):
@@ -167,7 +199,9 @@ def navidrome_play_counts(songs: list[dict[str, object]]) -> list[tuple[str, int
     return [(song_id, count) for count, _, song_id in ranked]
 
 
-def match_navidrome_play_counts(rows: list[dict[str, object]], ranked: list[tuple[str, int]]) -> list[tuple[dict[str, object], int]]:
+def match_navidrome_play_counts(
+    rows: list[dict[str, object]], ranked: list[tuple[str, int]]
+) -> list[tuple[dict[str, object], int]]:
     """Map ranked Navidrome song ids onto library rows by their source id."""
     by_source = {str(row["source_id"]): row for row in rows if row.get("source_id")}
     matched: list[tuple[dict[str, object], int]] = []
@@ -180,7 +214,10 @@ def match_navidrome_play_counts(rows: list[dict[str, object]], ranked: list[tupl
         matched.append((row, count))
     return matched
 
-def match_top_tracks(rows: list[dict[str, object]], entries: list[TopTrack]) -> list[tuple[dict[str, object], int]]:
+
+def match_top_tracks(
+    rows: list[dict[str, object]], entries: list[TopTrack]
+) -> list[tuple[dict[str, object], int]]:
     """Map ranked Last.fm entries onto library rows, keeping Last.fm's order.
 
     Matching mirrors track_listen_counts: exact artist and title first, then a

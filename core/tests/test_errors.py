@@ -1,4 +1,10 @@
-from core.errors import EchoraError, InputUnavailableError, JobCancelled, ProcessingError, RemoteComputeError
+from core.errors import (
+    EchoraError,
+    InputUnavailableError,
+    JobCancelled,
+    ProcessingError,
+    RemoteComputeError,
+)
 
 
 def test_processing_errors_carry_their_stage_and_item():

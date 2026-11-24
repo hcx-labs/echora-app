@@ -457,7 +457,9 @@ def database(monkeypatch):
             "0055_navidrome_integration.py",
             "0056_navidrome_original_lyrics.py",
         ):
-            migration_path = Path(__file__).parents[3] / "core/src/db/migrations/versions" / filename
+            migration_path = (
+                Path(__file__).parents[3] / "core/src/db/migrations/versions" / filename
+            )
             spec = importlib.util.spec_from_file_location("integration_migration", migration_path)
             migration = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(migration)

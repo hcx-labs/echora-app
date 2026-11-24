@@ -9,31 +9,169 @@ import numpy as np
 import torch
 
 _PREDEFINED: tuple[dict[str, object], ...] = (
-    {"name": "Dreamy", "group": "mood", "positive_prompts": ["dreamy atmospheric music", "ethereal floating music", "soft hazy production"], "negative_prompts": ["dry aggressive music"]},
-    {"name": "Melancholic", "group": "mood", "positive_prompts": ["melancholic reflective music", "sad introspective song"], "negative_prompts": ["joyful celebratory music"]},
-    {"name": "Joyful", "group": "mood", "positive_prompts": ["joyful uplifting music", "bright celebratory song"], "negative_prompts": ["ominous melancholic music"]},
-    {"name": "Peaceful", "group": "mood", "positive_prompts": ["peaceful calming music", "gentle serene sound"], "negative_prompts": ["tense chaotic music"]},
-    {"name": "Tense", "group": "mood", "positive_prompts": ["tense suspenseful music", "anxious uneasy atmosphere"], "negative_prompts": ["peaceful relaxing music"]},
-    {"name": "Aggressive", "group": "mood", "positive_prompts": ["aggressive intense music", "harsh forceful sound"], "negative_prompts": ["gentle peaceful music"]},
-    {"name": "Energetic", "group": "motion", "positive_prompts": ["high energy music", "fast driving rhythm"], "negative_prompts": ["slow calm music"]},
-    {"name": "Danceable", "group": "motion", "positive_prompts": ["danceable music with a strong groove", "club rhythm made for dancing"], "negative_prompts": ["arrhythmic ambient music"]},
-    {"name": "Slow-burning", "group": "motion", "positive_prompts": ["slow-building music", "gradual restrained musical development"], "negative_prompts": ["immediate high energy music"]},
-    {"name": "Chaotic", "group": "motion", "positive_prompts": ["chaotic unpredictable music", "frantic irregular sound"], "negative_prompts": ["orderly minimal music"]},
-    {"name": "Acoustic", "group": "texture", "positive_prompts": ["acoustic instruments and natural room sound", "unplugged acoustic music"], "negative_prompts": ["synthetic electronic production"]},
-    {"name": "Electronic", "group": "texture", "positive_prompts": ["electronic music with synthesizers", "synthetic electronic production"], "negative_prompts": ["unplugged acoustic music"]},
-    {"name": "Distorted", "group": "texture", "positive_prompts": ["distorted saturated music", "fuzzy overdriven sound"], "negative_prompts": ["clean transparent production"]},
-    {"name": "Lo-fi", "group": "texture", "positive_prompts": ["lo-fi music with rough warm production", "grainy homemade recording"], "negative_prompts": ["polished pristine production"]},
-    {"name": "Dense", "group": "texture", "positive_prompts": ["dense layered musical arrangement", "thick wall of sound"], "negative_prompts": ["sparse minimal arrangement"]},
-    {"name": "Minimal", "group": "texture", "positive_prompts": ["minimal sparse music", "few instruments and lots of space"], "negative_prompts": ["dense layered arrangement"]},
-    {"name": "Atmospheric", "group": "texture", "positive_prompts": ["atmospheric spacious music", "immersive ambient soundscape"], "negative_prompts": ["dry direct production"]},
-    {"name": "Instrumental", "group": "voice", "positive_prompts": ["instrumental music without vocals"], "negative_prompts": ["song with prominent lead vocals"]},
-    {"name": "Female vocals", "group": "voice", "positive_prompts": ["music with female lead vocals", "woman singing lead vocal"], "negative_prompts": ["instrumental music without vocals"]},
-    {"name": "Male vocals", "group": "voice", "positive_prompts": ["music with male lead vocals", "man singing lead vocal"], "negative_prompts": ["instrumental music without vocals"]},
-    {"name": "Group vocals", "group": "voice", "positive_prompts": ["group vocals and vocal harmonies", "choir or ensemble singing"], "negative_prompts": ["solo instrumental music"]},
-    {"name": "Guitar-driven", "group": "instrumentation", "positive_prompts": ["guitar-driven music", "prominent electric or acoustic guitar"], "negative_prompts": ["music dominated by synthesizers"]},
-    {"name": "Piano-led", "group": "instrumentation", "positive_prompts": ["piano-led music", "prominent piano performance"], "negative_prompts": ["music without piano"]},
-    {"name": "Synth-led", "group": "instrumentation", "positive_prompts": ["synthesizer-led music", "prominent electronic synthesizers"], "negative_prompts": ["unplugged acoustic music"]},
-    {"name": "Orchestral", "group": "instrumentation", "positive_prompts": ["orchestral music with strings and ensemble", "symphonic arrangement"], "negative_prompts": ["minimal electronic beat"]},
+    {
+        "name": "Dreamy",
+        "group": "mood",
+        "positive_prompts": [
+            "dreamy atmospheric music",
+            "ethereal floating music",
+            "soft hazy production",
+        ],
+        "negative_prompts": ["dry aggressive music"],
+    },
+    {
+        "name": "Melancholic",
+        "group": "mood",
+        "positive_prompts": ["melancholic reflective music", "sad introspective song"],
+        "negative_prompts": ["joyful celebratory music"],
+    },
+    {
+        "name": "Joyful",
+        "group": "mood",
+        "positive_prompts": ["joyful uplifting music", "bright celebratory song"],
+        "negative_prompts": ["ominous melancholic music"],
+    },
+    {
+        "name": "Peaceful",
+        "group": "mood",
+        "positive_prompts": ["peaceful calming music", "gentle serene sound"],
+        "negative_prompts": ["tense chaotic music"],
+    },
+    {
+        "name": "Tense",
+        "group": "mood",
+        "positive_prompts": ["tense suspenseful music", "anxious uneasy atmosphere"],
+        "negative_prompts": ["peaceful relaxing music"],
+    },
+    {
+        "name": "Aggressive",
+        "group": "mood",
+        "positive_prompts": ["aggressive intense music", "harsh forceful sound"],
+        "negative_prompts": ["gentle peaceful music"],
+    },
+    {
+        "name": "Energetic",
+        "group": "motion",
+        "positive_prompts": ["high energy music", "fast driving rhythm"],
+        "negative_prompts": ["slow calm music"],
+    },
+    {
+        "name": "Danceable",
+        "group": "motion",
+        "positive_prompts": [
+            "danceable music with a strong groove",
+            "club rhythm made for dancing",
+        ],
+        "negative_prompts": ["arrhythmic ambient music"],
+    },
+    {
+        "name": "Slow-burning",
+        "group": "motion",
+        "positive_prompts": ["slow-building music", "gradual restrained musical development"],
+        "negative_prompts": ["immediate high energy music"],
+    },
+    {
+        "name": "Chaotic",
+        "group": "motion",
+        "positive_prompts": ["chaotic unpredictable music", "frantic irregular sound"],
+        "negative_prompts": ["orderly minimal music"],
+    },
+    {
+        "name": "Acoustic",
+        "group": "texture",
+        "positive_prompts": [
+            "acoustic instruments and natural room sound",
+            "unplugged acoustic music",
+        ],
+        "negative_prompts": ["synthetic electronic production"],
+    },
+    {
+        "name": "Electronic",
+        "group": "texture",
+        "positive_prompts": [
+            "electronic music with synthesizers",
+            "synthetic electronic production",
+        ],
+        "negative_prompts": ["unplugged acoustic music"],
+    },
+    {
+        "name": "Distorted",
+        "group": "texture",
+        "positive_prompts": ["distorted saturated music", "fuzzy overdriven sound"],
+        "negative_prompts": ["clean transparent production"],
+    },
+    {
+        "name": "Lo-fi",
+        "group": "texture",
+        "positive_prompts": ["lo-fi music with rough warm production", "grainy homemade recording"],
+        "negative_prompts": ["polished pristine production"],
+    },
+    {
+        "name": "Dense",
+        "group": "texture",
+        "positive_prompts": ["dense layered musical arrangement", "thick wall of sound"],
+        "negative_prompts": ["sparse minimal arrangement"],
+    },
+    {
+        "name": "Minimal",
+        "group": "texture",
+        "positive_prompts": ["minimal sparse music", "few instruments and lots of space"],
+        "negative_prompts": ["dense layered arrangement"],
+    },
+    {
+        "name": "Atmospheric",
+        "group": "texture",
+        "positive_prompts": ["atmospheric spacious music", "immersive ambient soundscape"],
+        "negative_prompts": ["dry direct production"],
+    },
+    {
+        "name": "Instrumental",
+        "group": "voice",
+        "positive_prompts": ["instrumental music without vocals"],
+        "negative_prompts": ["song with prominent lead vocals"],
+    },
+    {
+        "name": "Female vocals",
+        "group": "voice",
+        "positive_prompts": ["music with female lead vocals", "woman singing lead vocal"],
+        "negative_prompts": ["instrumental music without vocals"],
+    },
+    {
+        "name": "Male vocals",
+        "group": "voice",
+        "positive_prompts": ["music with male lead vocals", "man singing lead vocal"],
+        "negative_prompts": ["instrumental music without vocals"],
+    },
+    {
+        "name": "Group vocals",
+        "group": "voice",
+        "positive_prompts": ["group vocals and vocal harmonies", "choir or ensemble singing"],
+        "negative_prompts": ["solo instrumental music"],
+    },
+    {
+        "name": "Guitar-driven",
+        "group": "instrumentation",
+        "positive_prompts": ["guitar-driven music", "prominent electric or acoustic guitar"],
+        "negative_prompts": ["music dominated by synthesizers"],
+    },
+    {
+        "name": "Piano-led",
+        "group": "instrumentation",
+        "positive_prompts": ["piano-led music", "prominent piano performance"],
+        "negative_prompts": ["music without piano"],
+    },
+    {
+        "name": "Synth-led",
+        "group": "instrumentation",
+        "positive_prompts": ["synthesizer-led music", "prominent electronic synthesizers"],
+        "negative_prompts": ["unplugged acoustic music"],
+    },
+    {
+        "name": "Orchestral",
+        "group": "instrumentation",
+        "positive_prompts": ["orchestral music with strings and ensemble", "symphonic arrangement"],
+        "negative_prompts": ["minimal electronic beat"],
+    },
 )
 
 _model = None
@@ -46,7 +184,14 @@ def predefined_concepts() -> list[dict[str, object]]:
 
 _GROUPS_TO_EXPAND = {"voice", "mood", "texture"}
 
-_WORD_CANON = {"voices": "vocal", "voice": "vocal", "vocals": "vocal", "vocal": "vocal", "singing": "sing", "sung": "sing"}
+_WORD_CANON = {
+    "voices": "vocal",
+    "voice": "vocal",
+    "vocals": "vocal",
+    "vocal": "vocal",
+    "singing": "sing",
+    "sung": "sing",
+}
 
 
 def _canon_words(value: str) -> set[str]:
@@ -68,9 +213,19 @@ def expand_tag_groups(tags: list[str]) -> list[list[str]]:
         if not value:
             continue
         words = _canon_words(value)
-        match = next((definition for definition in _PREDEFINED
-                      if words and words <= _canon_words(definition["name"])), None)
-        groups.append(list(match["positive_prompts"]) if match is not None and match["group"] in _GROUPS_TO_EXPAND else [value])
+        match = next(
+            (
+                definition
+                for definition in _PREDEFINED
+                if words and words <= _canon_words(definition["name"])
+            ),
+            None,
+        )
+        groups.append(
+            list(match["positive_prompts"])
+            if match is not None and match["group"] in _GROUPS_TO_EXPAND
+            else [value]
+        )
     return groups or [[tag] for tag in tags if tag.strip()]
 
 
@@ -120,7 +275,9 @@ def embed_texts(texts: list[str]) -> np.ndarray:
 
 def empirical_percentiles(scores: np.ndarray, available: np.ndarray | None = None) -> np.ndarray:
     values = np.asarray(scores, dtype=np.float32)
-    mask = np.ones(len(values), dtype=bool) if available is None else np.asarray(available, dtype=bool)
+    mask = (
+        np.ones(len(values), dtype=bool) if available is None else np.asarray(available, dtype=bool)
+    )
     mask = mask & np.isfinite(values)
     percentiles = np.full(len(values), 0.5, dtype=np.float32)
     indices = np.flatnonzero(mask)
@@ -137,8 +294,11 @@ def empirical_percentiles(scores: np.ndarray, available: np.ndarray | None = Non
 
 
 def combine_concept_percentiles(
-    semantic: np.ndarray, lyrics: np.ndarray, lyrics_available: np.ndarray,
-    semantic_weight: float = 0.45, lyrics_weight: float = 0.55,
+    semantic: np.ndarray,
+    lyrics: np.ndarray,
+    lyrics_available: np.ndarray,
+    semantic_weight: float = 0.45,
+    lyrics_weight: float = 0.55,
 ) -> tuple[np.ndarray, np.ndarray]:
     semantic_percentiles = empirical_percentiles(semantic)
     lyrics_percentiles = empirical_percentiles(lyrics, lyrics_available)

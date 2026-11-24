@@ -8,7 +8,12 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from core.integrations.external_ai import ExternalAISettings, LanguagePair, SettingsUpdate, router
-from worker.translation.client import TranslationError, source_checksum, translate, validate_response
+from worker.translation.client import (
+    TranslationError,
+    source_checksum,
+    translate,
+    validate_response,
+)
 import core.lyrics.translations as translation_storage
 
 

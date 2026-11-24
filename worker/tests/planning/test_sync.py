@@ -90,7 +90,9 @@ def test_empty_catalog_and_invalid_mode(planner):
 
 
 @pytest.mark.parametrize("recording_enabled", [False, True])
-def test_parent_batches_selected_work_but_reconciles_full_catalog(monkeypatch, recording_enabled, library_helpers):
+def test_parent_batches_selected_work_but_reconciles_full_catalog(
+    monkeypatch, recording_enabled, library_helpers
+):
     import worker.operations as analysis_jobs
 
     catalog = [f"song-{i}" for i in range(941)]

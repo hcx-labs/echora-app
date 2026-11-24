@@ -3,6 +3,7 @@
 ECHORA_TEST_RECORDING_MANIFEST=/absolute/path/manifest.json pytest <this file>
 No model downloads or production configuration changes are performed.
 """
+
 import hashlib
 import json
 import os
@@ -28,8 +29,9 @@ def bundle():
 def test_real_graph_returns_normalized_embeddings_and_silent_timeline(bundle):
     _, config = bundle
     rng = np.random.default_rng(81)
-    audio = np.concatenate([np.zeros(12000, dtype=np.float32),
-                            rng.normal(0, .1, 20000).astype(np.float32)])
+    audio = np.concatenate(
+        [np.zeros(12000, dtype=np.float32), rng.normal(0, 0.1, 20000).astype(np.float32)]
+    )
     result = recording_encoder.encode(audio, config)
     assert result.shape == (7, 128)
     assert result.dtype == np.float32 and np.isfinite(result).all()
@@ -47,7 +49,7 @@ def test_real_dynamic_batch_is_independent_of_batch_size(bundle, tmp_path):
     manifest.write_text(json.dumps(data))
     single = recording_encoder.load_config(manifest)
     assert single.representation_id == config.representation_id
-    audio = np.random.default_rng(92).normal(0, .1, 144000).astype(np.float32)
+    audio = np.random.default_rng(92).normal(0, 0.1, 144000).astype(np.float32)
     default_result = recording_encoder.encode(audio, config)
     single_result = recording_encoder.encode(audio, single)
     assert len(default_result) == 35  # Cross the default 32-window batch boundary.
@@ -60,6 +62,12 @@ def test_preserved_exporter_and_checkpoint_provenance(bundle):
     report = json.loads((path.parent / manifest["validation_report_path"]).read_text())
     assert report["passed"] is True
     assert report["source_commit"] == "15c6f3bcdf6a6da1daddfe47a1ffa5a0d22deadc"
-    assert report["checkpoint_archive_sha256"] == "33e6059c0bf3ee3bc1df0479cefeb92dc85f4aa2a66833d430ce771aa0d7dceb"
-    assert hashlib.sha256((path.parent / "exporter.py").read_bytes()).hexdigest() == report["export_script_sha256"]
+    assert (
+        report["checkpoint_archive_sha256"]
+        == "33e6059c0bf3ee3bc1df0479cefeb92dc85f4aa2a66833d430ce771aa0d7dceb"
+    )
+    assert (
+        hashlib.sha256((path.parent / "exporter.py").read_bytes()).hexdigest()
+        == report["export_script_sha256"]
+    )
     assert all(case["same_top_track_and_offset"] for case in report["retrieval_parity"])

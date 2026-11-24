@@ -13,7 +13,13 @@ import soundfile as sf
 
 import worker.kara.pipeline as pipeline
 
-from worker.kara.pipeline import _stored_model_revision, apply_adaptive_line_padding, build_lines_from_alignment_document, _validate_alignment_document, parse_ass_karaoke
+from worker.kara.pipeline import (
+    _stored_model_revision,
+    apply_adaptive_line_padding,
+    build_lines_from_alignment_document,
+    _validate_alignment_document,
+    parse_ass_karaoke,
+)
 
 
 def test_stored_model_revision_tracks_the_audio_input(monkeypatch):

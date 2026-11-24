@@ -19,7 +19,13 @@ from fastapi.responses import FileResponse
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from worker.artwork.render import CAMERA_LORA_STRENGTH, DEFAULT_INSTRUCTIONS, MODEL_FILES, REQUIRED_LOADERS, Recipe
+from worker.artwork.render import (
+    CAMERA_LORA_STRENGTH,
+    DEFAULT_INSTRUCTIONS,
+    MODEL_FILES,
+    REQUIRED_LOADERS,
+    Recipe,
+)
 from core.settings import get_settings
 
 FIELDS = (

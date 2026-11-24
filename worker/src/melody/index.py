@@ -25,7 +25,12 @@ from psycopg.rows import dict_row, tuple_row
 from psycopg.types.json import Jsonb
 
 from core.media.audio import decode_audio
-from core.revisions import MELODY_CONTOUR_REVISION, MELODY_EXTRACTOR, SEPARATION_REVISION as MELODY_SEPARATOR_REVISION, SEPARATOR_MODEL_ID as MELODY_SEPARATOR_MODEL
+from core.revisions import (
+    MELODY_CONTOUR_REVISION,
+    MELODY_EXTRACTOR,
+    SEPARATION_REVISION as MELODY_SEPARATOR_REVISION,
+    SEPARATOR_MODEL_ID as MELODY_SEPARATOR_MODEL,
+)
 from worker.media.preprocessing import melody_waveforms, get_check, prepare_audio
 from core.integrations.navidrome import NavidromeClient
 

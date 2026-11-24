@@ -1,4 +1,5 @@
 """Durable execution status, separate from reusable representation definitions."""
+
 from __future__ import annotations
 
 import os
@@ -8,7 +9,7 @@ def start_attempt(connection, run_id, requested: int):
     with connection.cursor() as cursor:
         cursor.execute(
             "INSERT INTO analysis_attempts (run_id, requested, job_id) VALUES (%s,%s,%s) RETURNING id",
-            (run_id, requested, os.getenv('ECHORA_JOB_ID')),
+            (run_id, requested, os.getenv("ECHORA_JOB_ID")),
         )
         return cursor.fetchone()[0]
 
@@ -34,5 +35,6 @@ def finish_attempt(connection, attempt_id):
                FROM (SELECT count(*) FILTER (WHERE status='complete') AS succeeded,
                             count(*) FILTER (WHERE status='failed') AS failed
                      FROM analysis_attempt_tracks WHERE attempt_id=%s) t
-               WHERE a.id=%s""", (attempt_id, attempt_id),
+               WHERE a.id=%s""",
+            (attempt_id, attempt_id),
         )

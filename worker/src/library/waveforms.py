@@ -1,4 +1,5 @@
 """Whole-track seek-bar peaks, generated only by the sync pipeline."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -23,15 +24,13 @@ def waveform_peaks(samples: np.ndarray, count: int = PEAK_COUNT) -> list[float]:
         raise ValueError("Waveform requires finite, nonempty samples and a positive bucket count")
     samples = np.asarray(samples, dtype=np.float64)
     buckets = np.array_split(samples, min(count, len(samples)))
-    envelope = np.array([
-        .9 * np.sqrt(np.mean(block * block)) + .1 * np.max(np.abs(block))
-        for block in buckets
-    ])
+    envelope = np.array(
+        [0.9 * np.sqrt(np.mean(block * block)) + 0.1 * np.max(np.abs(block)) for block in buckets]
+    )
     maximum = float(envelope.max())
     if maximum > 0:
         envelope = (envelope / maximum) ** 1.5
     return [round(float(value), 4) for value in envelope]
-
 
 
 def store_waveform(connection, track_id, audio: bytes) -> None:

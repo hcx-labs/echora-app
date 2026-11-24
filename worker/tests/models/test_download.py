@@ -26,6 +26,7 @@ def test_pin_main_ref_points_to_snapshot_commit(tmp_path) -> None:
 def test_required_models_include_pinned_roformer(monkeypatch):
     from worker.models.download import required_models
     from worker.media.roformer import MODEL_ID, MODEL_REVISION
+
     monkeypatch.delenv("MOSS_MODEL_ID", raising=False)
     monkeypatch.delenv("MOSS_REVISION", raising=False)
     assert (MODEL_ID, MODEL_REVISION, False) in required_models()
@@ -33,11 +34,16 @@ def test_required_models_include_pinned_roformer(monkeypatch):
 
 def test_provisioning_leaves_legacy_demucs_weights_untouched(monkeypatch, tmp_path):
     import worker.models.download as d
+
     checkpoint = tmp_path / "torch/hub/checkpoints/955717e8-8726e21a.th"
     checkpoint.parent.mkdir(parents=True)
     checkpoint.write_bytes(b"preserve existing experiment weights")
     monkeypatch.setenv("TORCH_HOME", str(tmp_path / "torch"))
-    monkeypatch.setattr(d, "required_models", Mock(return_value=((d.ROFORMER_MODEL_ID, d.ROFORMER_REVISION, False),)))
+    monkeypatch.setattr(
+        d,
+        "required_models",
+        Mock(return_value=((d.ROFORMER_MODEL_ID, d.ROFORMER_REVISION, False),)),
+    )
     download = Mock()
     monkeypatch.setattr(d, "snapshot_download", download)
     monkeypatch.setattr(d, "_prune_huggingface_cache", Mock())
@@ -50,6 +56,7 @@ def test_provisioning_leaves_legacy_demucs_weights_untouched(monkeypatch, tmp_pa
 
 def test_normal_downloader_provisions_recording_bundle(monkeypatch):
     import worker.models.download as d
+
     monkeypatch.setattr(d, "required_models", lambda: ())
     recording = Mock()
     monkeypatch.setattr(d, "download_recording_model", recording)
@@ -61,6 +68,7 @@ def test_normal_downloader_provisions_recording_bundle(monkeypatch):
 
 def test_prune_only_never_downloads_or_validates_recording_bundle(monkeypatch):
     import worker.models.download as d
+
     monkeypatch.setattr(d, "required_models", lambda: ())
     recording, snapshots, essentia = Mock(), Mock(), Mock()
     monkeypatch.setattr(d, "download_recording_model", recording)

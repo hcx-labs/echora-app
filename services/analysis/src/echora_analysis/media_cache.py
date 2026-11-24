@@ -71,7 +71,12 @@ class StreamCacheWriter:
 
 class MediaCache:
     def __init__(self, url: str) -> None:
-        self.client: redis.Redis[bytes] = redis.Redis.from_url(url, decode_responses=False, socket_connect_timeout=get_settings().media_cache_connect_timeout_seconds, socket_timeout=get_settings().media_cache_timeout_seconds)
+        self.client: redis.Redis[bytes] = redis.Redis.from_url(
+            url,
+            decode_responses=False,
+            socket_connect_timeout=get_settings().media_cache_connect_timeout_seconds,
+            socket_timeout=get_settings().media_cache_timeout_seconds,
+        )
 
     def get(self, key: str) -> CachedMedia | None:
         try:
@@ -87,7 +92,11 @@ class MediaCache:
 
     def set(self, key: str, content: bytes, content_type: str) -> None:
         try:
-            self.client.set(key, f"{content_type}\0".encode() + content, ex=get_settings().media_cache_ttl_seconds)
+            self.client.set(
+                key,
+                f"{content_type}\0".encode() + content,
+                ex=get_settings().media_cache_ttl_seconds,
+            )
         except redis.RedisError:
             pass
 

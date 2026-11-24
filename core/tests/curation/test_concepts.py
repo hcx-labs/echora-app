@@ -8,7 +8,9 @@ def test_concept_scores_support_overlap_and_library_percentiles(monkeypatch):
         "dreamy": np.array([[1.0, 0.0]], dtype=np.float32),
         "aggressive": np.array([[0.0, 1.0]], dtype=np.float32),
     }
-    monkeypatch.setattr(concepts, "embed_texts", lambda texts: np.vstack([vectors[text] for text in texts]))
+    monkeypatch.setattr(
+        concepts, "embed_texts", lambda texts: np.vstack([vectors[text] for text in texts])
+    )
     tracks = np.array([[1.0, 0.0], [0.7, 0.7], [0.0, 1.0]], dtype=np.float32)
 
     raw, percentiles = concepts.score_concept(tracks, ["dreamy"], ["aggressive"])

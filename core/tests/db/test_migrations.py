@@ -26,9 +26,7 @@ def run_offline_migrations(monkeypatch):
     db = ModuleType("core.db.session")
     db.Base = SimpleNamespace(metadata=object())
     monkeypatch.setitem(sys.modules, "core.db.session", db)
-    monkeypatch.setitem(
-        sys.modules, "core.db.models", ModuleType("core.db.models")
-    )
+    monkeypatch.setitem(sys.modules, "core.db.models", ModuleType("core.db.models"))
     runpy.run_path(str(Path(__file__).parents[2] / "src" / "db" / "migrations" / "env.py"))
     return observed
 

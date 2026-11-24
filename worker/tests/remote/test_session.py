@@ -17,7 +17,12 @@ import core.features as features
 import worker.remote.session as remote_compute
 from worker.models.download import model_manifest
 from core.embeddings.audio_models import EmbeddingResult
-from core.settings import PROCESSING_FIELDS, adopt_processing_settings, get_settings, processing_settings
+from core.settings import (
+    PROCESSING_FIELDS,
+    adopt_processing_settings,
+    get_settings,
+    processing_settings,
+)
 
 CONFIG = remote_compute.ModalConfig(
     "ak-test", "as-secret", "L40S", "ghcr.io/x/echora-analysis-gpu:1.0"

@@ -14,8 +14,17 @@ from worker.planning.audio import AudioProcessingPlan
 
 
 def song(identifier="source"):
-    return SimpleNamespace(id=identifier, title="Song", artist="Artist", album="Album",
-                           year=2020, duration=180, genre=None, path="song.flac", raw={})
+    return SimpleNamespace(
+        id=identifier,
+        title="Song",
+        artist="Artist",
+        album="Album",
+        year=2020,
+        duration=180,
+        genre=None,
+        path="song.flac",
+        raw={},
+    )
 
 
 def test_upsert_refreshes_only_matching_source_links_and_reuses_identity(database):
@@ -33,13 +42,27 @@ def test_upsert_refreshes_only_matching_source_links_and_reuses_identity(databas
                 UNIQUE(user_id,library_id,external_id));
             CREATE TABLE user_source_memberships(user_id uuid,library_id uuid,external_id text,
                 PRIMARY KEY(user_id,library_id,external_id));""")
-        db.execute("INSERT INTO tracks(id,audio_hash) VALUES (%s,'old'),(%s,%s)", (old, existing, digest))
-        db.execute("INSERT INTO track_sources VALUES (%s,%s,'subsonic','source','{}'),(%s,%s,'subsonic','alias','{}')", (library, old, library, old))
-        for row in [(owner,library,old,"source"),(owner,library,existing,"duplicate"),
-                    (other,library,old,"alias"),(owner,elsewhere,old,"source")]:
+        db.execute(
+            "INSERT INTO tracks(id,audio_hash) VALUES (%s,'old'),(%s,%s)", (old, existing, digest)
+        )
+        db.execute(
+            "INSERT INTO track_sources VALUES (%s,%s,'subsonic','source','{}'),(%s,%s,'subsonic','alias','{}')",
+            (library, old, library, old),
+        )
+        for row in [
+            (owner, library, old, "source"),
+            (owner, library, existing, "duplicate"),
+            (other, library, old, "alias"),
+            (owner, elsewhere, old, "source"),
+        ]:
             db.execute("INSERT INTO user_track_links VALUES (%s,%s,%s,%s)", row)
-        db.execute("INSERT INTO track_sources VALUES (%s,%s,'subsonic','duplicate','{}')", (library, existing))
-        db.execute("INSERT INTO user_source_memberships SELECT user_id,library_id,external_id FROM user_track_links")
+        db.execute(
+            "INSERT INTO track_sources VALUES (%s,%s,'subsonic','duplicate','{}')",
+            (library, existing),
+        )
+        db.execute(
+            "INSERT INTO user_source_memberships SELECT user_id,library_id,external_id FROM user_track_links"
+        )
         # The owner also proved access to the old recording through an alias.
         db.execute("INSERT INTO user_source_memberships VALUES (%s,%s,'alias')", (owner, library))
         db.row_factory = tuple_row
@@ -47,16 +70,30 @@ def test_upsert_refreshes_only_matching_source_links_and_reuses_identity(databas
         assert ingest._source_track_id(db, library, "source") == existing
         assert ingest._source_track_id(db, library, "alias") == old
         links = set(db.execute("SELECT * FROM user_track_links").fetchall())
-        assert links == {(owner,library,existing,"duplicate"),(owner,library,old,"alias"),
-                         (other,library,old,"alias"),(owner,elsewhere,old,"source")}
-        assert db.execute("SELECT audio_hash FROM tracks WHERE id=%s", (old,)).fetchone() == ("old",)
+        assert links == {
+            (owner, library, existing, "duplicate"),
+            (owner, library, old, "alias"),
+            (other, library, old, "alias"),
+            (owner, elsewhere, old, "source"),
+        }
+        assert db.execute("SELECT audio_hash FROM tracks WHERE id=%s", (old,)).fetchone() == (
+            "old",
+        )
         assert ingest._upsert_track(db, library, song(), digest) == (existing, False)
         assert set(db.execute("SELECT * FROM user_track_links").fetchall()) == links
         new_id, inserted = ingest._upsert_track(db, library, song(), "another-hash")
         assert inserted and new_id != existing
-        assert set(db.execute("SELECT track_id,external_id FROM user_track_links WHERE user_id=%s AND library_id=%s", (owner,library)).fetchall()) == {
-            (new_id, "source"), (existing, "duplicate"), (old, "alias")}
-        assert set(db.execute("SELECT track_id,external_id FROM user_track_links WHERE user_id=%s", (other,)).fetchall()) == {(old, "alias")}
+        assert set(
+            db.execute(
+                "SELECT track_id,external_id FROM user_track_links WHERE user_id=%s AND library_id=%s",
+                (owner, library),
+            ).fetchall()
+        ) == {(new_id, "source"), (existing, "duplicate"), (old, "alias")}
+        assert set(
+            db.execute(
+                "SELECT track_id,external_id FROM user_track_links WHERE user_id=%s", (other,)
+            ).fetchall()
+        ) == {(old, "alias")}
 
 
 def test_explicit_source_hashes_before_single_bound_plan_even_when_complete(monkeypatch):
@@ -77,13 +114,19 @@ def test_explicit_source_hashes_before_single_bound_plan_even_when_complete(monk
     upsert = Mock(return_value=("current-track", True))
     monkeypatch.setattr(ingest, "_upsert_track", upsert)
     calls = []
+
     def plan(*args, **kwargs):
         calls.append(args)
-        upsert.assert_called_once_with(connection, "library", client.tracks.return_value[0],
-                                       hashlib.sha256(b"new bytes").hexdigest())
+        upsert.assert_called_once_with(
+            connection,
+            "library",
+            client.tracks.return_value[0],
+            hashlib.sha256(b"new bytes").hexdigest(),
+        )
         assert kwargs["resolved_track_ids"] == {"source": "current-track"}
         # Explicit ingestion refreshes bytes even when all artifacts exist.
         return empty
+
     monkeypatch.setattr(ingest, "plan_audio", plan)
     monkeypatch.setattr(ingest, "active_cache", lambda: None)
     summary = ingest.ingest_navidrome("https://music", "user", "password", ["source"])

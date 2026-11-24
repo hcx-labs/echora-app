@@ -8,7 +8,15 @@ import pytest
 import worker.themes.pipeline as lyric_themes
 import core.lyrics.translations as translation_storage
 from core.integrations.external_ai import ExternalAISettings
-from worker.themes.pipeline import PROMPT_REVISION, ThemeError, backfill_themes, describe, lyrics_checksum, parse, search_text
+from worker.themes.pipeline import (
+    PROMPT_REVISION,
+    ThemeError,
+    backfill_themes,
+    describe,
+    lyrics_checksum,
+    parse,
+    search_text,
+)
 
 REPLY = {
     "description": "A narrator loves someone who never notices.",

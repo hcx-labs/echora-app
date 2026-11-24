@@ -27,7 +27,18 @@ from psycopg.types.json import Jsonb
 from worker.artwork.comfyui import ComfyUI, ComfyUIError, ComfyUIUnavailable, launch, output_items
 from worker.artwork.settings import MotionArtworkSettings, artwork_path, load_settings
 from worker.artwork.prompts import CAMERA_RETRY
-from worker.artwork.render import FPS, NEGATIVE, Recipe, build_encode_graph, build_graph, build_prompt_graph, clean_prompt, encoding_file, finish, zooms
+from worker.artwork.render import (
+    FPS,
+    NEGATIVE,
+    Recipe,
+    build_encode_graph,
+    build_graph,
+    build_prompt_graph,
+    clean_prompt,
+    encoding_file,
+    finish,
+    zooms,
+)
 from core.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -683,7 +694,6 @@ def _write_external_prompts(
         raise ComfyUIUnavailable("External AI is not enabled for prompt writing")
     key = None
     if encrypted:
-
         key = credential_cipher().decrypt(bytes(encrypted)).decode()
     for index, cover in enumerate(covers):
         check()

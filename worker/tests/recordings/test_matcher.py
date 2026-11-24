@@ -10,8 +10,12 @@ from worker.recordings.matcher import MATCHER_REVISION, MatchPolicy, match_recor
 
 
 POLICY = MatchPolicy(
-    window_similarity=0.85, min_score=0.65, min_support=6,
-    min_coverage=0.65, min_temporal_spread=0.6, min_margin=0.08,
+    window_similarity=0.85,
+    min_score=0.65,
+    min_support=6,
+    min_coverage=0.65,
+    min_temporal_spread=0.6,
+    min_margin=0.08,
     block_size=7,
 )
 
@@ -79,7 +83,9 @@ def test_zero_reference_rows_preserve_offset():
 
 def test_unrelated():
     assert match_recording(vectors(20), [ref(vectors(100, 3))], POLICY) == {
-        "state": "no_match", "matches": []}
+        "state": "no_match",
+        "matches": [],
+    }
 
 
 @pytest.mark.parametrize("q", [np.zeros((20, 128)), vectors(5), np.empty((0, 128))])
@@ -87,11 +93,17 @@ def test_insufficient(q):
     assert match_recording(q, [], POLICY)["state"] == "insufficient_audio"
 
 
-@pytest.mark.parametrize("q", [
-    np.ones((20, 128)), np.ones((20, 127)), np.ones(128),
-    np.full((20, 128), np.nan), np.full((20, 128), np.inf),
-    np.ones((20, 128), dtype=complex),
-])
+@pytest.mark.parametrize(
+    "q",
+    [
+        np.ones((20, 128)),
+        np.ones((20, 127)),
+        np.ones(128),
+        np.full((20, 128), np.nan),
+        np.full((20, 128), np.inf),
+        np.ones((20, 128), dtype=complex),
+    ],
+)
 def test_invalid_query(q):
     with pytest.raises(ValueError):
         match_recording(q, [], POLICY)
@@ -172,12 +184,22 @@ def test_cancellation_during_track_search():
     assert calls == 100
 
 
-@pytest.mark.parametrize("changes", [
-    {"min_score": float("nan")}, {"min_support": 0}, {"block_size": 0},
-    {"shortlist_size": 1}, {"offset_radius": -1}, {"min_margin": 0},
-    {"min_score": "0.9"}, {"min_score": True}, {"min_support": 6.0},
-    {"min_coverage": None}, {"block_size": True},
-])
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"min_score": float("nan")},
+        {"min_support": 0},
+        {"block_size": 0},
+        {"shortlist_size": 1},
+        {"offset_radius": -1},
+        {"min_margin": 0},
+        {"min_score": "0.9"},
+        {"min_score": True},
+        {"min_support": 6.0},
+        {"min_coverage": None},
+        {"block_size": True},
+    ],
+)
 def test_policy_validation(changes):
     with pytest.raises(ValueError):
         replace(POLICY, **changes)
@@ -223,7 +245,7 @@ def test_score_below_high_quality_band_is_returned(score, windows, quality):
     noise /= np.linalg.norm(noise, axis=1, keepdims=True)
     r = score * q + np.sqrt(1 - score**2) * noise
     r[windows:] = 0
-    policy = replace(POLICY, window_similarity=.5, min_score=.6)
+    policy = replace(POLICY, window_similarity=0.5, min_score=0.6)
     result = match_recording(q, [ref(r)], policy)
     assert result["state"] == "ambiguous"
     best = result["matches"][0]
@@ -246,31 +268,31 @@ def test_runner_entirely_below_window_threshold_still_prevents_high_quality():
     noise = vectors(20, seed=102)
     noise -= (noise * q).sum(axis=1, keepdims=True) * q
     noise /= np.linalg.norm(noise, axis=1, keepdims=True)
-    winner = .90 * q + np.sqrt(1 - .90**2) * noise
-    runner = .84 * q + np.sqrt(1 - .84**2) * noise
+    winner = 0.90 * q + np.sqrt(1 - 0.90**2) * noise
+    runner = 0.84 * q + np.sqrt(1 - 0.84**2) * noise
     result = match_recording(q, [ref(winner, "winner"), ref(runner, "runner")], POLICY)
-    assert result['state'] == 'ambiguous'
-    assert result['matches'][0]['track_id'] == 'winner'
-    assert result['matches'][0]['runner_up_margin'] == pytest.approx(.06)
-    assert result['matches'][0]['match_quality'] == 'possible'
+    assert result["state"] == "ambiguous"
+    assert result["matches"][0]["track_id"] == "winner"
+    assert result["matches"][0]["runner_up_margin"] == pytest.approx(0.06)
+    assert result["matches"][0]["match_quality"] == "possible"
 
 
 def test_repeated_passage_keeps_supported_occurrences_for_spread():
     q = np.vstack([np.eye(128)[:10]] * 2)
     result = match_recording(q, [ref(q)], POLICY)
-    assert result['state'] == 'identified'
-    best = result['matches'][0]
-    assert best['support'] == 10
-    assert best['coverage'] == best['temporal_spread'] == 1
+    assert result["state"] == "identified"
+    best = result["matches"][0]
+    assert best["support"] == 10
+    assert best["coverage"] == best["temporal_spread"] == 1
 
 
 def test_later_repetitions_can_support_partial_overlap():
     a, b = vectors(10), vectors(10, 42)
     q = np.vstack([a, b, a])
-    policy = replace(POLICY, min_coverage=.45, min_temporal_spread=.45)
+    policy = replace(POLICY, min_coverage=0.45, min_temporal_spread=0.45)
     result = match_recording(q, [ref(q[15:])], policy)
-    assert result['matches']
-    best = result['matches'][0]
-    assert best['offset_seconds'] == -7.5
-    assert best['support'] == 15
-    assert best['coverage'] == .5
+    assert result["matches"]
+    best = result["matches"][0]
+    assert best["offset_seconds"] == -7.5
+    assert best["support"] == 15
+    assert best["coverage"] == 0.5

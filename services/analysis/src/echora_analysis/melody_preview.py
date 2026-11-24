@@ -1,4 +1,5 @@
 """Bounded display data from existing hum-search contours, without audio analysis."""
+
 import math
 import statistics
 
@@ -13,11 +14,16 @@ def melody_preview(source: str, pitch, voiced, hop_seconds: float, limit: int = 
     points = []
     for index in range(count):
         start, end = index * length // count, (index + 1) * length // count
-        values = [float(pitch[i]) for i in range(start, end)
-                  if voiced[i] and math.isfinite(float(pitch[i]))]
+        values = [
+            float(pitch[i])
+            for i in range(start, end)
+            if voiced[i] and math.isfinite(float(pitch[i]))
+        ]
         # Preserve gaps instead of joining unrelated melodic phrases.
         value = round(statistics.median(values), 2) if len(values) >= (end - start) / 2 else None
-        points.append({"time_seconds": round((start + end - 1) / 2 * hop_seconds, 4), "pitch": value})
+        points.append(
+            {"time_seconds": round((start + end - 1) / 2 * hop_seconds, 4), "pitch": value}
+        )
     if not any(point["pitch"] is not None for point in points):
         return None
     return {"source": source, "points": points}

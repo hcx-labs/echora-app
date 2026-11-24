@@ -1,6 +1,13 @@
 from datetime import datetime, timezone
 
-from core.curation.listening import Listen, TopTrack, match_navidrome_play_counts, match_top_tracks, navidrome_play_counts, track_listen_counts
+from core.curation.listening import (
+    Listen,
+    TopTrack,
+    match_navidrome_play_counts,
+    match_top_tracks,
+    navidrome_play_counts,
+    track_listen_counts,
+)
 
 
 def test_track_listen_counts_matches_tracks_and_overnight_periods():
@@ -54,4 +61,7 @@ def test_match_navidrome_play_counts_maps_source_ids_once():
         {"id": "t3", "title": "Unlinked", "source_id": None},
     ]
     ranked = [("nd-2", 9), ("missing", 7), ("nd-1", 3), ("nd-2", 1)]
-    assert [(row["id"], count) for row, count in match_navidrome_play_counts(rows, ranked)] == [("t2", 9), ("t1", 3)]
+    assert [(row["id"], count) for row, count in match_navidrome_play_counts(rows, ranked)] == [
+        ("t2", 9),
+        ("t1", 3),
+    ]

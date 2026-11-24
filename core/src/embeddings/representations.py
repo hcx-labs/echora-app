@@ -1,4 +1,5 @@
 """One configured representation contract per model, shared by writers and readers."""
+
 from __future__ import annotations
 
 import hashlib
@@ -8,7 +9,12 @@ from core.settings import get_settings
 from psycopg.types.json import Jsonb
 
 MODELS = {
-    "muq_mulan": ("MUQ", "OpenMuQ/MuQ-MuLan-large", "2e01c796b71dca71b45251384c04cd7b237c9020", 512),
+    "muq_mulan": (
+        "MUQ",
+        "OpenMuQ/MuQ-MuLan-large",
+        "2e01c796b71dca71b45251384c04cd7b237c9020",
+        512,
+    ),
     "mert": ("MERT", "m-a-p/MERT-v1-95M", "12af15fef9d0ac838c3f475bfbbf26d2060dd4f5", 768),
     "bge_m3": ("LYRICS", "BAAI/bge-m3", "5617a9f61b028005a4858fdac845db406aefb181", 1024),
 }
@@ -17,11 +23,15 @@ MODELS = {
 def model_settings(name: str) -> tuple[str, str]:
     prefix, model_id, revision, _ = MODELS[name]
     settings = get_settings()
-    return getattr(settings, f"{prefix.lower()}_model_id"), getattr(settings, f"{prefix.lower()}_revision")
+    return getattr(settings, f"{prefix.lower()}_model_id"), getattr(
+        settings, f"{prefix.lower()}_revision"
+    )
 
 
 def config_hash(config: dict[str, object]) -> str:
-    return hashlib.sha256(json.dumps(config, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def embedding_config(name: str, revision: str | None = None) -> dict[str, object]:
@@ -29,15 +39,24 @@ def embedding_config(name: str, revision: str | None = None) -> dict[str, object
     revision = revision or configured_revision
     if name == "bge_m3":
         config = {
-            "model": name, "revision": revision, "chunk_tokens": 7168,
-            "overlap_tokens": 512, "aggregation": "normalized_mean",
-            "pooling": "bge-m3 dense", "maximum_tokens": 8192,
+            "model": name,
+            "revision": revision,
+            "chunk_tokens": 7168,
+            "overlap_tokens": 512,
+            "aggregation": "normalized_mean",
+            "pooling": "bge-m3 dense",
+            "maximum_tokens": 8192,
         }
     else:
         config = {
-            "model": name, "revision": revision, "sample_rate": 24000,
-            "coverage": "full-track", "windows": None, "window_seconds": 10,
-            "stride_seconds": 5, "aggregation": "normalized_mean",
+            "model": name,
+            "revision": revision,
+            "sample_rate": 24000,
+            "coverage": "full-track",
+            "windows": None,
+            "window_seconds": 10,
+            "stride_seconds": 5,
+            "aggregation": "normalized_mean",
             "store_window_embeddings": True,
         }
     # Preserve compatibility with existing default-model runs. Custom repositories
@@ -63,11 +82,27 @@ def configure_representations(connection) -> None:
         specs.append((kind, name, revision, config_hash(config), dimension, Jsonb(config)))
     for name in ("muq_mulan", "mert"):
         config = _profile_config(name, DEFAULT_PARAMETERS)
-        specs.append(("audio_profile", name, AUDIO_PROFILE_REVISION,
-                      config_hash(config), None, Jsonb(config)))
+        specs.append(
+            (
+                "audio_profile",
+                name,
+                AUDIO_PROFILE_REVISION,
+                config_hash(config),
+                None,
+                Jsonb(config),
+            )
+        )
     config = voice_config()
-    specs.append(("voice_classification", "mtg-jamendo-voice-gender-v2", "joint-v2",
-                  config_hash(config), 3, Jsonb(config)))
+    specs.append(
+        (
+            "voice_classification",
+            "mtg-jamendo-voice-gender-v2",
+            "joint-v2",
+            config_hash(config),
+            3,
+            Jsonb(config),
+        )
+    )
     with connection.cursor() as cursor:
         cursor.executemany(
             """INSERT INTO active_representation_specs
@@ -75,7 +110,8 @@ def configure_representations(connection) -> None:
                VALUES (%s,%s,%s,%s,%s,%s)
                ON CONFLICT (kind, model_name) DO UPDATE SET
                  model_revision=EXCLUDED.model_revision, config_hash=EXCLUDED.config_hash,
-                 dimension=EXCLUDED.dimension, config=EXCLUDED.config""", specs,
+                 dimension=EXCLUDED.dimension, config=EXCLUDED.config""",
+            specs,
         )
 
 

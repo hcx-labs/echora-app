@@ -27,8 +27,8 @@ def test_levels_are_channel_aware_and_last_window_keeps_actual_duration():
     curve = energy_curve(stereo, SAMPLE_RATE)
     assert len(curve) == 2
     assert curve[-1]["end_seconds"] == 1.25
-    assert curve[0]["rms_dbfs"] == pytest.approx(-15.0515, abs=.01)
-    assert curve[0]["sample_peak_dbfs"] == pytest.approx(-12.0412, abs=.01)
+    assert curve[0]["rms_dbfs"] == pytest.approx(-15.0515, abs=0.01)
+    assert curve[0]["sample_peak_dbfs"] == pytest.approx(-12.0412, abs=0.01)
 
 
 def test_spectral_centroid_tracks_tone_frequency():
@@ -39,10 +39,12 @@ def test_spectral_centroid_tracks_tone_frequency():
 
 def test_ebu_loudness_tracks_attenuation_without_claiming_true_peak():
     loud = analyze_waveform(tone())
-    quiet = analyze_waveform(tone(amplitude=.125))
+    quiet = analyze_waveform(tone(amplitude=0.125))
     assert loud["failed_components"] == []
     assert quiet["failed_components"] == []
-    assert loud["loudness"]["integrated_lufs"] - quiet["loudness"]["integrated_lufs"] == pytest.approx(6.0206, abs=.15)
+    assert loud["loudness"]["integrated_lufs"] - quiet["loudness"][
+        "integrated_lufs"
+    ] == pytest.approx(6.0206, abs=0.15)
     assert loud["true_peak_dbtp"] is None
     assert loud["confidence_calibrated"] is False
     json.dumps(loud, allow_nan=False)
@@ -52,7 +54,7 @@ def test_tempo_retains_raw_confidence_and_valid_timestamps():
     stereo = np.zeros((15 * SAMPLE_RATE, 2), dtype=np.float32)
     click = np.hanning(600).astype(np.float32)
     for start in range(0, len(stereo) - len(click), SAMPLE_RATE // 2):
-        stereo[start:start + len(click), :] = click[:, None]
+        stereo[start : start + len(click), :] = click[:, None]
     result = analyze_waveform(stereo)
     assert "rhythm" not in result["failed_components"]
     assert result["rhythm"]["half_double_tempo_ambiguity"] is True

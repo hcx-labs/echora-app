@@ -29,8 +29,11 @@ def test_cache_reused_across_instances_and_not_mutable(tmp_path):
 def test_source_and_recipe_invalidate(tmp_path):
     produce = Mock(return_value=np.ones(10, dtype=np.float32))
     c = cache(tmp_path)
-    for source, recipe in [(b"one", {"rate": 16000}), (b"two", {"rate": 16000}),
-                           (b"two", {"rate": 24000})]:
+    for source, recipe in [
+        (b"one", {"rate": 16000}),
+        (b"two", {"rate": 16000}),
+        (b"two", {"rate": 24000}),
+    ]:
         c.array(source, recipe, produce)
     assert produce.call_count == 3
 
@@ -55,12 +58,15 @@ def test_corruption_is_rebuilt(tmp_path, damage):
 def test_cancel_during_publish_never_reuses_partial(tmp_path):
     class Cancel(BaseException):
         pass
+
     checks = 0
+
     def check():
         nonlocal checks
         checks += 1
         if checks == 5:  # After array publish, before manifest publish.
             raise Cancel()
+
     produce = Mock(return_value=np.ones(10, dtype=np.float32))
     with pytest.raises(Cancel):
         cache(tmp_path, check=check).array(b"song", {}, produce)
@@ -81,9 +87,11 @@ def test_failed_or_nonfinite_producer_is_not_cached(tmp_path):
 def test_concurrent_same_artifact_has_one_producer(tmp_path):
     barrier = threading.Barrier(2)
     produce = Mock(return_value=np.ones(1000, dtype=np.float32))
+
     def read():
         barrier.wait(timeout=5)
         return cache(tmp_path).array(b"same", {}, produce)
+
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(read) for _ in range(2)]
         for future in futures:
@@ -113,6 +121,7 @@ def test_oversized_result_is_returned_without_retention(tmp_path):
 
 def test_decode_contracts_cached_only_in_session(monkeypatch, tmp_path):
     import core.media.audio as audio
+
     monkeypatch.setenv("ECHORA_PREPROCESS_DIR", str(tmp_path))
     get_settings.cache_clear()
     raw = Mock(return_value=np.ones(10, dtype=np.float32))
@@ -136,11 +145,14 @@ def test_shared_vocals_for_transcription_and_karaoke(monkeypatch, tmp_path):
     import core.media.audio as audio
     import worker.media.roformer as roformer
     import soundfile as sf
+
     monkeypatch.setenv("ECHORA_PREPROCESS_DIR", str(tmp_path))
     get_settings.cache_clear()
     separate = Mock(side_effect=lambda waveform, check: waveform * 0.25)
     monkeypatch.setattr(roformer, "separate_vocals", separate)
-    monkeypatch.setattr(audio, "_decode_audio_channels", Mock(return_value=np.ones((44100, 2), dtype=np.float32)))
+    monkeypatch.setattr(
+        audio, "_decode_audio_channels", Mock(return_value=np.ones((44100, 2), dtype=np.float32))
+    )
     before_separate = Mock()
     with p.preprocessing_session():
         p.vocal_waveform(b"song", before_separate=before_separate)
@@ -164,8 +176,10 @@ def test_shared_vocals_for_transcription_and_karaoke(monkeypatch, tmp_path):
 def test_cancel_check_propagates_through_session(monkeypatch, tmp_path):
     monkeypatch.setenv("ECHORA_PREPROCESS_DIR", str(tmp_path))
     get_settings.cache_clear()
+
     class Cancel(BaseException):
         pass
+
     with p.preprocessing_session(lambda: (_ for _ in ()).throw(Cancel())):
         with pytest.raises(Cancel):
             p.cached_decode(b"song", 24000, 1, lambda: np.ones(10))
@@ -182,9 +196,15 @@ def test_manifest_has_source_and_recipe_but_no_credentials(tmp_path):
 
 def test_audio_plan_prepares_only_pending_formats():
     from worker.planning.audio import AudioProcessingPlan, audio_prerequisites
-    plan = AudioProcessingPlan(frozenset({"embedding"}), frozenset({"embedding"}),
-                               frozenset({"fingerprint"}), frozenset({"melody"}),
-                               frozenset({"melody"}), frozenset({"waveform"}))
+
+    plan = AudioProcessingPlan(
+        frozenset({"embedding"}),
+        frozenset({"embedding"}),
+        frozenset({"fingerprint"}),
+        frozenset({"melody"}),
+        frozenset({"melody"}),
+        frozenset({"waveform"}),
+    )
     assert audio_prerequisites(plan, "embedding").mono_rates == (24000,)
     assert audio_prerequisites(plan, "melody").stereo_rates == (44100,)
     assert audio_prerequisites(plan, "waveform").stereo_rates == (24000,)
@@ -195,6 +215,7 @@ def test_audio_plan_prepares_only_pending_formats():
 def test_melody_reuses_shared_vocals_and_caches_residual(monkeypatch, tmp_path):
     import core.media.audio as audio
     import worker.media.roformer as roformer
+
     monkeypatch.setenv("ECHORA_PREPROCESS_DIR", str(tmp_path))
     get_settings.cache_clear()
     mix = np.random.default_rng(22).uniform(-2, 2, (44100, 2)).astype(np.float32)
@@ -238,6 +259,7 @@ def test_prune_stops_checking_once_remaining_entries_are_retained(tmp_path):
 def test_karaoke_reference_matches_vocal_resampling_grid(monkeypatch, tmp_path, frames):
     import core.media.audio as audio
     import worker.media.roformer as roformer
+
     monkeypatch.setenv("ECHORA_PREPROCESS_DIR", str(tmp_path))
     get_settings.cache_clear()
     mix = np.random.default_rng(frames).uniform(-1, 1, (frames, 2)).astype(np.float32)
