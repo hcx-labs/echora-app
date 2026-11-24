@@ -1,6 +1,6 @@
 """Source replacement must refresh identity before planning new analysis."""
 
-from core.settings import get_settings
+from core.config import reset_config_cache
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
@@ -106,7 +106,7 @@ def test_explicit_source_hashes_before_single_bound_plan_even_when_complete(monk
     client.audio_bytes.return_value = b"new bytes"
     monkeypatch.setattr(ingest.psycopg, "connect", lambda *a, **kw: connection)
     monkeypatch.setenv("DATABASE_URL", "unused")
-    get_settings.cache_clear()
+    reset_config_cache()
     monkeypatch.setattr(ingest, "NavidromeClient", lambda *a: client)
     monkeypatch.setattr(ingest, "configure_representations", Mock())
     monkeypatch.setattr(ingest, "_library", lambda *a: "library")

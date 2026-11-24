@@ -8,7 +8,7 @@ from psycopg.types.json import Jsonb
 
 from core.integrations.external_ai import ExternalAISettings, LanguagePair
 from worker.translation.client import source_checksum, validate_lines
-from core.settings import require_database_url
+from core.db.config import require_database_url
 
 
 def load_settings():

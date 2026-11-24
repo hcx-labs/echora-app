@@ -1,6 +1,6 @@
 """Source rechecks are independent of canonical analysis completeness."""
 
-from core.settings import get_settings
+from core.config import reset_config_cache
 
 import os
 from types import SimpleNamespace
@@ -18,7 +18,7 @@ def source(monkeypatch):
     if not url:
         pytest.skip("TEST_DATABASE_URL required")
     monkeypatch.setenv("ECHORA_SOURCE_RECHECK_SECONDS", "604800")
-    get_settings.cache_clear()
+    reset_config_cache()
     db = psycopg.connect(url)
     library, namespace, track = [uuid4() for _ in range(3)]
     try:
@@ -68,7 +68,7 @@ def test_unknown_or_expired_verification_rechecks_without_metadata_changes(sourc
 def test_strict_mode_rechecks_every_full_sync(source, monkeypatch):
     db, library = source
     monkeypatch.setenv("ECHORA_SOURCE_RECHECK_SECONDS", "0")
-    get_settings.cache_clear()
+    reset_config_cache()
     assert sources_needing_refresh(db, library, ["source"], catalog(size=100)) == {"source"}
 
 

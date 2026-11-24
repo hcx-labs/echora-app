@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from core.settings import get_settings
+from core.db.config import DatabaseConfig
+from core.embeddings.config import EmbeddingConfig
 
 from dataclasses import dataclass
 import hashlib
@@ -279,7 +280,7 @@ def ingest_navidrome(
     summary = IngestSummary(requested=len(song_ids))
 
     with (
-        psycopg.connect(get_settings().database_url) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url) as connection,
         NavidromeClient(url, username, password) as navidrome,
     ):
         configure_representations(connection)
@@ -625,10 +626,14 @@ def ingest_navidrome(
             )
             muq = (
                 RemoteModel(
-                    MuQMuLanModel.name, get_settings().muq_model_id, get_settings().muq_revision
+                    MuQMuLanModel.name,
+                    EmbeddingConfig.load().muq_model_id,
+                    EmbeddingConfig.load().muq_revision,
                 )
                 if current_remote()
-                else MuQMuLanModel(get_settings().muq_model_id, get_settings().muq_revision, device)
+                else MuQMuLanModel(
+                    EmbeddingConfig.load().muq_model_id, EmbeddingConfig.load().muq_revision, device
+                )
             )
             try:
                 embedding_phase("muq", "Embedding semantics for", plan.muq_external_ids, muq)
@@ -649,10 +654,16 @@ def ingest_navidrome(
             )
             mert = (
                 RemoteModel(
-                    MertModel.name, get_settings().mert_model_id, get_settings().mert_revision
+                    MertModel.name,
+                    EmbeddingConfig.load().mert_model_id,
+                    EmbeddingConfig.load().mert_revision,
                 )
                 if current_remote()
-                else MertModel(get_settings().mert_model_id, get_settings().mert_revision, device)
+                else MertModel(
+                    EmbeddingConfig.load().mert_model_id,
+                    EmbeddingConfig.load().mert_revision,
+                    device,
+                )
             )
             try:
                 embedding_phase("mert", "Embedding acoustics for", plan.mert_external_ids, mert)

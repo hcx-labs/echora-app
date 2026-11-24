@@ -8,6 +8,9 @@ from model storage.
 
 from __future__ import annotations
 
+from core.db.config import DatabaseConfig
+from core.media.config import MotionArtworkConfig
+from worker.artwork.config import ComfyUIConfig
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -26,7 +29,6 @@ from worker.artwork.render import (
     REQUIRED_LOADERS,
     Recipe,
 )
-from core.settings import get_settings
 
 FIELDS = (
     "enabled",
@@ -114,7 +116,7 @@ class MotionArtworkSettings(BaseModel):
 
     def external_url(self) -> str:
         """A running ComfyUI to use instead of starting one, or blank for the embedded one."""
-        return self.comfyui_url or get_settings().comfyui_url
+        return self.comfyui_url or ComfyUIConfig.load().url
 
 
 class LocationUpdate(BaseModel):
@@ -123,7 +125,7 @@ class LocationUpdate(BaseModel):
 
 
 def _connect():
-    return psycopg.connect(get_settings().database_url, row_factory=dict_row)
+    return psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row)
 
 
 def load_settings(cursor) -> MotionArtworkSettings:
@@ -211,7 +213,7 @@ def clear_loops() -> dict[str, int]:
             removed += 1
         except (OSError, ValueError):
             pass
-    for directory in sorted(Path(get_settings().motion_artwork_dir).glob("*/"), reverse=True):
+    for directory in sorted(Path(MotionArtworkConfig.load().dir).glob("*/"), reverse=True):
         try:
             directory.rmdir()  # Only removes directories that are now empty.
         except OSError:
@@ -221,7 +223,7 @@ def clear_loops() -> dict[str, int]:
 
 def artwork_path(relative: str) -> Path:
     """Resolve a stored relative path, refusing anything outside the artwork directory."""
-    root = Path(get_settings().motion_artwork_dir).resolve()
+    root = Path(MotionArtworkConfig.load().dir).resolve()
     path = (root / relative).resolve()
     if root not in path.parents:
         raise ValueError("Artwork path escapes the artwork directory")
@@ -246,10 +248,8 @@ def track_artwork(cursor, user_id, track_id) -> dict | None:
 def _embedded_status() -> dict[str, object]:
     from huggingface_hub import try_to_load_from_cache
 
-    settings = get_settings()
-    installed = (Path(settings.comfyui_dir) / "main.py").is_file() and Path(
-        settings.comfyui_python
-    ).is_file()
+    comfyui = ComfyUIConfig.load()
+    installed = (Path(comfyui.dir) / "main.py").is_file() and Path(comfyui.python).is_file()
     missing = [
         filename.rsplit("/", 1)[-1]
         for repo, revision, filename in MODEL_FILES
@@ -302,7 +302,7 @@ def router(require_user):
         return {
             **settings.model_dump(),
             "defaults": {
-                "comfyui_url": get_settings().comfyui_url,
+                "comfyui_url": ComfyUIConfig.load().url,
                 "instructions": DEFAULT_INSTRUCTIONS,
             },
         }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.settings import get_settings
+from worker.library.config import LibraryConfig
 
 
 # Ignore per-user playback/star/rating fields. Catalog metadata is only a change
@@ -33,7 +33,7 @@ _CONTENT_HINTS = (
 
 
 def sources_needing_refresh(connection, library_id, external_ids, catalog=()):
-    interval = int(get_settings().source_recheck_seconds)
+    interval = int(LibraryConfig.load().source_recheck_seconds)
     if interval < 0:
         raise ValueError("ECHORA_SOURCE_RECHECK_SECONDS must be nonnegative")
     current = {track.id: getattr(track, "raw", {}) or {} for track in catalog}

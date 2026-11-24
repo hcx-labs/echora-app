@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from __future__ import annotations
+from core.db.config import DatabaseConfig
 from core.errors import ConflictError, IntegrationError, InvalidQueryError, NotFoundError
 from core.library.connections import credential_cipher
 from datetime import datetime, timedelta, timezone
@@ -20,7 +21,6 @@ from core.curation.ranking import (
     rank_curation,
 )
 from core.db.session import session_scope
-from core.settings import get_settings
 from core.db.models import UserPreference
 from core.curation.journeys import (
     normalize_rows as normalize_journey_rows,
@@ -91,7 +91,7 @@ def curation_corpus(
     list[tuple[np.ndarray, np.ndarray] | None],
 ]:
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -383,7 +383,7 @@ def preview_sonic_journey(
     )
 
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -484,7 +484,7 @@ def preview_curation(
     language_map: dict[str, dict[str, object]] = {}
     if request.target_language:
         with (
-            psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+            psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
             connection.cursor() as cursor,
         ):
             cursor.execute(

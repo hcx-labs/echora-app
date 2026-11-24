@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from core.db.config import DatabaseConfig
+from core.embeddings.config import EmbeddingConfig
 from core.library.connections import credential_cipher
-from core.settings import get_settings
 
 from collections.abc import Callable
 import hashlib
@@ -264,7 +265,7 @@ def backfill_lyrics(
         "failed": 0,
     }
     with (
-        psycopg.connect(get_settings().database_url) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url) as connection,
         NavidromeClient(url, username, password) as client,
     ):
         library_id = resolve_library_id(connection, url)
@@ -625,12 +626,14 @@ def backfill_lyrics(
         model = (
             RemoteModel(
                 LyricsEmbeddingModel.name,
-                get_settings().lyrics_model_id,
-                get_settings().lyrics_revision,
+                EmbeddingConfig.load().lyrics_model_id,
+                EmbeddingConfig.load().lyrics_revision,
             )
             if remote
             else LyricsEmbeddingModel(
-                get_settings().lyrics_model_id, get_settings().lyrics_revision, device
+                EmbeddingConfig.load().lyrics_model_id,
+                EmbeddingConfig.load().lyrics_revision,
+                device,
             )
         )
         try:

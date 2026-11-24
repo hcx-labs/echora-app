@@ -11,7 +11,7 @@ languages constantly), so the module always produces a distribution:
 
 from __future__ import annotations
 
-from core.settings import get_settings
+from core.lyrics.config import LanguageConfig
 
 import hashlib
 import logging
@@ -30,13 +30,13 @@ MODEL_URL = (
     "9f2e94d2fd6b2615d26f5ec5b34cf7e2f38cb86e/lid.176.bin"
 )
 MODEL_SHA256 = "7e69ec5451bc261cc7844e49e4792a85d7f09c06789ec800fc4a44aec362764e"
-MODEL_PATH = get_settings().lid_model_path
+MODEL_PATH = LanguageConfig.load().lid_model_path
 
 # IndicLID-FTR (AI4Bharat): fastText model trained on romanized Indic text.
 # Catches Hindi/Urdu/etc. written in Latin script ("Hinglish"), which generic
 # LID models misclassify as European languages. Lazy-downloaded on first use.
 INDICLID_FTR_URL = "https://github.com/AI4Bharat/IndicLID/releases/download/v1.0/indiclid-ftr.zip"
-INDICLID_FTR_PATH = get_settings().indiclid_ftr_path
+INDICLID_FTR_PATH = LanguageConfig.load().indiclid_ftr_path
 INDICLID_FTR_THRESHOLD = 0.6
 INDIC_LABELS = {
     "hin": "hi",

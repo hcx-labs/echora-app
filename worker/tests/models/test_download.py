@@ -1,12 +1,12 @@
-from core.settings import get_settings
+from core.config import reset_config_cache
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def _reset_settings_cache():
-    get_settings.cache_clear()
+    reset_config_cache()
     yield
-    get_settings.cache_clear()
+    reset_config_cache()
 
 
 from unittest.mock import Mock

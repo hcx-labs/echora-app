@@ -1,4 +1,4 @@
-from core.settings import get_settings
+from core.config import reset_config_cache
 
 import io
 import json
@@ -29,10 +29,10 @@ def test_stored_model_revision_tracks_the_audio_input(monkeypatch):
     for value in ("true", "false"):
         monkeypatch.setenv("FA_KARA_VOCAL_SEPARATION", value)
         monkeypatch.setenv("FA_KARA_DEMUCS_MODEL", "ignored")
-        get_settings.cache_clear()
+        reset_config_cache()
         assert _stored_model_revision("model-revision").endswith(":model-revision:mix")
     monkeypatch.setenv("FA_KARA_AUDIO_INPUT", "vocals")
-    get_settings.cache_clear()
+    reset_config_cache()
     assert _stored_model_revision("model-revision").endswith(
         f":model-revision:roformer:{SEPARATION_REVISION}"
     )
@@ -183,7 +183,7 @@ def test_worker_aligns_the_configured_audio_without_line_times(
     monkeypatch.setenv("HF_HOME", str(tmp_path))
     monkeypatch.setenv("FA_KARA_AUDIO_INPUT", audio_input)
     monkeypatch.setenv("FA_KARA_VOCAL_SEPARATION", "false")
-    get_settings.cache_clear()
+    reset_config_cache()
     separated = source == "roformer_vocals"
     snapshot = (
         tmp_path
@@ -275,7 +275,7 @@ def test_worker_aligns_the_configured_audio_without_line_times(
 def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch, cancel):
     monkeypatch.setenv("DATABASE_URL", "unused-mocked")
     monkeypatch.setenv("FA_KARA_AUDIO_INPUT", "vocals")
-    get_settings.cache_clear()
+    reset_config_cache()
     connection = MagicMock()
     monkeypatch.setattr(pipeline.psycopg, "connect", lambda _: connection)
     connection.__enter__.return_value = connection
@@ -346,7 +346,7 @@ def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch,
 def test_backfill_aligns_the_original_mix_without_separating(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "unused-mocked")
     monkeypatch.setenv("FA_KARA_AUDIO_INPUT", "mix")
-    get_settings.cache_clear()
+    reset_config_cache()
     connection = MagicMock()
     monkeypatch.setattr(pipeline.psycopg, "connect", lambda _: connection)
     connection.__enter__.return_value = connection
@@ -467,7 +467,7 @@ def test_local_model_path_overrides_snapshot(monkeypatch, tmp_path):
     monkeypatch.setenv("HF_HOME", str(tmp_path / "missing-cache"))
     monkeypatch.setenv("FA_KARA_MODEL_PATH", str(checkpoint))
     monkeypatch.setenv("FA_KARA_REVISION", "v6-checkpoint-22000")
-    get_settings.cache_clear()
+    reset_config_cache()
     monkeypatch.setattr(pipeline, "_fa_kara_worker", lambda *args: object())
     seen = {}
 
@@ -505,7 +505,7 @@ def test_local_model_path_overrides_snapshot(monkeypatch, tmp_path):
     try:
         result = pipeline._run_fa_kara(b"audio", "Hello", "en", [], False)
     finally:
-        get_settings.cache_clear()
+        reset_config_cache()
     assert seen["model"] == str(checkpoint)
     # A local checkpoint is identified by its weights, not by the FA_KARA_REVISION label.
     assert result["model"] == str(checkpoint)
@@ -519,12 +519,12 @@ def test_replacing_a_local_checkpoint_changes_its_identity(monkeypatch, tmp_path
     weights.write_bytes(b"weights v1")
     monkeypatch.setenv("FA_KARA_REVISION", "same-label")
     monkeypatch.delenv("FA_KARA_MODEL_PATH", raising=False)
-    get_settings.cache_clear()
+    reset_config_cache()
     try:
         # Without a local checkpoint, the pinned revision is the identity.
         assert pipeline.current_model_revision() == "same-label"
         monkeypatch.setenv("FA_KARA_MODEL_PATH", str(checkpoint))
-        get_settings.cache_clear()
+        reset_config_cache()
         first = pipeline.current_model_revision()
         weights.write_bytes(b"weights v2, retrained")
         os.utime(weights, ns=(1, 1))
@@ -536,7 +536,7 @@ def test_replacing_a_local_checkpoint_changes_its_identity(monkeypatch, tmp_path
         with pytest.raises(RuntimeError, match="no weights file"):
             pipeline.current_model_revision()
     finally:
-        get_settings.cache_clear()
+        reset_config_cache()
 
 
 def test_second_stream_words_that_overlap_are_marked_as_a_second_voice(monkeypatch):
@@ -545,7 +545,7 @@ def test_second_stream_words_that_overlap_are_marked_as_a_second_voice(monkeypat
     # Without inline backing placement an unbracketed second-stream phrase is a second voice only
     # when it is simultaneous; bracketed words always are.
     monkeypatch.setenv("FA_KARA_INLINE_BACKING", "false")
-    get_settings.cache_clear()
+    reset_config_cache()
     lines = [
         {
             "text": "Lonely (so lonely) tonight",
@@ -588,13 +588,13 @@ def test_second_stream_words_that_overlap_are_marked_as_a_second_voice(monkeypat
     assert [s.get("voice") for s in lines[2]["syllables"]] == [None, None, None]
     assert [s.get("voice") for s in lines[3]["syllables"]] == [None, None]
     assert all("voice" not in line for line in lines)
-    get_settings.cache_clear()
+    reset_config_cache()
 
 
 def test_inline_backing_marks_every_second_stream_phrase_as_a_second_voice():
     from worker.kara.pipeline import mark_backing_voice
 
-    get_settings.cache_clear()  # inline backing placement is the default
+    reset_config_cache()  # inline backing placement is the default
     lines = [
         {
             "text": "I want something stronger (I want it)",
@@ -669,7 +669,7 @@ def test_overlap_between_lines_is_not_a_second_voice():
 
 
 def test_worker_environment_carries_the_decoder_weights(monkeypatch, tmp_path):
-    get_settings.cache_clear()
+    reset_config_cache()
     seen = []
 
     class Worker:
@@ -691,10 +691,10 @@ def test_worker_environment_carries_the_decoder_weights(monkeypatch, tmp_path):
     assert pipeline._fa_kara_worker(tmp_path, "revision") is worker and len(seen) == 1
     # A changed weight is a different decoder: the worker is replaced.
     monkeypatch.setenv("FA_KARA_TEXT_BONUS", "0.1")
-    get_settings.cache_clear()
+    reset_config_cache()
     assert pipeline._fa_kara_worker(tmp_path, "revision") is not worker
     assert seen[-1]["FA_KARA_TEXT_BONUS"] == "0.1" and "terminated" in seen
-    get_settings.cache_clear()
+    reset_config_cache()
 
 
 @pytest.mark.parametrize(
@@ -706,7 +706,7 @@ def test_lyrics_without_a_language_ask_the_aligner_to_identify_them(
     """A known language the normalizer has no rules for ("es") stays on the generic path; only a
     missing one is identified by the aligner, which would otherwise spell English letter by letter."""
     monkeypatch.setenv("HF_HOME", str(tmp_path))
-    get_settings.cache_clear()
+    reset_config_cache()
     snapshot = (
         tmp_path
         / "hub"
@@ -741,4 +741,4 @@ def test_lyrics_without_a_language_ask_the_aligner_to_identify_them(
         assert argv[argv.index("--lang") + 1] == "auto"
         allowed = argv[argv.index("--detect_language") + 1].split(",")
         assert {"en", "ja", "ko"} <= set(allowed)
-    get_settings.cache_clear()
+    reset_config_cache()

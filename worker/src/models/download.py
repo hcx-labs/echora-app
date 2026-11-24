@@ -1,4 +1,7 @@
-from core.settings import get_settings
+from core.db.config import DatabaseConfig
+from core.media.config import MotionArtworkConfig
+from worker.kara.config import KaraConfig
+from worker.models.config import ModelsConfig
 import argparse
 import hashlib
 import json
@@ -42,8 +45,8 @@ LEGACY_MANAGED_MODELS = {"NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn"}
 
 def required_models() -> tuple[tuple[str, str, bool], ...]:
     """Return immutable model revisions required by the active service config."""
-    fa_model = get_settings().fa_kara_model_id
-    fa_revision = get_settings().fa_kara_revision
+    fa_model = KaraConfig.load().model_id
+    fa_revision = KaraConfig.load().revision
     from worker.transcription.config import transcription_model
 
     moss = transcription_model()
@@ -62,7 +65,7 @@ def model_manifest(motion_artwork: bool | None = None) -> str:
     or for Modal, its motion artwork switch).
     """
     if motion_artwork is None:
-        motion_artwork = get_settings().motion_artwork_models
+        motion_artwork = MotionArtworkConfig.load().models
     content = {
         "snapshots": [list(item) for item in required_models()],
         "essentia": [list(item) for item in ESSENTIA_MODELS],
@@ -74,7 +77,7 @@ def model_manifest(motion_artwork: bool | None = None) -> str:
 
 def analysis_downloads() -> list[tuple[str, object]]:
     """Ordered download steps for the models analysis needs: (label, callable)."""
-    motion_artwork = get_settings().motion_artwork_models
+    motion_artwork = MotionArtworkConfig.load().models
     steps: list[tuple[str, object]] = []
     for model, revision, needs_main_ref in required_models():
 
@@ -138,7 +141,7 @@ def _prune_huggingface_cache(required: tuple[tuple[str, str, bool], ...]) -> Non
 
 def _download_essentia() -> None:
     """Fetch the MTG-Jamendo voice/gender classifier files used by voice_pipeline."""
-    directory = Path(get_settings().essentia_models_dir)
+    directory = Path(ModelsConfig.load().essentia_dir)
     directory.mkdir(parents=True, exist_ok=True)
     for url, expected_sha256 in ESSENTIA_MODELS:
         target = directory / url.rsplit("/", 1)[-1]
@@ -176,14 +179,14 @@ def _download_motion_artwork() -> None:
 
 
 def main(*, prune_only: bool = False, motion_artwork: bool = False) -> None:
-    if not prune_only and not os.environ.get("HF_TOKEN") and get_settings().database_url:
+    if not prune_only and not os.environ.get("HF_TOKEN") and DatabaseConfig.load().database_url:
         # The token saved in Settings → Analysis models, for gated models such as LTX-2.5.
         from worker.models.huggingface_token import token_or_none
 
         token = token_or_none()
         if token:
             os.environ["HF_TOKEN"] = token
-    motion_artwork = motion_artwork or get_settings().motion_artwork_models
+    motion_artwork = motion_artwork or MotionArtworkConfig.load().models
     required = required_models() + motion_artwork_snapshots(motion_artwork)
     if not prune_only:
         download_recording_model()

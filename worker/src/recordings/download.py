@@ -6,6 +6,7 @@ ECHORA_RECORDING_MODEL_DIRECTORY defaults to /data/models/recording. Bundles liv
 under <directory>/<full revision>, leaving other generations untouched.
 """
 
+from worker.recordings.config import RecordingConfig
 from collections.abc import Mapping
 import errno
 import json
@@ -49,29 +50,19 @@ def validate_bundle(directory: Path) -> None:
 
 
 def download_recording_model(environ: Mapping[str, str] | None = None) -> Path | None:
-    from core.settings import get_settings
+    """Download and verify the configured recording bundle; ``None`` when none is configured.
 
-    settings = get_settings() if environ is None else None
-    env = environ
-    model_id = (
-        settings.recording_model_id if settings else env.get("ECHORA_RECORDING_MODEL_ID", "")
-    ).strip()
-    revision = (
-        settings.recording_model_revision
-        if settings
-        else env.get("ECHORA_RECORDING_MODEL_REVISION", "")
-    ).strip()
+    ``environ`` replaces the process environment (tests).
+    """
+    config = RecordingConfig.load() if environ is None else RecordingConfig.from_environ(environ)
+    model_id, revision = config.model_id.strip(), config.model_revision.strip()
     if not model_id and not revision:
         return None
     if not model_id or not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError(
             "Set ECHORA_RECORDING_MODEL_ID and a full immutable ECHORA_RECORDING_MODEL_REVISION together"
         )
-    root = Path(
-        settings.recording_model_directory
-        if settings
-        else env.get("ECHORA_RECORDING_MODEL_DIRECTORY", "/data/models/recording")
-    )
+    root = Path(config.model_directory)
     if not root.is_absolute():
         raise ValueError("ECHORA_RECORDING_MODEL_DIRECTORY must be an absolute mounted path")
     destination = root / revision

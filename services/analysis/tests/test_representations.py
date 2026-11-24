@@ -1,6 +1,6 @@
 from core.curation.preview import curation_corpus
 from core.library.membership import reconcile_user_tracks
-from core.settings import get_settings
+from core.config import reset_config_cache
 
 import os
 import uuid
@@ -30,10 +30,10 @@ def test_default_contract_preserves_existing_audio_configuration():
 def test_custom_repository_and_revision_cannot_reuse_default_contract(monkeypatch):
     original = config_hash(embedding_config("muq_mulan"))
     monkeypatch.setenv("MUQ_MODEL_ID", "example/custom")
-    get_settings.cache_clear()
+    reset_config_cache()
     assert config_hash(embedding_config("muq_mulan")) != original
     monkeypatch.setenv("MUQ_REVISION", "another-revision")
-    get_settings.cache_clear()
+    reset_config_cache()
     assert model_settings("muq_mulan") == ("example/custom", "another-revision")
     assert embedding_config("muq_mulan")["revision"] == "another-revision"
 
@@ -115,7 +115,7 @@ def test_revision_switch_reduces_coverage_instead_of_mixing_spaces(db, monkeypat
     old = add_run(db)
     add_embedding(db, old)
     monkeypatch.setenv("MUQ_REVISION", "replacement")
-    get_settings.cache_clear()
+    reset_config_cache()
     configure_representations(db)
     assert db.execute("SELECT count(*) FROM current_embeddings").fetchone()[0] == 0
     new = add_run(db)
@@ -291,7 +291,7 @@ def test_job_transition_interrupts_only_its_unfinished_attempts(db, monkeypatch)
     run = add_run(db)
     unrelated = start_attempt(db, run, 1)
     monkeypatch.setenv("ECHORA_JOB_ID", str(job_id))
-    get_settings.cache_clear()
+    reset_config_cache()
     owned = start_attempt(db, run, 1)
     db.execute("UPDATE jobs SET status='queued' WHERE id=%s", (job_id,))
     assert db.execute("SELECT status FROM analysis_attempts WHERE id=%s", (owned,)).fetchone() == (

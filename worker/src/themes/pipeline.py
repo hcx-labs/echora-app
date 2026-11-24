@@ -14,6 +14,7 @@ tracks with lyrics (`core.curation.preview.theme_overlay`).
 
 from __future__ import annotations
 
+from core.embeddings.config import EmbeddingConfig
 from core.library.connections import credential_cipher
 import concurrent.futures
 import hashlib
@@ -31,7 +32,7 @@ from psycopg.types.json import Jsonb
 from core.integrations.claude import ClaudeError, complete_json
 from core.integrations.external_ai import ExternalAISettings
 from core.revisions import LYRIC_THEMES_REVISION
-from core.settings import require_database_url
+from core.db.config import require_database_url
 
 logger = logging.getLogger(__name__)
 
@@ -227,11 +228,12 @@ class _Embedder:
             import torch
 
             from core.embeddings.text import LyricsEmbeddingModel
-            from core.settings import get_settings
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
             self.model = LyricsEmbeddingModel(
-                get_settings().lyrics_model_id, get_settings().lyrics_revision, device
+                EmbeddingConfig.load().lyrics_model_id,
+                EmbeddingConfig.load().lyrics_revision,
+                device,
             )
         outcomes = []
         for text in texts:

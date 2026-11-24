@@ -1,6 +1,6 @@
 """Execution binds canonical artifacts to hashed source bytes, not mutable aliases."""
 
-from core.settings import get_settings
+from core.config import reset_config_cache
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
@@ -36,7 +36,7 @@ def execution(monkeypatch):
     planner = Mock()
     monkeypatch.setattr(ingest, "plan_audio", planner)
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
-    get_settings.cache_clear()
+    reset_config_cache()
     return connection, client, upsert, waveform, planner
 
 

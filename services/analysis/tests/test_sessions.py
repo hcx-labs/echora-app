@@ -1,5 +1,6 @@
 """Independent session policy, HTTP contract, and PostgreSQL concurrency checks."""
 
+from core.config import reset_config_cache
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -22,13 +23,13 @@ def auth(monkeypatch):
         "DATABASE_URL", os.getenv("TEST_DATABASE_URL", "postgresql://localhost/unused")
     )
     monkeypatch.setenv("ECHORA_SESSION_TRUSTED_ORIGINS", "http://testserver")
-    from core.settings import get_settings
+    from core.config import reset_config_cache
 
-    get_settings.cache_clear()
+    reset_config_cache()
     import echora_analysis.sessions as sessions
 
     yield sessions
-    get_settings.cache_clear()
+    reset_config_cache()
 
 
 @pytest.fixture
@@ -207,7 +208,7 @@ def test_activity_contract_and_cookie_security(auth, monkeypatch):
     assert response.headers["cache-control"] == "no-store"
     assert "opaque-test-token" not in response.text
     monkeypatch.setenv("COOKIE_SECURE", "true")
-    auth.get_settings.cache_clear()
+    reset_config_cache()
     secure = client.post(
         "/auth/session/activity", headers={"X-Echora-Activity": "1", "Origin": "http://testserver"}
     )
@@ -315,7 +316,7 @@ def test_environment_overrides_control_new_sessions_and_renewals(auth, database,
         ("RENEW_INTERVAL", 600),
     ]:
         monkeypatch.setenv("ECHORA_SESSION_" + name + "_SECONDS", str(value))
-    auth.get_settings.cache_clear()
+    reset_config_cache()
     now = datetime.now(timezone.utc)
     token, expires, absolute = issue(auth, database, now)
     assert expires == now + timedelta(hours=2)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.settings import get_settings
+from core.integrations.config import NavidromeConfig
 
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -31,13 +31,13 @@ class NavidromeTrack:
 
 _media_http_client = httpx.Client(
     timeout=httpx.Timeout(
-        get_settings().navidrome_timeout_seconds, read=get_settings().navidrome_read_timeout_seconds
+        NavidromeConfig.load().timeout_seconds, read=NavidromeConfig.load().read_timeout_seconds
     ),
     follow_redirects=True,
     limits=httpx.Limits(
-        max_connections=get_settings().navidrome_max_connections,
-        max_keepalive_connections=get_settings().navidrome_max_keepalive_connections,
-        keepalive_expiry=get_settings().navidrome_keepalive_expiry_seconds,
+        max_connections=NavidromeConfig.load().max_connections,
+        max_keepalive_connections=NavidromeConfig.load().max_keepalive_connections,
+        keepalive_expiry=NavidromeConfig.load().keepalive_expiry_seconds,
     ),
 )
 
@@ -53,7 +53,7 @@ def batch_audio_cache(check=lambda: None):
         state = {
             "directory": Path(directory),
             "size": 0,
-            "limit": max(0, int(get_settings().audio_cache_bytes)),
+            "limit": max(0, int(NavidromeConfig.load().audio_cache_bytes)),
             "check": check,
         }
         token = _batch_state.set(state)
@@ -80,8 +80,8 @@ class NavidromeClient:
         self._owns_client = http_client is None
         self.client = http_client or httpx.Client(
             timeout=httpx.Timeout(
-                get_settings().navidrome_timeout_seconds,
-                read=get_settings().navidrome_read_timeout_seconds,
+                NavidromeConfig.load().timeout_seconds,
+                read=NavidromeConfig.load().read_timeout_seconds,
             ),
             follow_redirects=True,
         )

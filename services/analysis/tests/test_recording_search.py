@@ -1,6 +1,7 @@
 """Recording API boundaries and isolated-schema lifecycle integration tests."""
 
-from core.settings import get_settings
+from worker.recordings.config import RecordingConfig
+from core.config import reset_config_cache
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -51,7 +52,7 @@ def test_api_limits_and_configuration(api, monkeypatch):
     assert (
         client.post(
             "/library/recording/search",
-            content=b"x" * (get_settings().recording_max_upload_bytes + 1),
+            content=b"x" * (RecordingConfig.load().max_upload_bytes + 1),
         ).status_code
         == 413
     )
@@ -103,7 +104,7 @@ def test_policy_requires_calibration_and_matching_representation(monkeypatch, tm
     )
     path = tmp_path / "policy.json"
     monkeypatch.setenv("ECHORA_RECORDING_MATCH_POLICY", str(path))
-    get_settings.cache_clear()
+    reset_config_cache()
     data = {
         "representation_id": "one",
         "matcher_revision": recording_matcher.MATCHER_REVISION,
@@ -283,7 +284,7 @@ def test_sync_index_status_scopes_catalog_owner_and_representation(recording_db,
         recording_encoder, "config_from_env", lambda: SimpleNamespace(representation_id="current")
     )
     monkeypatch.delenv("ECHORA_RECORDING_MATCH_POLICY", raising=False)
-    get_settings.cache_clear()
+    reset_config_cache()
     with recording_db() as db:
         db.execute(
             "INSERT INTO libraries(id,namespace) VALUES (%s,%s),(%s,%s)",

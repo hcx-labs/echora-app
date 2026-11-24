@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from core.settings import get_settings
+from core.embeddings.config import EmbeddingConfig
 
 from psycopg.types.json import Jsonb
 
@@ -22,9 +22,9 @@ MODELS = {
 
 def model_settings(name: str) -> tuple[str, str]:
     prefix, model_id, revision, _ = MODELS[name]
-    settings = get_settings()
-    return getattr(settings, f"{prefix.lower()}_model_id"), getattr(
-        settings, f"{prefix.lower()}_revision"
+    config = EmbeddingConfig.load()
+    return getattr(config, f"{prefix.lower()}_model_id"), getattr(
+        config, f"{prefix.lower()}_revision"
     )
 
 

@@ -41,7 +41,7 @@ non-silent rows must have nonzero finite embeddings and are L2 normalized. Input
 shorter than one second are rejected. No padding or amplitude normalization occurs.
 """
 
-from core.settings import get_settings
+from worker.recordings.config import RecordingConfig
 
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -177,9 +177,9 @@ def _session(data: dict, check: Callable[[], None]):
 
         options = ort.SessionOptions()
         options.intra_op_num_threads = min(
-            get_settings().recording_intra_op_threads, os.cpu_count() or 1
+            RecordingConfig.load().intra_op_threads, os.cpu_count() or 1
         )
-        options.inter_op_num_threads = get_settings().recording_inter_op_threads
+        options.inter_op_num_threads = RecordingConfig.load().inter_op_threads
         session = ort.InferenceSession(
             model, sess_options=options, providers=["CPUExecutionProvider"]
         )
@@ -262,7 +262,7 @@ def config_from_env(environ: Mapping[str, str] | None = None) -> EncoderConfig |
     """Absent/empty env disables; an invalid configured path fails closed."""
 
     path = (
-        get_settings().recording_model_manifest
+        RecordingConfig.load().model_manifest
         if environ is None
         else environ.get("ECHORA_RECORDING_MODEL_MANIFEST")
     )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.settings import get_settings
+from core.embeddings.config import EmbeddingConfig
 from core.features import feature_enabled
 
 from dataclasses import dataclass
@@ -130,7 +130,7 @@ def plan_lyrics(
     if library_id is not None:
         restriction += " AND ts.library_id=%s"
         parameters.append(library_id)
-    revision = get_settings().lyrics_revision
+    revision = EmbeddingConfig.load().lyrics_revision
     with connection.cursor() as cursor:
         cursor.execute(
             f"""SELECT DISTINCT ts.external_id
@@ -203,8 +203,8 @@ def plan_audio(
         source_join = """LEFT JOIN unnest(%s::text[],%s::uuid[]) AS ts(external_id,track_id)
                         ON ts.external_id=requested.external_id"""
         source_parameters = [ids, [resolved_track_ids[item] for item in ids]]
-    muq_revision = get_settings().muq_revision
-    mert_revision = get_settings().mert_revision
+    muq_revision = EmbeddingConfig.load().muq_revision
+    mert_revision = EmbeddingConfig.load().mert_revision
     with connection.cursor() as cursor:
         hum_enabled = feature_enabled(connection, "hum")
         cursor.execute(

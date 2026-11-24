@@ -7,11 +7,12 @@ receives it for its downloads only. Gated models today: LTX-2.5 for motion artwo
 
 from __future__ import annotations
 
+from core.library.config import CredentialsConfig
 import logging
 
 import psycopg
 
-from core.settings import get_settings, require_database_url
+from core.db.config import require_database_url
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 def _cipher():
     from cryptography.fernet import Fernet
 
-    key = get_settings().credential_encryption_key
+    key = CredentialsConfig.load().credential_encryption_key.get_secret_value()
     if not key:
         raise RuntimeError("CREDENTIAL_ENCRYPTION_KEY is required")
     return Fernet(key.encode())

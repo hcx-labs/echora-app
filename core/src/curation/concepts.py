@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.settings import get_settings
+from core.embeddings.config import EmbeddingConfig
 
 import threading
 from typing import Iterable
@@ -256,8 +256,8 @@ def embed_texts(texts: list[str]) -> np.ndarray:
             from muq import MuQMuLan
 
             model = MuQMuLan.from_pretrained(
-                get_settings().muq_model_id,
-                revision=get_settings().muq_revision,
+                EmbeddingConfig.load().muq_model_id,
+                revision=EmbeddingConfig.load().muq_revision,
             )
             if torch.cuda.is_available():
                 try:

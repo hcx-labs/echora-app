@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.settings import get_settings
+from core.embeddings.config import EmbeddingConfig
 
 from dataclasses import dataclass
 import threading
@@ -65,7 +65,7 @@ class LyricsEmbeddingModel:
         with torch.inference_mode():
             encoded = self.model.encode(
                 chunks,
-                batch_size=get_settings().lyrics_window_batch_size,
+                batch_size=EmbeddingConfig.load().lyrics_window_batch_size,
                 normalize_embeddings=True,
                 convert_to_numpy=True,
                 show_progress_bar=False,
@@ -84,7 +84,7 @@ class LyricsEmbeddingModel:
     def embed_queries(self, texts: list[str]) -> np.ndarray:
         matrix = self.model.encode(
             [text.strip() for text in texts],
-            batch_size=get_settings().lyrics_track_batch_size,
+            batch_size=EmbeddingConfig.load().lyrics_track_batch_size,
             normalize_embeddings=True,
             convert_to_numpy=True,
             show_progress_bar=False,
@@ -97,8 +97,8 @@ def shared_lyrics_model() -> LyricsEmbeddingModel:
     with _shared_lock:
         if _shared_model is None:
             _shared_model = LyricsEmbeddingModel(
-                get_settings().lyrics_model_id,
-                get_settings().lyrics_revision,
+                EmbeddingConfig.load().lyrics_model_id,
+                EmbeddingConfig.load().lyrics_revision,
                 "cuda" if torch.cuda.is_available() else "cpu",
             )
         return _shared_model

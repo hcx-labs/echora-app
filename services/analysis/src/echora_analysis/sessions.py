@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from echora_analysis.config import ApiConfig, OidcConfig, SessionConfig
+from echora_analysis.config import SessionConfig
 from datetime import datetime, timedelta, timezone
 import hashlib
 import math
@@ -14,7 +16,6 @@ from sqlalchemy.orm import joinedload
 
 from core.db.session import session_scope
 from core.db.models import User, UserSession
-from core.settings import get_settings
 
 
 def token_hash(token: str) -> str:
@@ -22,11 +23,11 @@ def token_hash(token: str) -> str:
 
 
 def create_session(session, user_id, *, now: datetime | None = None):
-    settings = get_settings()
+    settings = SessionConfig.load()
     now = now or datetime.now(timezone.utc)
     token = secrets.token_urlsafe(48)
-    absolute = now + timedelta(seconds=settings.session_absolute_timeout_seconds)
-    expires = min(absolute, now + timedelta(seconds=settings.session_idle_timeout_seconds))
+    absolute = now + timedelta(seconds=settings.absolute_timeout_seconds)
+    expires = min(absolute, now + timedelta(seconds=settings.idle_timeout_seconds))
     session.add(
         UserSession(
             token_hash=token_hash(token),
@@ -83,7 +84,7 @@ def session_user(token: str | None):
 
 
 def session_status(token: str | None, *, activity: bool = False, now: datetime | None = None):
-    settings = get_settings()
+    settings = SessionConfig.load()
     fixed_now = now is not None
     now = now or datetime.now(timezone.utc)
     with session_scope() as session:
@@ -96,23 +97,23 @@ def session_status(token: str | None, *, activity: bool = False, now: datetime |
                 raise HTTPException(
                     status_code=401, detail="Session expired", headers={"Cache-Control": "no-store"}
                 )
-        due = stored.last_renewed_at + timedelta(seconds=settings.session_renew_interval_seconds)
+        due = stored.last_renewed_at + timedelta(seconds=settings.renew_interval_seconds)
         renewed = activity and now >= due
         if renewed:
             stored.expires_at = min(
                 stored.absolute_expires_at,
-                now + timedelta(seconds=settings.session_idle_timeout_seconds),
+                now + timedelta(seconds=settings.idle_timeout_seconds),
             )
             stored.last_renewed_at = now
-            due = now + timedelta(seconds=settings.session_renew_interval_seconds)
+            due = now + timedelta(seconds=settings.renew_interval_seconds)
         return {
             "renewed": renewed,
             "expires_at": stored.expires_at,
             "absolute_expires_at": stored.absolute_expires_at,
             "renew_after_seconds": max(0, math.ceil((due - now).total_seconds())),
-            "activity_check_seconds": settings.session_activity_check_seconds,
-            "activity_window_seconds": settings.session_activity_window_seconds,
-            "request_timeout_seconds": settings.session_request_timeout_seconds,
+            "activity_check_seconds": settings.activity_check_seconds,
+            "activity_window_seconds": settings.activity_window_seconds,
+            "request_timeout_seconds": settings.request_timeout_seconds,
         }
 
 
@@ -125,7 +126,7 @@ def set_session_cookie(response: Response, token: str, expires_at: datetime):
         expires=expires_at,
         httponly=True,
         samesite="strict",
-        secure=get_settings().cookie_secure,
+        secure=SessionConfig.load().cookie_secure,
         path="/",
     )
 
@@ -152,13 +153,13 @@ def record_activity(
             detail="Activity header required",
             headers={"Cache-Control": "no-store"},
         )
-    settings = get_settings()
+    settings, oidc = SessionConfig.load(), OidcConfig.load()
     allowed = {
         value.strip()
-        for value in (settings.session_trusted_origins + "," + settings.cors_origins).split(",")
+        for value in (settings.trusted_origins + "," + ApiConfig.load().cors_origins).split(",")
         if value.strip()
     }
-    for redirect in (settings.oidc_redirect_uri, settings.oidc_post_login_redirect):
+    for redirect in (oidc.redirect_uri, oidc.post_login_redirect):
         parsed = urlsplit(redirect)
         if parsed.scheme in ("http", "https") and parsed.netloc:
             allowed.add(f"{parsed.scheme}://{parsed.netloc}")

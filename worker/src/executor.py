@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.jobs.config import QueueConfig
+from worker.config import WorkerConfig
 import argparse
 import logging
 import multiprocessing
@@ -15,7 +17,7 @@ import time
 import uuid
 
 import core.jobs.queue as jobs
-from core.settings import get_settings
+from core.errors import ConfigurationError
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +94,7 @@ def execute(
             partial = _has_failures(summary)
             retry = [s for s in _failed_stages(summary) if s not in RETRY_EXEMPT]
             if retry and job.get("attempts", 1) < job.get(
-                "max_attempts", get_settings().job_max_attempts
+                "max_attempts", QueueConfig.load().max_attempts
             ):
                 # Per-song failures are swallowed by pipelines to preserve the rest
                 # of the batch. Retry that batch using its committed artifact plan.
@@ -127,7 +129,7 @@ def _terminate(process) -> None:
             process.terminate()
     except ProcessLookupError:
         pass
-    process.join(timeout=get_settings().worker_shutdown_grace_seconds)
+    process.join(timeout=WorkerConfig.load().shutdown_grace_seconds)
     if process.is_alive():
         try:
             if hasattr(os, "killpg") and os.getpgid(process.pid) == process.pid:
@@ -136,7 +138,7 @@ def _terminate(process) -> None:
                 process.kill()
         except ProcessLookupError:
             pass
-        process.join(timeout=get_settings().worker_shutdown_grace_seconds)
+        process.join(timeout=WorkerConfig.load().shutdown_grace_seconds)
 
 
 def supervise(job: dict, stop: threading.Event, lease_seconds: int) -> None:
@@ -150,7 +152,7 @@ def supervise(job: dict, stop: threading.Event, lease_seconds: int) -> None:
     except BaseException:
         directory.cleanup()
         raise
-    heartbeat_interval = min(get_settings().worker_heartbeat_seconds, lease_seconds / 3)
+    heartbeat_interval = min(WorkerConfig.load().heartbeat_seconds, lease_seconds / 3)
     try:
         while process.is_alive():
             if stop.wait(heartbeat_interval):
@@ -182,9 +184,11 @@ def run(
     poll_seconds: float | None = None,
     lease_seconds: int | None = None,
 ) -> None:
-    settings = get_settings()
-    poll_seconds = settings.worker_poll_seconds if poll_seconds is None else poll_seconds
-    lease_seconds = settings.worker_lease_seconds if lease_seconds is None else lease_seconds
+    settings = WorkerConfig.load()
+    poll_seconds = settings.poll_seconds if poll_seconds is None else poll_seconds
+    lease_seconds = QueueConfig.load().lease_seconds if lease_seconds is None else lease_seconds
+    if settings.heartbeat_seconds >= lease_seconds / 2:
+        raise ConfigurationError("Worker heartbeat must be less than half the job lease")
     stop = threading.Event()
     for name in (signal.SIGTERM, signal.SIGINT):
         signal.signal(name, lambda *_: stop.set())
@@ -197,7 +201,7 @@ def run(
                 from worker.recordings.search import cleanup
                 from worker.recordings.calibration import cleanup as cleanup_calibration
 
-                next_recording_cleanup = time.monotonic() + settings.worker_cleanup_interval_seconds
+                next_recording_cleanup = time.monotonic() + settings.cleanup_interval_seconds
                 for maintenance in (cleanup, cleanup_calibration):
                     try:
                         maintenance()
@@ -209,7 +213,7 @@ def run(
                 from worker.curation.jobs import enqueue_due
 
                 enqueue_due()
-                next_schedule_check = time.monotonic() + settings.worker_schedule_check_seconds
+                next_schedule_check = time.monotonic() + settings.schedule_check_seconds
             job = jobs.claim(worker_type, worker_id, lease_seconds)
             if job:
                 supervise(job, stop, lease_seconds)
@@ -228,8 +232,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("worker_type", choices=("analysis", "scheduled"))
     parser.add_argument("--once", action="store_true", help="Claim at most one job, then exit")
-    parser.add_argument("--poll-seconds", type=float, default=get_settings().worker_poll_seconds)
-    parser.add_argument("--lease-seconds", type=int, default=get_settings().worker_lease_seconds)
+    parser.add_argument("--poll-seconds", type=float, default=WorkerConfig.load().poll_seconds)
+    parser.add_argument("--lease-seconds", type=int, default=QueueConfig.load().lease_seconds)
     args = parser.parse_args()
     if args.poll_seconds <= 0 or args.lease_seconds < 15:
         parser.error("poll seconds must be positive and lease seconds must be at least 15")

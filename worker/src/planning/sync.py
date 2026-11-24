@@ -7,7 +7,6 @@ explicit lyrics backfills remain the way to retry retrieval for those songs.
 
 from __future__ import annotations
 
-from core.settings import get_settings
 
 import uuid
 

@@ -7,7 +7,7 @@ The exact reader deliberately precedes ANN so recall has a testable baseline.
 
 from __future__ import annotations
 
-from core.settings import get_settings
+from worker.recordings.config import RecordingConfig
 
 import hashlib
 import json
@@ -35,7 +35,7 @@ def search_configuration():
     config = config_from_env()
     if config is None:
         raise ValueError("Recording encoder is disabled")
-    path = get_settings().recording_match_policy
+    path = RecordingConfig.load().match_policy
     if not path:
         raise ValueError("Recording match policy is not configured")
     policy, policy_id = load_match_policy(config, path)
@@ -164,7 +164,7 @@ def cleanup():
 
 
 def enqueue(user_id, audio: bytes, representation_id: str, policy_id: str):
-    if not audio or len(audio) > get_settings().recording_max_upload_bytes:
+    if not audio or len(audio) > RecordingConfig.load().max_upload_bytes:
         raise ValueError("Invalid recording upload size")
     with jobs._db() as db:
         # Serialize admission, including the global cap, across API replicas.
@@ -181,9 +181,9 @@ def enqueue(user_id, audio: bytes, representation_id: str, policy_id: str):
             (user_id,),
         ).fetchone()["n"]
         if (
-            active["total"] >= get_settings().recording_max_active
-            or active["owned"] >= get_settings().recording_max_active_per_user
-            or recent >= get_settings().recording_uploads_per_minute
+            active["total"] >= RecordingConfig.load().max_active
+            or active["owned"] >= RecordingConfig.load().max_active_per_user
+            or recent >= RecordingConfig.load().uploads_per_minute
         ):
             raise QueueFull()
         public = jobs._insert(db, "recording_search", "analysis", user_id, None, {}, None, None)
@@ -196,8 +196,8 @@ def enqueue(user_id, audio: bytes, representation_id: str, policy_id: str):
                 representation_id,
                 policy_id,
                 audio,
-                get_settings().recording_audio_retention_seconds,
-                get_settings().recording_result_retention_seconds,
+                RecordingConfig.load().audio_retention_seconds,
+                RecordingConfig.load().result_retention_seconds,
             ),
         )
         # Operator-armed only after explicit user consent. Consume the one-shot
@@ -207,17 +207,17 @@ def enqueue(user_id, audio: bytes, representation_id: str, policy_id: str):
             """UPDATE recording_diagnostic_captures
             SET audio=%s,job_id=%s,captured_at=now(),expires_at=now()+%s*interval '1 second'
             WHERE user_id=%s AND captured_at IS NULL AND expires_at>now()""",
-            (audio, public["id"], get_settings().recording_diagnostic_retention_seconds, user_id),
+            (audio, public["id"], RecordingConfig.load().diagnostic_retention_seconds, user_id),
         )
         return {"job_id": public["id"]}
 
 
 def decode_query(audio: bytes, check=lambda: None) -> np.ndarray:
     """Bound decoding and observe cancellation without retaining query PCM."""
-    if not audio or len(audio) > get_settings().recording_max_upload_bytes:
+    if not audio or len(audio) > RecordingConfig.load().max_upload_bytes:
         raise ValueError("Invalid recording upload size")
     check()
-    deadline = time.monotonic() + get_settings().recording_decode_timeout_seconds
+    deadline = time.monotonic() + RecordingConfig.load().decode_timeout_seconds
     with subprocess.Popen(
         [
             "ffmpeg",
@@ -258,7 +258,7 @@ def decode_query(audio: bytes, check=lambda: None) -> np.ndarray:
                 try:
                     output, _ = process.communicate(
                         input=pending_input,
-                        timeout=min(get_settings().recording_cancel_poll_seconds, remaining),
+                        timeout=min(RecordingConfig.load().cancel_poll_seconds, remaining),
                     )
                     break
                 except subprocess.TimeoutExpired:
@@ -353,7 +353,7 @@ def execute(job, context):
     from worker.recordings.matcher import match_recording
 
     started = time.monotonic()
-    deadline = started + get_settings().recording_processing_timeout_seconds
+    deadline = started + RecordingConfig.load().processing_timeout_seconds
     last_lease_check = started
     context.check()
 

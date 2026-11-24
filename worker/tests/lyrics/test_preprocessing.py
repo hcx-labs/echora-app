@@ -1,4 +1,4 @@
-from core.settings import get_settings
+from core.config import reset_config_cache
 
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -31,7 +31,7 @@ def setup(monkeypatch, provider, stored=None):
     connection = Mock()
     connection.cursor.side_effect = lambda: nullcontext(cursor)
     monkeypatch.setenv("DATABASE_URL", "unused")
-    get_settings.cache_clear()
+    reset_config_cache()
     monkeypatch.setattr(lp.psycopg, "connect", lambda _: nullcontext(connection))
     client = Mock()
 

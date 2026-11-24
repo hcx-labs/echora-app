@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from core.db.config import DatabaseConfig
+from core.integrations.config import LastfmConfig
+from echora_analysis.config import ApiConfig, OidcConfig, SessionConfig, UiConfig
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -62,7 +65,6 @@ from core.library.connections import credential_cipher, load_connection
 from core.library.membership import attach_user_library, relink_renumbered_sources
 from . import sessions
 import core.jobs.queue as jobs
-from core.settings import get_settings
 from core.db.models import (
     Curation,
     NavidromeConnection,
@@ -124,7 +126,7 @@ async def _echora_error(request: Request, error: EchoraError) -> JSONResponse:
 # Origins are explicit: reflecting arbitrary origins with credentials would let
 # any site read responses using the visitor's session cookie.
 _cors_origins = [
-    origin.strip() for origin in get_settings().cors_origins.split(",") if origin.strip()
+    origin.strip() for origin in ApiConfig.load().cors_origins.split(",") if origin.strip()
 ]
 if _cors_origins:
     app.add_middleware(
@@ -136,20 +138,24 @@ if _cors_origins:
     )
 app.add_middleware(
     SessionMiddleware,
-    secret_key=get_settings().oidc_session_secret,
+    secret_key=OidcConfig.load().session_secret.get_secret_value(),
     session_cookie="echora_oidc_state",
     same_site="lax",
-    https_only=get_settings().cookie_secure,
+    https_only=SessionConfig.load().cookie_secure,
 )
 _oauth = OAuth()
-_oidc_issuer = get_settings().oidc_issuer_url.rstrip("/")
-if _oidc_issuer and get_settings().oidc_client_id and get_settings().oidc_client_secret:
+_oidc_issuer = OidcConfig.load().issuer_url.rstrip("/")
+if (
+    _oidc_issuer
+    and OidcConfig.load().client_id
+    and OidcConfig.load().client_secret.get_secret_value()
+):
     _oauth.register(
         name="oidc",
-        client_id=get_settings().oidc_client_id,
-        client_secret=get_settings().oidc_client_secret,
+        client_id=OidcConfig.load().client_id,
+        client_secret=OidcConfig.load().client_secret.get_secret_value(),
         server_metadata_url=f"{_oidc_issuer}/.well-known/openid-configuration",
-        client_kwargs={"scope": get_settings().oidc_scopes},
+        client_kwargs={"scope": OidcConfig.load().scopes},
     )
 logger = logging.getLogger(__name__)
 _COMMUNITY_SNAPSHOT_REVISION = 1
@@ -327,16 +333,14 @@ app.include_router(navidrome_plugin_router)
 def start_background_services() -> None:
     # Worker claims, not API restarts, determine whether execution is interrupted.
     _enforce_secure_cookie_policy()
-    with psycopg.connect(get_settings().database_url) as connection:
+    with psycopg.connect(DatabaseConfig.load().database_url) as connection:
         configure_representations(connection)
 
 
 def _enforce_secure_cookie_policy() -> None:
-    if get_settings().cookie_secure:
+    if SessionConfig.load().cookie_secure:
         return
-    redirect = (
-        get_settings().oidc_redirect_uri or "http://localhost:3000/analysis/auth/oidc/callback"
-    )
+    redirect = OidcConfig.load().redirect_uri or "http://localhost:3000/analysis/auth/oidc/callback"
     host = urlparse(redirect).hostname or ""
     if host not in {"localhost", "127.0.0.1", "::1"}:
         raise RuntimeError(
@@ -355,7 +359,7 @@ async def oidc_start(request: Request) -> Response:
     client = _oauth.create_client("oidc")
     if client is None:
         raise HTTPException(status_code=503, detail="OIDC is not configured")
-    redirect_uri = get_settings().oidc_redirect_uri or str(request.url_for("oidc_callback"))
+    redirect_uri = OidcConfig.load().redirect_uri or str(request.url_for("oidc_callback"))
     return await client.authorize_redirect(request, redirect_uri)
 
 
@@ -374,10 +378,10 @@ async def oidc_callback(request: Request) -> Response:
     email = str(claims.get("email") or "").strip().casefold()
     if not subject or not email or "@" not in email:
         raise HTTPException(status_code=422, detail="OIDC must provide subject and email claims")
-    require_verified = get_settings().oidc_require_verified_email
+    require_verified = OidcConfig.load().require_verified_email
     if require_verified and claims.get("email_verified") is not True:
         raise HTTPException(status_code=403, detail="OIDC email is not verified")
-    bootstrap_email = get_settings().oidc_bootstrap_admin_email.strip().casefold()
+    bootstrap_email = OidcConfig.load().bootstrap_admin_email.strip().casefold()
     if not bootstrap_email:
         raise HTTPException(status_code=503, detail="OIDC_BOOTSTRAP_ADMIN_EMAIL is not configured")
     with session_scope() as session:
@@ -428,7 +432,7 @@ async def oidc_callback(request: Request) -> Response:
             delete(UserSession).where(UserSession.expires_at < datetime.now(timezone.utc))
         )
         token, expires_at, _ = sessions.create_session(session, user.id)
-    destination = get_settings().oidc_post_login_redirect
+    destination = OidcConfig.load().post_login_redirect
     response = RedirectResponse(destination, status_code=303)
     sessions.set_session_cookie(response, token, expires_at)
     return response
@@ -561,7 +565,7 @@ def update_karaoke_processing_settings(
     if not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Administrator access required")
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         column = (
@@ -622,7 +626,10 @@ def update_transcription_processing_settings(
     user = _session_user(echora_session)
     if not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Administrator access required")
-    with psycopg.connect(get_settings().database_url) as connection, connection.cursor() as cursor:
+    with (
+        psycopg.connect(DatabaseConfig.load().database_url) as connection,
+        connection.cursor() as cursor,
+    ):
         column = (
             "transcription_modal_enabled"
             if request.location == "modal"
@@ -646,7 +653,7 @@ def update_hum_processing_settings(
     if not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Administrator access required")
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         column = "hum_modal_enabled" if request.location == "modal" else "hum_processing_enabled"
@@ -751,7 +758,7 @@ def update_lastfm(
                 "format": "json",
                 "limit": 1,
             },
-            timeout=get_settings().lastfm_validation_timeout_seconds,
+            timeout=LastfmConfig.load().validation_timeout_seconds,
         )
         response.raise_for_status()
         payload = response.json()
@@ -798,7 +805,7 @@ def _admin_user(echora_session: str | None) -> dict[str, object]:
 def runtime_settings(response: Response) -> dict[str, int]:
     # Only this explicit, non-secret allowlist is browser-visible.
     response.headers["Cache-Control"] = "no-store"
-    return get_settings().public_ui()
+    return UiConfig.load().public_ui()
 
 
 @app.get("/settings/oidc")
@@ -813,7 +820,7 @@ def oidc_admin_settings(echora_session: str | None = Cookie(default=None)) -> di
         return {
             "configured": _oauth.create_client("oidc") is not None,
             "issuer": _oidc_issuer or None,
-            "require_verified_email": get_settings().oidc_require_verified_email,
+            "require_verified_email": OidcConfig.load().require_verified_email,
             "auto_provision": policy.auto_provision if policy else True,
             "users": [
                 {
@@ -1041,7 +1048,10 @@ def navidrome_sync_status(
             status_code=502, detail="Could not scan the Navidrome library"
         ) from error
     namespace = uuid.uuid5(uuid.NAMESPACE_URL, credentials[0].rstrip("/"))
-    with psycopg.connect(get_settings().database_url) as connection, connection.cursor() as cursor:
+    with (
+        psycopg.connect(DatabaseConfig.load().database_url) as connection,
+        connection.cursor() as cursor,
+    ):
         # Heal a renumbered library here too, so it never shows as unanalyzed.
         relink_renumbered_sources(connection, credentials[0], tracks)
         cursor.execute(
@@ -1138,7 +1148,7 @@ def start_recording_backfill(
 def lyrics_status(echora_session: str | None = Cookie(default=None)) -> dict[str, object]:
     _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -1209,7 +1219,7 @@ def start_semantic_fusion_build(
 def semantic_fusion_status(echora_session: str | None = Cookie(default=None)) -> dict[str, object]:
     _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -1231,7 +1241,7 @@ def similar_tracks(
 ) -> dict[str, object]:
     _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -1261,7 +1271,7 @@ def track_recording_group(
 ) -> dict[str, object]:
     _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -1301,7 +1311,7 @@ def track_audio_descriptors(
 ) -> dict[str, object]:
     user = _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -1340,7 +1350,7 @@ def track_waveform(
 ) -> dict[str, object]:
     user = _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -1384,7 +1394,7 @@ def track_visual_features(
 ) -> dict[str, object]:
     user = _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -1447,7 +1457,7 @@ def track_audio_quality(
 ) -> dict[str, object]:
     user = _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -1548,7 +1558,7 @@ def track_info(
 ) -> dict[str, object]:
     user = _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -1593,7 +1603,7 @@ def track_lyrics(
 ) -> dict[str, object]:
     user = _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -1655,7 +1665,7 @@ def update_track_lyrics(
         raise HTTPException(status_code=422, detail="Lyrics cannot be empty")
     language = request.language.strip().lower() if request.language else None
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -1701,7 +1711,7 @@ def force_transcription_language(
     user = _session_user(echora_session)
     language = request.language.strip()
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -1745,7 +1755,7 @@ def update_track_lyrics_status(
 ) -> dict[str, object]:
     user = _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -1951,7 +1961,7 @@ def start_navidrome_ingest(
 def hum_index_status(echora_session: str | None = Cookie(default=None)) -> dict[str, object]:
     user = _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -2139,7 +2149,7 @@ def library_tracks(
 
 def _lyrics_concept_corpus(user_id: uuid.UUID) -> tuple[list[dict[str, object]], np.ndarray, str]:
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -2162,7 +2172,7 @@ def _lyrics_concept_corpus(user_id: uuid.UUID) -> tuple[list[dict[str, object]],
 
 def _semantic_concept_corpus(user_id: uuid.UUID) -> tuple[list[dict[str, object]], np.ndarray, str]:
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -2191,7 +2201,7 @@ def _semantic_concept_corpus(user_id: uuid.UUID) -> tuple[list[dict[str, object]
 def library_concepts(echora_session: str | None = Cookie(default=None)) -> dict[str, object]:
     user = _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -2214,7 +2224,7 @@ def create_concept(
             status_code=422, detail="A concept needs a positive prompt or positive track"
         )
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -2283,7 +2293,7 @@ def concept_lens(
     requested = list(dict.fromkeys(name.strip() for name in request.concepts if name.strip()))
     definitions = {str(item["name"]).casefold(): item for item in predefined_concepts()}
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -2453,7 +2463,7 @@ def preview_curation(
 def list_curations(echora_session: str | None = Cookie(default=None)) -> dict[str, object]:
     user = _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -2793,7 +2803,7 @@ def audio_profile_status(echora_session: str | None = Cookie(default=None)) -> d
     user = _session_user(echora_session)
     models: dict[str, dict[str, int]] = {}
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         for model_name in SUPPORTED_PROFILE_MODELS:
@@ -2838,7 +2848,10 @@ def start_audio_profile_rebuild(
     echora_session: str | None = Cookie(default=None),
 ) -> dict[str, object]:
     user = _session_user(echora_session)
-    with psycopg.connect(get_settings().database_url) as connection, connection.cursor() as cursor:
+    with (
+        psycopg.connect(DatabaseConfig.load().database_url) as connection,
+        connection.cursor() as cursor,
+    ):
         cursor.execute(
             """SELECT DISTINCT e.track_id, ar.model_name
                FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
@@ -2870,7 +2883,7 @@ def track_audio_profile(
     if model not in SUPPORTED_PROFILE_MODELS:
         raise HTTPException(status_code=422, detail="Audio profiles support muq_mulan or mert")
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -2957,7 +2970,7 @@ def library_map(
         if not 0 <= semantic_weight <= 1:
             raise HTTPException(status_code=422, detail="semantic_weight must be between 0 and 1")
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         if model == "blend":
@@ -3060,7 +3073,7 @@ def library_map(
     )
     corpus_hash = hashlib.sha256(corpus_material.encode()).hexdigest()
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -3245,7 +3258,7 @@ def library_map(
         "seed_stability_ari": clustering["seed_stability_ari"],
     }
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -3283,7 +3296,7 @@ def community_snapshots(
     _session_user(echora_session)
     limit = min(max(limit, 1), 100)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -3303,7 +3316,7 @@ def community_snapshot(
 ) -> dict[str, object]:
     _session_user(echora_session)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -3324,7 +3337,7 @@ def _artist_embedding_corpus(model: str) -> tuple[list[dict[str, object]], np.nd
     if model not in {"muq_mulan", "mert"}:
         raise HTTPException(status_code=422, detail="Artist profiles support muq_mulan or mert")
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -3397,7 +3410,7 @@ def artist_profile(
     payload, profile = _artist_payload(display_name, rows, matrix, indices)
     stored = jsonable_encoder({**payload, "model": model, "corpus_hash": corpus_hash})
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -3485,7 +3498,7 @@ def preview_journey(
     if request.start_track_id == request.end_track_id:
         raise HTTPException(status_code=422, detail="Journey endpoints must be different tracks")
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -3580,7 +3593,7 @@ def preview_journey(
 @app.get("/library/filter-options")
 def browse_filter_options(echora_session: str | None = Cookie(default=None)):
     user = _session_user(echora_session)
-    with psycopg.connect(get_settings().database_url, row_factory=dict_row) as db:
+    with psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as db:
         rows = db.execute(
             """WITH visible AS MATERIALIZED (
             SELECT DISTINCT track_id FROM user_track_links WHERE user_id=%s
@@ -3629,7 +3642,7 @@ def _navidrome_ranking(user_id: str, connection_id: str) -> list[tuple[str, int]
 
 def _library_track_rows(user_id: object) -> list[dict[str, object]]:
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -3725,7 +3738,7 @@ def library_facets(
     user = _session_user(echora_session)
     limit = min(max(limit, 1), 50)
     with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(

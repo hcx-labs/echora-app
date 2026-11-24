@@ -16,6 +16,7 @@ Every class derives from ``EchoraConfig`` and names its environment prefix:
   computes with exactly the calling worker's settings.
 - ``secret(...)`` fields are ``SecretStr``: hidden from ``repr`` and excluded from dumps.
 - ``load()`` returns one validated, cached instance per class for the process;
+  ``adopt()`` replaces it (a remote container adopting the caller's values) and
   ``reset_config_cache()`` clears every class's instance (tests that change the environment).
 
 Values are validated when loaded, and validation errors never echo the input (it may be a
@@ -24,7 +25,7 @@ secret). Nothing reads ``.env`` files: Docker Compose passes them to the process
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, Self
 
@@ -60,11 +61,15 @@ def compute(default: Any = ..., *, legacy: str | None = None, **constraints: Any
     return Field(default, json_schema_extra=extra, **constraints)
 
 
-def secret(*, legacy: str | None = None, **constraints: Any) -> Any:
-    """A secret field: declare it as ``SecretStr``. Empty by default, never dumped or shown."""
+def secret(default: str = "", *, legacy: str | None = None, **constraints: Any) -> Any:
+    """A secret field: declare it as ``SecretStr``. Never dumped or shown."""
     extra = {_LEGACY: legacy} if legacy else {}
     return Field(
-        SecretStr(""), json_schema_extra=extra or None, repr=False, exclude=True, **constraints
+        SecretStr(default),
+        json_schema_extra=extra or None,
+        repr=False,
+        exclude=True,
+        **constraints,
     )
 
 
@@ -128,6 +133,25 @@ class EchoraConfig(BaseSettings):
             instance = cls()
             EchoraConfig._instances[cls] = instance
         return instance  # type: ignore[return-value]
+
+    @classmethod
+    def from_environ(cls, environ: Mapping[str, str]) -> Self:
+        """The config these variables give, by the same names, ignoring the process environment."""
+        given = {name.upper(): value for name, value in environ.items()}
+        values: dict[str, Any] = {}
+        for entry in cls.entries():
+            for name in (entry.name, *entry.deprecated_names):
+                if name in given:
+                    values[entry.field] = given[name]
+                    break
+        return cls.model_validate(values)
+
+    @classmethod
+    def adopt(cls, instance: Self) -> None:
+        """Make ``instance`` what ``load()`` returns in this process (remote computation)."""
+        if type(instance) is not cls:
+            raise TypeError(f"Expected a {cls.__name__}, got {type(instance).__name__}")
+        EchoraConfig._instances[cls] = instance
 
     @classmethod
     def compute_fields(cls) -> tuple[str, ...]:

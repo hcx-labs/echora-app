@@ -1,5 +1,8 @@
 """Analysis on Modal: deployment checks, sessions and every stage's Modal path, without Modal."""
 
+from core.config import reset_config_cache
+from core.media.config import MotionArtworkConfig
+from worker.kara.config import KaraConfig
 from contextlib import nullcontext
 from hashlib import sha256
 import os
@@ -17,12 +20,7 @@ import core.features as features
 import worker.remote.session as remote_compute
 from worker.models.download import model_manifest
 from core.embeddings.audio_models import EmbeddingResult
-from core.settings import (
-    PROCESSING_FIELDS,
-    adopt_processing_settings,
-    get_settings,
-    processing_settings,
-)
+from worker.remote.compute import adopt_compute_settings, compute_settings
 
 CONFIG = remote_compute.ModalConfig(
     "ak-test", "as-secret", "L40S", "ghcr.io/x/echora-analysis-gpu:1.0"
@@ -75,7 +73,7 @@ def current_status(**changes):
 
 def ready_session(modal=None):
     modal = modal or FakeModal([current_status()])
-    session = remote_compute.ModalSession(CONFIG, processing_settings(), modal_api=modal)
+    session = remote_compute.ModalSession(CONFIG, compute_settings(), modal_api=modal)
     session.ensure_ready()
     return session, modal
 
@@ -145,7 +143,7 @@ def test_missing_or_stale_code_is_deployed_first(monkeypatch):
         deploy = Mock()
         monkeypatch.setattr(remote_compute, "deploy", deploy)
         modal = FakeModal([before, current_status()])
-        session = remote_compute.ModalSession(CONFIG, processing_settings(), modal_api=modal)
+        session = remote_compute.ModalSession(CONFIG, compute_settings(), modal_api=modal)
         assert session.ensure_ready()["deployed"]
         deploy.assert_called_once_with(CONFIG)
 
@@ -155,7 +153,7 @@ def test_deploy_waits_for_old_containers_to_roll_over(monkeypatch):
     monkeypatch.setattr(remote_compute, "ROLLOVER_POLL_SECONDS", 0)
     # Right after deploying, a still-warm old container answers once more.
     modal = FakeModal([current_status(code="old"), current_status(code="old"), current_status()])
-    session = remote_compute.ModalSession(CONFIG, processing_settings(), modal_api=modal)
+    session = remote_compute.ModalSession(CONFIG, compute_settings(), modal_api=modal)
     assert session.ensure_ready()["deployed"]
 
 
@@ -164,7 +162,7 @@ def test_deployment_that_still_differs_is_refused(monkeypatch):
     monkeypatch.setattr(remote_compute, "deploy", Mock())
     modal = FakeModal([None, current_status(code="other")])
     with pytest.raises(RuntimeError, match="does not match"):
-        remote_compute.ModalSession(CONFIG, processing_settings(), modal_api=modal).ensure_ready()
+        remote_compute.ModalSession(CONFIG, compute_settings(), modal_api=modal).ensure_ready()
 
 
 def test_changed_models_are_downloaded_with_progress(monkeypatch):
@@ -176,9 +174,9 @@ def test_changed_models_are_downloaded_with_progress(monkeypatch):
     ]
     modal = FakeModal([current_status(models="old"), current_status()], prepare_events=events)
     progress = []
-    session = remote_compute.ModalSession(CONFIG, processing_settings(), modal_api=modal)
+    session = remote_compute.ModalSession(CONFIG, compute_settings(), modal_api=modal)
     assert session.ensure_ready(progress.append)["downloaded"]
-    modal.prepare.remote_gen.assert_called_once_with(processing_settings(), None)
+    modal.prepare.remote_gen.assert_called_once_with(compute_settings(), None)
     assert [item["message"] for item in progress if item.get("unit") == "models"] == [
         "Preparing models on Modal: model-a",
         "Preparing models on Modal: model-b",
@@ -188,12 +186,12 @@ def test_changed_models_are_downloaded_with_progress(monkeypatch):
 def test_incomplete_model_storage_is_refused(monkeypatch):
     modal = FakeModal([current_status(models="old")])
     with pytest.raises(RuntimeError, match="incomplete"):
-        remote_compute.ModalSession(CONFIG, processing_settings(), modal_api=modal).ensure_ready()
+        remote_compute.ModalSession(CONFIG, compute_settings(), modal_api=modal).ensure_ready()
 
 
 def test_compute_requires_a_checked_deployment():
     session = remote_compute.ModalSession(
-        CONFIG, processing_settings(), modal_api=FakeModal([current_status()])
+        CONFIG, compute_settings(), modal_api=FakeModal([current_status()])
     )
     with pytest.raises(RuntimeError, match="Check the Modal deployment"):
         session.voice(["digest"])
@@ -233,27 +231,24 @@ def test_workspace_comes_from_token_info(monkeypatch):
 # Settings and models
 
 
-def test_remote_containers_adopt_the_workers_processing_settings(monkeypatch):
-    for name in PROCESSING_FIELDS:
-        # Set first, so monkeypatch restores whatever adopting writes to the environment.
-        monkeypatch.setenv(name.upper(), str(processing_settings()[name]))
-    values = {
-        **processing_settings(),
-        "fa_kara_revision": "a" * 40,
-        "fa_kara_min_letter_ms": 60,
-        "fa_kara_audio_speed": 0.9,
-    }
-    adopt_processing_settings(values)
-    assert processing_settings() == values
-    assert get_settings().fa_kara_min_letter_ms == 60
-    with pytest.raises(ValueError, match="Not processing settings"):
-        adopt_processing_settings({"database_url": "postgresql://elsewhere"})
+def test_remote_containers_adopt_the_workers_compute_settings():
+    values = compute_settings()
+    values["configs"]["KaraConfig"].update(
+        {"revision": "a" * 40, "min_letter_ms": 60, "audio_speed": 0.9}
+    )
+    adopt_compute_settings(values)
+    assert compute_settings() == values
+    assert KaraConfig.load().min_letter_ms == 60
+    with pytest.raises(ValueError, match="Not compute settings"):
+        adopt_compute_settings({"database_url": "postgresql://elsewhere"})
+    with pytest.raises(ValueError, match="Not compute fields"):
+        adopt_compute_settings({"configs": {"KaraConfig": {"job_timeout_seconds": 1}}})
 
 
 def test_model_manifest_follows_the_model_settings(monkeypatch):
     before = model_manifest()
     monkeypatch.setenv("FA_KARA_REVISION", "b" * 40)
-    get_settings.cache_clear()
+    reset_config_cache()
     assert model_manifest() != before
 
 
@@ -286,7 +281,7 @@ def test_compute_choice_respects_permission_and_default(monkeypatch):
 
 
 def preparation_database(monkeypatch):
-    monkeypatch.setattr(external_processing, "remote_settings", processing_settings)
+    monkeypatch.setattr(external_processing, "remote_settings", compute_settings)
     db = MagicMock()
     db.execute.return_value.fetchone.return_value = {"locked": True}
     monkeypatch.setattr(external_processing, "_connect", lambda: nullcontext(db))
@@ -304,7 +299,7 @@ def test_preparation_records_ready_state_under_a_lock(monkeypatch):
     session.ensure_ready.return_value = {"code": "code", "models": "models"}
     factory = Mock(return_value=session)
     assert external_processing.prepare(session_factory=factory) is session
-    factory.assert_called_once_with(CONFIG, processing_settings())
+    factory.assert_called_once_with(CONFIG, compute_settings())
     assert recorded[0]["status"] == "preparing" and recorded[-1]["status"] == "ready"
     assert recorded[-1]["deployed_code"] == "code" and recorded[-1]["deployed_models"] == "models"
     statements = [call.args[0] for call in db.execute.call_args_list]
@@ -351,12 +346,12 @@ def test_every_call_carries_the_exact_model_and_settings():
     args, kwargs = modal.analysis.embed_audio.map.call_args
     assert args == (["a"],) and kwargs["kwargs"] == {
         "model": ("mert", "m-a-p/MERT-v1-95M", "rev"),
-        "settings": processing_settings(),
+        "settings": compute_settings(),
     }
     session.karaoke(["a"], ["text"], ["ja"], [[]])
     args, kwargs = modal.analysis.karaoke.map.call_args
     assert args == (["a"], ["text"], ["ja"], [[]]) and kwargs["kwargs"] == {
-        "settings": processing_settings()
+        "settings": compute_settings()
     }
     assert kwargs["order_outputs"] and kwargs["return_exceptions"]
 
@@ -396,7 +391,7 @@ def test_separation_phase_asks_for_exactly_the_stages_artifacts():
     assert args == (["a", "b"],)
     assert kwargs["kwargs"] == {
         "artifacts": {"vocals": True, "reference": True},
-        "settings": processing_settings(),
+        "settings": compute_settings(),
     }
     assert list(session.prepare_vocals([], melody=True)) == []
 
@@ -437,7 +432,7 @@ def ingest_batch(monkeypatch):
         loader.name = getattr(ingest, name).name
         monkeypatch.setattr(ingest, name, loader)
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
-    get_settings.cache_clear()
+    reset_config_cache()
     tracks = {name: uuid4() for name in ("a", "bad", "c")}
     audio = {name: f"audio {name}".encode() for name in tracks}
     client.tracks.return_value = [
@@ -552,7 +547,7 @@ def test_modal_batch_aligns_karaoke_remotely(monkeypatch, audio_input):
     import worker.kara.pipeline as karaoke_pipeline
 
     monkeypatch.setenv("FA_KARA_AUDIO_INPUT", audio_input)
-    get_settings.cache_clear()
+    reset_config_cache()
     rows = [
         (uuid4(), "a", "A", "lyrics a", "ja", [{"text": "a"}]),
         (uuid4(), "b", "B", "lyrics b", None, None),
@@ -616,7 +611,7 @@ def test_motion_artwork_models_count_only_when_modal_renders_them():
     assert model_manifest(True) != model_manifest(False)
     session = remote_compute.ModalSession(
         CONFIG,
-        {**processing_settings(), "motion_artwork_models": True},
+        compute_settings(motion_artwork_models=True),
         modal_api=FakeModal([current_status()]),
     )
     assert session.expected()["models"] == model_manifest(True)
@@ -624,8 +619,8 @@ def test_motion_artwork_models_count_only_when_modal_renders_them():
 
 def test_remote_containers_adopt_the_motion_artwork_model_switch(monkeypatch):
     monkeypatch.setenv("ECHORA_MOTION_ARTWORK_MODELS", "false")
-    adopt_processing_settings({"motion_artwork_models": True})
-    assert get_settings().motion_artwork_models is True
+    adopt_compute_settings({"motion_artwork_models": True})
+    assert MotionArtworkConfig.load().models is True
 
 
 def test_hugging_face_token_goes_only_to_model_preparation(monkeypatch):
@@ -633,8 +628,8 @@ def test_hugging_face_token_goes_only_to_model_preparation(monkeypatch):
 
     config = replace(CONFIG, hf_token="hf_secret")
     modal = FakeModal([current_status(models="old"), current_status()])
-    remote_compute.ModalSession(config, processing_settings(), modal_api=modal).ensure_ready()
-    modal.prepare.remote_gen.assert_called_once_with(processing_settings(), "hf_secret")
+    remote_compute.ModalSession(config, compute_settings(), modal_api=modal).ensure_ready()
+    modal.prepare.remote_gen.assert_called_once_with(compute_settings(), "hf_secret")
     assert "hf_secret" not in remote_compute._modal_environment(config).values()
     assert "hf_secret" not in remote_compute._scrubbed("token hf_secret", config)
 
@@ -675,7 +670,7 @@ def test_motion_artwork_videos_come_back_through_the_transfer_volume(tmp_path):
     assert (
         sent_settings.comfyui_url == ""
         and recipe == "recipe"
-        and sent_processing == processing_settings()
+        and sent_processing == compute_settings()
     )
     assert sent_covers == [
         {"sha256": "abc", "data": b"cover", "content_type": "image/jpeg", "seed": 1}
@@ -718,7 +713,7 @@ def test_downloads_use_the_saved_token_unless_one_is_given(monkeypatch):
     monkeypatch.setattr(download_models, "_pin_main_ref", lambda path: None)
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
     monkeypatch.delenv("HF_TOKEN", raising=False)
-    get_settings.cache_clear()
+    reset_config_cache()
     try:
         download_models.main()
         assert set(calls) == {"hf_saved"}
@@ -737,7 +732,7 @@ def test_saved_token_is_verified_and_encrypted(monkeypatch):
 
     monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
-    get_settings.cache_clear()
+    reset_config_cache()
     db = MagicMock()
     monkeypatch.setattr(huggingface_token.psycopg, "connect", lambda url: nullcontext(db))
     monkeypatch.setattr(

@@ -18,6 +18,7 @@ locally. Results therefore match local processing.
 
 from __future__ import annotations
 
+from core.embeddings.config import EmbeddingConfig
 import json
 import os
 from pathlib import Path
@@ -96,9 +97,9 @@ def prepare_models(settings: dict[str, object], hf_token: str | None = None):
     """
     from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
 
-    from core.settings import adopt_processing_settings
+    from worker.remote.compute import adopt_compute_settings
 
-    adopt_processing_settings(settings)
+    adopt_compute_settings(settings)
     from worker.models.download import analysis_downloads, model_manifest
 
     if hf_token:
@@ -142,10 +143,10 @@ class Analysis:
         if settings == self.settings:
             return
         from worker.models.download import model_manifest
-        from core.settings import adopt_processing_settings
+        from worker.remote.compute import adopt_compute_settings
 
         self._release()
-        adopt_processing_settings(settings)
+        adopt_compute_settings(settings)
         models_volume.reload()
         if _manifest() != model_manifest():
             raise RuntimeError(
@@ -286,13 +287,14 @@ class Analysis:
     def embed_lyrics(self, text: str, settings: dict[str, object]):
         """BGE-M3 lyrics embedding, by the local model class."""
         from core.embeddings.text import LyricsEmbeddingModel
-        from core.settings import get_settings
 
         self._adopt(settings)
         model = self._resident(
             "lyrics",
             lambda: LyricsEmbeddingModel(
-                get_settings().lyrics_model_id, get_settings().lyrics_revision, "cuda"
+                EmbeddingConfig.load().lyrics_model_id,
+                EmbeddingConfig.load().lyrics_revision,
+                "cuda",
             ),
         )
         return model.embed(text)
@@ -354,9 +356,9 @@ class Artwork:
 
         from worker.models.download import model_manifest
         from worker.artwork.pipeline import render_loops
-        from core.settings import adopt_processing_settings
+        from worker.remote.compute import adopt_compute_settings
 
-        adopt_processing_settings(settings)
+        adopt_compute_settings(settings)
         models_volume.reload()
         if _manifest() != model_manifest():
             raise RuntimeError(

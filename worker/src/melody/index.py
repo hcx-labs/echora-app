@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from core.settings import get_settings
+from core.db.config import DatabaseConfig
+from worker.melody.config import MelodyConfig
 
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -547,7 +548,7 @@ def build_corpus(
 ) -> dict[str, int]:
     report = progress or (lambda _: None)
     completed = failed = contours_stored = 0
-    with psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection:
+    with psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection:
         run_id = _create_run(connection, corpus_id)
         with connection.cursor() as cursor:
             cursor.execute(
@@ -695,7 +696,7 @@ def _capture_hum_diagnostic(
     query_mask: np.ndarray,
     results: list[dict[str, object]],
 ) -> str | None:
-    root = Path(get_settings().hum_diagnostic_dir)
+    root = Path(MelodyConfig.load().diagnostic_dir)
     marker = root.parent / "capture-next-hum"
     try:
         marker.unlink()
@@ -756,12 +757,12 @@ def search_corpus(user_id: uuid.UUID, audio: bytes, limit: int = 10) -> dict[str
     query, query_mask = extract_hum_contour(audio)
     windows = _motif_windows(query, query_mask)
     prepared_motifs = _prepare_motifs(windows)
-    with psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection:
+    with psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection:
         contours = _load_contours(connection, user_id)
         if not contours:
             raise ValueError("Build the melody hum index before searching")
 
-        workers = min(get_settings().hum_max_workers, os.cpu_count() or 2)
+        workers = min(MelodyConfig.load().max_workers, os.cpu_count() or 2)
         best_by_window: list[dict[uuid.UUID, tuple[float, float, str]]] = [{} for _ in windows]
         best_across_windows: dict[uuid.UUID, tuple[float, float, str]] = {}
 

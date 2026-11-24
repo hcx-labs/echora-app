@@ -1,4 +1,4 @@
-from core.settings import get_settings
+from core.config import reset_config_cache
 
 from concurrent.futures import ThreadPoolExecutor
 import io
@@ -123,7 +123,7 @@ def test_decode_contracts_cached_only_in_session(monkeypatch, tmp_path):
     import core.media.audio as audio
 
     monkeypatch.setenv("ECHORA_PREPROCESS_DIR", str(tmp_path))
-    get_settings.cache_clear()
+    reset_config_cache()
     raw = Mock(return_value=np.ones(10, dtype=np.float32))
     stereo = Mock(return_value=np.ones((10, 2), dtype=np.float32))
     monkeypatch.setattr(audio, "_decode_audio", raw)
@@ -147,7 +147,7 @@ def test_shared_vocals_for_transcription_and_karaoke(monkeypatch, tmp_path):
     import soundfile as sf
 
     monkeypatch.setenv("ECHORA_PREPROCESS_DIR", str(tmp_path))
-    get_settings.cache_clear()
+    reset_config_cache()
     separate = Mock(side_effect=lambda waveform, check: waveform * 0.25)
     monkeypatch.setattr(roformer, "separate_vocals", separate)
     monkeypatch.setattr(
@@ -175,7 +175,7 @@ def test_shared_vocals_for_transcription_and_karaoke(monkeypatch, tmp_path):
 
 def test_cancel_check_propagates_through_session(monkeypatch, tmp_path):
     monkeypatch.setenv("ECHORA_PREPROCESS_DIR", str(tmp_path))
-    get_settings.cache_clear()
+    reset_config_cache()
 
     class Cancel(BaseException):
         pass
@@ -217,7 +217,7 @@ def test_melody_reuses_shared_vocals_and_caches_residual(monkeypatch, tmp_path):
     import worker.media.roformer as roformer
 
     monkeypatch.setenv("ECHORA_PREPROCESS_DIR", str(tmp_path))
-    get_settings.cache_clear()
+    reset_config_cache()
     mix = np.random.default_rng(22).uniform(-2, 2, (44100, 2)).astype(np.float32)
     decode = Mock(return_value=mix.copy())
     separate = Mock(side_effect=lambda waveform, check: waveform * 0.25)
@@ -261,7 +261,7 @@ def test_karaoke_reference_matches_vocal_resampling_grid(monkeypatch, tmp_path, 
     import worker.media.roformer as roformer
 
     monkeypatch.setenv("ECHORA_PREPROCESS_DIR", str(tmp_path))
-    get_settings.cache_clear()
+    reset_config_cache()
     mix = np.random.default_rng(frames).uniform(-1, 1, (frames, 2)).astype(np.float32)
     decode = Mock(return_value=mix)
     separate = Mock(side_effect=lambda waveform, check: waveform.copy())

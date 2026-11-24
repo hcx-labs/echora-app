@@ -115,15 +115,15 @@ def test_main_normalize_source_lines_uses_the_rules():
 
 def test_settings_and_language_forwarding(monkeypatch):
     import worker.kara.pipeline as karaoke_pipeline
-    from core.settings import Settings
+    from worker.kara.config import KaraConfig
 
-    assert Settings().fa_kara_label_rules == "v3-sung"
+    assert KaraConfig().label_rules == "v3-sung"
     monkeypatch.setenv("FA_KARA_LABEL_RULES", "v4")
     with pytest.raises(ValueError):
-        Settings()
+        KaraConfig()
     for rules in ("v3", "v3-orthographic"):
-        monkeypatch.setenv("FA_KARA_LABEL_RULES", rules)
-        assert Settings().fa_kara_label_rules == rules
+        monkeypatch.setenv("ECHORA_KARA_LABEL_RULES", rules)
+        assert KaraConfig().label_rules == rules
     assert "en" not in karaoke_pipeline.fa_kara_languages("v1")
     assert {"en", "de", "fr", "tr", "yue", "zh"} <= karaoke_pipeline.fa_kara_languages("v2")
     # v3 also forwards the non-Latin-script languages it reads per line.

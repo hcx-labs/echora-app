@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from core.db.config import DatabaseConfig
 from datetime import datetime, timedelta, timezone
 import hashlib
 import secrets
@@ -14,7 +15,6 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.settings import get_settings
 from core.lyrics.sources import lyrics_paused
 
 
@@ -42,7 +42,7 @@ class KeyCreate(BaseModel):
 
 
 def connect():
-    return psycopg.connect(get_settings().database_url, row_factory=dict_row)
+    return psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row)
 
 
 def digest(token: str) -> str:

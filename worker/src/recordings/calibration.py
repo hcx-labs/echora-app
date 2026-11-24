@@ -7,7 +7,7 @@ Disk publication/deletion and expiry share a database advisory lock across repli
 
 from __future__ import annotations
 
-from core.settings import get_settings
+from worker.recordings.config import RecordingConfig
 
 import hashlib
 import os
@@ -42,11 +42,11 @@ class TrackUnavailable(ValueError):
 
 
 def enabled() -> bool:
-    return get_settings().recording_calibration_enabled
+    return RecordingConfig.load().calibration_enabled
 
 
 def directory() -> Path:
-    return Path(get_settings().recording_calibration_dir)
+    return Path(RecordingConfig.load().calibration_dir)
 
 
 def _file(root: Path, sample_id) -> Path:
@@ -76,7 +76,7 @@ def save(
         raise ValueError("Choose the actual library song or mark the clip as not in your library")
     if not isinstance(notes, str) or len(notes) > 300:
         raise ValueError("Calibration notes must be at most 300 characters")
-    if not audio or len(audio) > get_settings().recording_max_upload_bytes:
+    if not audio or len(audio) > RecordingConfig.load().max_upload_bytes:
         raise ValueError("Invalid calibration recording size")
     owner = UUID(str(user_id))
     expected = UUID(str(expected_track_id)) if expected_track_id is not None else None
@@ -112,9 +112,9 @@ def save(
             # Expired rows count until cleanup erases their files, bounding disk
             # retention even while a worker is stopped.
             if (
-                quota["total"] >= get_settings().recording_calibration_max_total_samples
-                or quota["owned"] >= get_settings().recording_calibration_max_user_samples
-                or quota["recent"] >= get_settings().recording_calibration_uploads_per_minute
+                quota["total"] >= RecordingConfig.load().calibration_max_total_samples
+                or quota["owned"] >= RecordingConfig.load().calibration_max_user_samples
+                or quota["recent"] >= RecordingConfig.load().calibration_uploads_per_minute
             ):
                 raise QueueFull("Calibration storage is full. Delete a saved clip or try later.")
             if (
@@ -140,7 +140,7 @@ def save(
                     hashlib.sha256(audio).hexdigest(),
                     len(audio),
                     duration,
-                    get_settings().recording_calibration_retention_seconds,
+                    RecordingConfig.load().calibration_retention_seconds,
                 ),
             ).fetchone()
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -171,7 +171,7 @@ def list_samples(user_id):
                 SELECT 1 FROM user_track_links u WHERE u.user_id=s.user_id AND u.track_id=t.id)
             WHERE s.user_id=%s AND s.expires_at>now() ORDER BY s.created_at DESC,s.id
             LIMIT %s""",
-            (UUID(str(user_id)), get_settings().recording_calibration_max_user_samples),
+            (UUID(str(user_id)), RecordingConfig.load().calibration_max_user_samples),
         ).fetchall()
     return {"samples": [_public(row) for row in rows]}
 

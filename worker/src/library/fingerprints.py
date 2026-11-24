@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.settings import get_settings
+from worker.library.config import LibraryConfig
 
 import json
 import subprocess
@@ -31,7 +31,7 @@ def compute_chromaprint(audio: bytes) -> tuple[bytes, float, str]:
             ["fpcalc", "-raw", "-json", source.name],
             capture_output=True,
             text=True,
-            timeout=get_settings().fingerprint_timeout_seconds,
+            timeout=LibraryConfig.load().fingerprint_timeout_seconds,
             check=False,
         )
     if process.returncode != 0:

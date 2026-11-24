@@ -1,113 +1,142 @@
+"""The settings catalog across every config class: names, defaults, validation and secrecy."""
+
+import json
+import os
+import runpy
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
-from core.settings import Settings, get_settings, require_database_url
+from core.config import reset_config_cache
+from core.db.config import DatabaseConfig, require_database_url
+from core.errors import ConfigurationError
+
+ROOT = Path(__file__).resolve().parents[3]
+EXPORTER = runpy.run_path(str(ROOT / "scripts/export-runtime-settings.py"))
+CLASSES = {cls.__name__: cls for cls in EXPORTER["catalog"]()}
 
 
 @pytest.fixture(autouse=True)
 def isolated_settings(monkeypatch):
-    import os
-
-    names = {name.upper() for name in Settings.model_fields}
-    names.update(
-        field.validation_alias
-        for field in Settings.model_fields.values()
-        if isinstance(field.validation_alias, str)
-    )
+    names = {
+        name
+        for cls in CLASSES.values()
+        for entry in cls.entries()
+        for name in (entry.name, *entry.deprecated_names)
+    }
     for name in os.environ:
         if name.upper() in names:
             monkeypatch.delenv(name)
-    get_settings.cache_clear()
+    reset_config_cache()
     yield
-    get_settings.cache_clear()
+    reset_config_cache()
+
+
+def test_every_variable_has_one_owner():
+    seen: dict[str, str] = {}
+    for cls in CLASSES.values():
+        for entry in cls.entries():
+            for name in (entry.name, *entry.deprecated_names):
+                assert name not in seen, f"{name}: {seen.get(name)} and {cls.__name__}"
+                seen[name] = cls.__name__
 
 
 def test_defaults_and_no_dotenv(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text("DATABASE_URL=do-not-read\nECHORA_BATCH_SIZE=1\n")
     monkeypatch.chdir(tmp_path)
-    settings = Settings()
-    assert settings.database_url == ""
-    assert settings.batch_size == 128
-    assert settings.oidc_redirect_uri == ""
-    assert settings.worker_lease_seconds == 120
-    assert settings.model_config["env_file"] is None
-    assert Settings(unknown="ignored").batch_size == 128
+    assert DatabaseConfig().database_url == ""
+    assert CLASSES["WorkerConfig"]().batch_size == 128
+    assert CLASSES["QueueConfig"]().lease_seconds == 120
+    assert CLASSES["OidcConfig"]().redirect_uri == ""
 
 
 def test_database_url_is_required_by_connection_entry_points(monkeypatch):
-    with pytest.raises(RuntimeError, match="DATABASE_URL is required"):
+    with pytest.raises(ConfigurationError, match="DATABASE_URL is required"):
         require_database_url()
     monkeypatch.setenv("DATABASE_URL", "postgresql://example.invalid/echora")
-    get_settings.cache_clear()
+    reset_config_cache()
     assert require_database_url() == "postgresql://example.invalid/echora"
 
 
-def test_aliases_types_case_and_cache(monkeypatch):
+def test_legacy_names_case_and_cache(monkeypatch):
+    worker, session = CLASSES["WorkerConfig"], CLASSES["SessionConfig"]
     monkeypatch.setenv("echora_batch_size", "12")
     monkeypatch.setenv("COOKIE_SECURE", "true")
-    assert get_settings().batch_size == 12
-    assert get_settings().cookie_secure is True
+    assert worker.load().batch_size == 12
+    assert session.load().cookie_secure is True
     monkeypatch.setenv("echora_batch_size", "24")
-    assert get_settings().batch_size == 12
-    get_settings.cache_clear()
-    assert get_settings().batch_size == 24
-    assert Settings(batch_size=3).batch_size == 3
+    assert worker.load().batch_size == 12
+    reset_config_cache()
+    assert worker.load().batch_size == 24
+    # The canonical name wins over a legacy one.
+    monkeypatch.setenv("ECHORA_WORKER_BATCH_SIZE", "36")
+    reset_config_cache()
+    assert worker.load().batch_size == 36
 
 
-def test_secret_strings_do_not_export():
-    names = (
-        "database_url",
-        "redis_url",
-        "oidc_session_secret",
-        "oidc_client_secret",
-        "credential_encryption_key",
-    )
-    settings = Settings(**{name: "private-marker" for name in names})
-    assert settings.database_url == "private-marker"
-    assert "private-marker" not in repr(settings)
-    assert "private-marker" not in settings.model_dump_json()
-    assert all(name not in settings.model_dump() for name in names)
-    assert Settings().oidc_session_secret == Settings().oidc_session_secret
+def test_secrets_do_not_export(monkeypatch):
+    for name in (
+        "DATABASE_URL",
+        "REDIS_URL",
+        "OIDC_SESSION_SECRET",
+        "OIDC_CLIENT_SECRET",
+        "CREDENTIAL_ENCRYPTION_KEY",
+    ):
+        monkeypatch.setenv(name, "private-marker")
+    for cls in CLASSES.values():
+        config = cls()
+        assert "private-marker" not in repr(config)
+        assert "private-marker" not in config.model_dump_json()
+    assert DatabaseConfig().database_url == "private-marker"
+    oidc = CLASSES["OidcConfig"]()
+    assert oidc.client_secret.get_secret_value() == "private-marker"
+    assert "private-marker" not in EXPORTER["template"]()
+
+
+def test_generated_session_secret_is_stable_per_process():
+    oidc = CLASSES["OidcConfig"]
+    assert oidc().session_secret.get_secret_value() == oidc().session_secret.get_secret_value()
 
 
 @pytest.mark.parametrize(
-    "values",
+    ("owner", "values"),
     [
-        {"batch_size": 0},
-        {"db_pool_size": 0},
-        {"db_max_overflow": -1},
-        {"worker_lease_seconds": 14},
-        {"worker_heartbeat_seconds": 60},
-        {"session_activity_check_seconds": 3600},
-        {"session_renew_interval_seconds": 604800},
-        {"session_absolute_timeout_seconds": 604799},
-        {"session_activity_window_seconds": 59},
-        {"session_request_timeout_seconds": 0},
-        {"job_retry_max_seconds": 1},
-        {"semantic_fusion_weight_lyrics": 0, "semantic_fusion_weight_audio": 0},
-        {"semantic_fusion_weight_audio": float("nan")},
-        {"fa_kara_audio_speed": 0},
-        {"preprocess_max_bytes": -1},
-        {"preprocess_ttl_seconds": 0},
-        {"fa_kara_audio_speed": 1.51},
-        {"fa_kara_aligner": "unknown"},
-        {"recording_max_upload_bytes": 0},
-        {"cors_origins": "*"},
-        {"session_trusted_origins": "*"},
-        {"karaoke_job_timeout_seconds": 0},
-        {"navidrome_max_connections": 2},
-        {"media_cache_timeout_seconds": 0},
+        ("WorkerConfig", {"batch_size": 0}),
+        ("DatabaseConfig", {"db_pool_size": 0}),
+        ("DatabaseConfig", {"db_max_overflow": -1}),
+        ("QueueConfig", {"lease_seconds": 14}),
+        ("QueueConfig", {"retry_max_seconds": 1}),
+        ("SessionConfig", {"activity_check_seconds": 3600}),
+        ("SessionConfig", {"renew_interval_seconds": 604800}),
+        ("SessionConfig", {"absolute_timeout_seconds": 604799}),
+        ("SessionConfig", {"activity_window_seconds": 59}),
+        ("SessionConfig", {"request_timeout_seconds": 0}),
+        ("SessionConfig", {"trusted_origins": "*"}),
+        ("ApiConfig", {"cors_origins": "*"}),
+        ("FusionConfig", {"weight_lyrics": 0, "weight_audio": 0}),
+        ("FusionConfig", {"weight_audio": float("nan")}),
+        ("KaraConfig", {"audio_speed": 0}),
+        ("KaraConfig", {"audio_speed": 1.51}),
+        ("KaraConfig", {"aligner": "unknown"}),
+        ("KaraConfig", {"job_timeout_seconds": 0}),
+        ("PreprocessConfig", {"max_bytes": -1}),
+        ("PreprocessConfig", {"ttl_seconds": 0}),
+        ("RecordingConfig", {"max_upload_bytes": 0}),
+        ("NavidromeConfig", {"max_connections": 2}),
+        ("MediaCacheConfig", {"timeout_seconds": 0}),
+        ("UiConfig", {"recording_poll_ms": 0}),
     ],
 )
-def test_invalid_settings(values):
+def test_invalid_settings(owner, values):
     with pytest.raises(ValidationError):
-        Settings(**values)
+        CLASSES[owner](**values)
 
 
 def test_errors_hide_input(monkeypatch):
     monkeypatch.setenv("ECHORA_BATCH_SIZE", "private-invalid-value")
     with pytest.raises(ValidationError) as error:
-        Settings()
+        CLASSES["WorkerConfig"]()
     assert "private-invalid-value" not in str(error.value)
 
 
@@ -121,22 +150,18 @@ def test_empty_models_preserved(monkeypatch):
         "ECHORA_RECORDING_MODEL_MANIFEST",
     ):
         monkeypatch.setenv(name, "")
-    settings = Settings()
-    for attr in (
-        "muq_model_id",
-        "mert_model_id",
-        "lyrics_model_id",
-        "moss_model_id",
-        "fa_kara_model_id",
-        "recording_model_manifest",
-    ):
-        assert getattr(settings, attr) == ""
-    assert Settings(audio_cache_bytes=0, preprocess_max_bytes=0, source_recheck_seconds=0)
+    embedding = CLASSES["EmbeddingConfig"]()
+    assert embedding.muq_model_id == embedding.mert_model_id == embedding.lyrics_model_id == ""
+    assert CLASSES["TranscriptionConfig"]().moss_model_id == ""
+    assert CLASSES["KaraConfig"]().model_id == ""
+    assert CLASSES["RecordingConfig"]().model_manifest == ""
+    assert CLASSES["NavidromeConfig"](audio_cache_bytes=0)
+    assert CLASSES["PreprocessConfig"](max_bytes=0)
+    assert CLASSES["LibraryConfig"](source_recheck_seconds=0)
 
 
-def test_public_ui_is_an_explicit_allowlist():
-    from core.settings import public_ui_settings
-
+def test_public_ui_is_only_the_ui_config(monkeypatch):
+    ui = CLASSES["UiConfig"]
     expected = {
         "job_poll_ms": 1200,
         "batch_poll_ms": 1500,
@@ -146,13 +171,9 @@ def test_public_ui_is_an_explicit_allowlist():
         "recording_request_timeout_ms": 10000,
         "recording_upload_timeout_ms": 60000,
     }
-    assert public_ui_settings() == expected
-    assert Settings(database_url="private", job_poll_ms=42).public_ui() == {
-        **expected,
-        "job_poll_ms": 42,
-    }
-    with pytest.raises(ValidationError):
-        Settings(recording_poll_ms=0)
+    assert ui.load().public_ui() == expected
+    monkeypatch.setenv("ECHORA_JOB_POLL_MS", "42")
+    assert ui().public_ui() == {**expected, "job_poll_ms": 42}
 
 
 def test_operational_http_settings(monkeypatch):
@@ -160,25 +181,16 @@ def test_operational_http_settings(monkeypatch):
 
     monkeypatch.setenv("ECHORA_NAVIDROME_TIMEOUT_SECONDS", "7")
     monkeypatch.setenv("ECHORA_NAVIDROME_READ_TIMEOUT_SECONDS", "9")
-    get_settings.cache_clear()
+    reset_config_cache()
     with NavidromeClient("https://example.invalid", "user", "pass") as client:
         assert client.client.timeout.connect == 7
         assert client.client.timeout.read == 9
 
 
 def test_environment_catalog_matches_settings_defaults():
-    import runpy
-    from pathlib import Path
-
-    root = Path(__file__).resolve().parents[3]
-    exporter = runpy.run_path(str(root / "scripts/export-runtime-settings.py"))
-    assert (root / "configs/runtime.env.example").read_text() == exporter["template"]()
+    assert (ROOT / "configs/runtime.env.example").read_text() == EXPORTER["template"]()
 
 
 def test_browser_defaults_match_settings():
-    import json
-    from pathlib import Path
-
-    root = Path(__file__).resolve().parents[3]
-    defaults = root / "web/components/runtime/runtimeConfig.defaults.json"
-    assert json.loads(defaults.read_text()) == Settings.model_construct().public_ui()
+    defaults = ROOT / "web/components/runtime/runtimeConfig.defaults.json"
+    assert json.loads(defaults.read_text()) == EXPORTER["ui_defaults"]()

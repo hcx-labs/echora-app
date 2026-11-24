@@ -1,7 +1,7 @@
 """Pre-batch song selection, separate from execution-time rechecking."""
 
 from core.testing import stub_module
-from core.settings import get_settings
+from core.config import reset_config_cache
 
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -20,7 +20,7 @@ def planner(monkeypatch):
     # Optional pipelines add their own selection queries; keep the host's config out.
     for name in ("MOSS_MODEL_ID", "MOSS_REVISION", "ECHORA_RECORDING_MODEL_MANIFEST"):
         monkeypatch.delenv(name, raising=False)
-    get_settings.cache_clear()
+    reset_config_cache()
 
     monkeypatch.setattr(
         translation_storage, "load_settings", lambda: (SimpleNamespace(enabled=False), None)
@@ -99,10 +99,10 @@ def test_parent_batches_selected_work_but_reconciles_full_catalog(
     selected = catalog[-70:]
     if recording_enabled:
         monkeypatch.setenv("ECHORA_RECORDING_MODEL_MANIFEST", "/configured/model.json")
-        get_settings.cache_clear()
+        reset_config_cache()
     else:
         monkeypatch.delenv("ECHORA_RECORDING_MODEL_MANIFEST", raising=False)
-        get_settings.cache_clear()
+        reset_config_cache()
     main = SimpleNamespace(
         _load_connection=Mock(return_value=("https://music", "user", "secret")),
         _attach_user_library=Mock(),
@@ -126,7 +126,7 @@ def test_parent_batches_selected_work_but_reconciles_full_catalog(
     select = Mock(return_value=selected)
     monkeypatch.setattr(sync_plan, "select_sync_tracks", select)
     monkeypatch.setenv("ECHORA_BATCH_SIZE", "32")
-    get_settings.cache_clear()
+    reset_config_cache()
     context = SimpleNamespace(check=Mock(), report=Mock(), token="token")
     job = {
         "id": "root",
@@ -162,10 +162,10 @@ def test_entire_library_selects_recording_only_backfill_without_other_models(pla
     from worker.planning.audio import AudioProcessingPlan
 
     monkeypatch.delenv("ECHORA_RECORDING_MATCH_POLICY", raising=False)
-    get_settings.cache_clear()
+    reset_config_cache()
     monkeypatch.delenv("MOSS_MODEL_ID", raising=False)
     monkeypatch.delenv("MOSS_REVISION", raising=False)
-    get_settings.cache_clear()
+    reset_config_cache()
     connection, cursor, audio, _ = planner
     cursor.fetchall.side_effect = [[("existing",), ("ready",)], []]
     audio.return_value = AudioProcessingPlan(

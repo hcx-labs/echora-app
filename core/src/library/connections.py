@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 from __future__ import annotations
+from core.library.config import CredentialsConfig
 from datetime import datetime, timezone
 import uuid
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import select
 from core.db.session import session_scope
-from core.settings import get_settings
 from core.db.models import NavidromeConnection
 
 
 def credential_cipher() -> Fernet:
-    key = get_settings().credential_encryption_key
+    key = CredentialsConfig.load().credential_encryption_key.get_secret_value()
     if not key:
         raise RuntimeError("CREDENTIAL_ENCRYPTION_KEY is required")
     return Fernet(key.encode())

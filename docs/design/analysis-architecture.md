@@ -283,8 +283,9 @@ class KaraConfig(ProcessorConfig, env_prefix="ECHORA_KARA_"):
   catalog lists them as deprecated.
 - **Secrets.** They are `SecretStr`, excluded from dumps and reprs.
 - **Compute fields.** Fields made with `compute()` change model results. A Modal call ships
-  `config.compute_values()`, and the container builds the same config object from that dict. This
-  replaces `PROCESSING_FIELDS` and `adopt_processing_settings`.
+  `worker.remote.compute.compute_settings()` (each compute config's `compute_values()`), and the
+  container calls `adopt_compute_settings()`, which rebuilds each config with
+  `with_compute_values()` and installs it with `adopt()`.
 - **No hidden globals.** Global state lives on config, context or service objects. The only
   module-level state is declared, typed caches (resident models, persistent search services), each
   behind one accessor.

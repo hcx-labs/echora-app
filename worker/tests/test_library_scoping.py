@@ -5,7 +5,7 @@ from contextlib import nullcontext
 import functools
 import hashlib
 import logging
-from core.settings import Settings
+from core.config import config_classes
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -21,8 +21,10 @@ def load_functions(filename, **dependencies):
     tree.body = [
         ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)
     ] + [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
-    namespace = dict(
-        get_settings=lambda: Settings.model_construct(database_url="fake"), **dependencies
+    namespace = {cls.__name__: cls for cls in config_classes()}
+    namespace.update(
+        DatabaseConfig=SimpleNamespace(load=lambda: SimpleNamespace(database_url="fake")),
+        **dependencies,
     )
     exec(compile(ast.fix_missing_locations(tree), filename, "exec"), namespace)
     return namespace

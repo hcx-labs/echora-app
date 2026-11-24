@@ -12,7 +12,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from core.integrations.external_ai import LanguagePair
-from core.settings import require_database_url
+from core.db.config import require_database_url
 from core.lyrics.translations import load_settings, load_translations, save_translation
 from worker.translation.client import translate, TranslationError, source_checksum
 

@@ -9,6 +9,7 @@ upgrade or a model change is deployed or downloaded before any song is sent.
 
 from __future__ import annotations
 
+from worker.remote.config import RemoteConfig
 from collections.abc import Callable
 from datetime import datetime
 import logging
@@ -23,7 +24,8 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from worker.remote.constants import GPU_TYPES
 from worker.remote.session import ModalConfig, ModalSession, workspace
-from core.settings import get_settings, processing_settings, require_database_url
+from core.db.config import require_database_url
+from worker.remote.compute import compute_settings
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +108,7 @@ def config(row: dict[str, object] | None = None) -> ModalConfig | None:
     # Gated models (LTX-2.5) download with the shared token from Analysis models settings.
     hf_token = token_or_none()
     return ModalConfig(
-        str(row["token_id"]), secret, str(row["gpu"]), get_settings().modal_image, hf_token
+        str(row["token_id"]), secret, str(row["gpu"]), RemoteConfig.load().image, hf_token
     )
 
 
@@ -117,10 +119,7 @@ def remote_settings() -> dict[str, object]:
 
     with motion_connect() as connection, connection.cursor() as cursor:
         artwork = motion_settings(cursor)
-    return {
-        **processing_settings(),
-        "motion_artwork_models": bool(artwork.enabled and artwork.generate_on_modal),
-    }
+    return compute_settings(motion_artwork_models=artwork.enabled and artwork.generate_on_modal)
 
 
 def _is_admin(db, user_id) -> bool:
@@ -261,7 +260,7 @@ def _public(
         "status": row["status"],
         "status_detail": row["status_detail"],
         "checked_at": checked.isoformat() if isinstance(checked, datetime) else None,
-        "image": get_settings().modal_image,
+        "image": RemoteConfig.load().image,
         "gpu_types": list(GPU_TYPES),
         "setup": setup,
     }
@@ -330,7 +329,7 @@ def router(require_user):
                         body.token_id,
                         _cipher().decrypt(bytes(encrypted)).decode(),
                         body.gpu,
-                        get_settings().modal_image,
+                        RemoteConfig.load().image,
                     )
                     try:
                         workspace_name = workspace(candidate)

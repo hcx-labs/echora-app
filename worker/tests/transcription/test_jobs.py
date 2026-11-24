@@ -1,5 +1,5 @@
 from core.testing import stub_module
-from core.settings import get_settings
+from core.config import reset_config_cache
 
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -17,7 +17,7 @@ def setup_main(monkeypatch, library_helpers):
 def test_default_batch_is_128(monkeypatch, library_helpers):
     ctx = setup_main(monkeypatch, library_helpers)
     monkeypatch.delenv("ECHORA_BATCH_SIZE", raising=False)
-    get_settings.cache_clear()
+    reset_config_cache()
     jobs = SimpleNamespace(expand=Mock())
     stub_module(monkeypatch, "core.jobs.queue", jobs)
     analysis_jobs.execute(

@@ -7,6 +7,9 @@ per batch phase, then stops so GPU memory returns to analysis.
 
 from __future__ import annotations
 
+from worker.artwork.config import ComfyUIConfig
+from core.db.config import DatabaseConfig
+from core.media.config import MotionArtworkConfig
 from core.library.connections import credential_cipher
 import hashlib
 import logging
@@ -39,7 +42,6 @@ from worker.artwork.render import (
     finish,
     zooms,
 )
-from core.settings import get_settings
 
 logger = logging.getLogger(__name__)
 # Covers are fetched at a fixed size so a cover's identity does not depend on render settings.
@@ -47,7 +49,7 @@ COVER_FETCH_SIZE = 1536
 
 
 def _connect():
-    return psycopg.connect(get_settings().database_url, row_factory=dict_row)
+    return psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row)
 
 
 def plan_tracks(cursor, user_id, url: str, external_ids: list[str]) -> list[dict]:
@@ -109,13 +111,13 @@ def comfyui_phase(
                 except Exception:
                     logger.warning("Could not ask ComfyUI to free its memory")
         return
-    deployment = get_settings()
+    deployment = ComfyUIConfig.load()
     with launch(
-        deployment.comfyui_dir,
-        deployment.comfyui_python,
+        deployment.dir,
+        deployment.python,
         work_dir=work,
         check=check,
-        startup_timeout_seconds=deployment.comfyui_startup_timeout_seconds,
+        startup_timeout_seconds=deployment.startup_timeout_seconds,
     ) as local:
         with ComfyUI(local) as client:
             yield client
@@ -513,7 +515,7 @@ def _store(cover: dict, recipe: Recipe, event: dict) -> None:
     """Move a rendered loop into the artwork directory and record it."""
     sha = cover["sha256"]
     relative = f"{sha[:2]}/{sha}-{recipe.hash()}.mp4"
-    target = Path(get_settings().motion_artwork_dir) / relative
+    target = Path(MotionArtworkConfig.load().dir) / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_suffix(".part.mp4")
     shutil.move(event["file"], partial)
@@ -568,11 +570,11 @@ def render_loops(
     removed later, so the consumer moves it before asking for the next event. The same code runs
     on this server and on Modal.
     """
-    deployment = get_settings()
+    deployment = MotionArtworkConfig.load()
     wait = {
         "check": check,
-        "timeout_seconds": deployment.motion_artwork_render_timeout_seconds,
-        "poll_seconds": deployment.motion_artwork_poll_seconds,
+        "timeout_seconds": deployment.render_timeout_seconds,
+        "poll_seconds": deployment.poll_seconds,
     }
     external = bool(settings.external_url())
     timings: dict[str, float] = {}

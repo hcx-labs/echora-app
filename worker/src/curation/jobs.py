@@ -5,11 +5,12 @@ held across remote I/O (not merely the selecting transaction). Publication inten
 outlives jobs: a fresh manual job cannot bypass an ambiguous playlist creation.
 """
 
+from worker.curation.config import CurationConfig
 from core.library.connections import load_connection
 from core.integrations.navidrome import NavidromeClient
 from core.curation.preview import CurationRecipe, preview_curation
 from core.errors import ConflictError, NotFoundError
-from core.settings import get_settings, require_database_url
+from core.db.config import require_database_url
 from contextlib import contextmanager
 import json
 import uuid
@@ -94,7 +95,7 @@ def enqueue_due():
             """SELECT id FROM curations
             WHERE status='draft' OR (refresh_enabled AND next_refresh_at <= now())
             ORDER BY next_refresh_at NULLS FIRST LIMIT %s""",
-            (get_settings().curation_due_limit,),
+            (CurationConfig.load().due_limit,),
         ).fetchall()
     count = 0
     for item in due:

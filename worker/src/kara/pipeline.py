@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from core.settings import get_settings
+from core.db.config import DatabaseConfig
+from worker.kara.config import KaraConfig
 
 from collections.abc import Callable
 import functools
@@ -70,9 +71,9 @@ def current_model_revision() -> str:
     so replacing a local checkpoint makes existing alignments stale even when
     FA_KARA_REVISION is unchanged.
     """
-    path = get_settings().fa_kara_model_path
+    path = KaraConfig.load().model_path
     if not path:
-        return get_settings().fa_kara_revision
+        return KaraConfig.load().revision
     candidates = [Path(path) / name for name in ("model.safetensors", "pytorch_model.bin")]
     weights = next((candidate for candidate in candidates if candidate.is_file()), None)
     if weights is None:
@@ -82,7 +83,7 @@ def current_model_revision() -> str:
 
 
 def _separates_vocals() -> bool:
-    return get_settings().fa_kara_audio_input == "vocals"
+    return KaraConfig.load().audio_input == "vocals"
 
 
 def _stored_model_revision(model_revision: str) -> str:
@@ -294,7 +295,7 @@ def mark_backing_voice(lines: list[dict[str, object]]) -> list[dict[str, object]
             # With inline backing placement every inline bracket phrase is on the second stream,
             # so it is shown as the second voice whether or not it overlaps the lead; otherwise
             # only a simultaneous phrase qualifies.
-            inline = bool(others) and get_settings().fa_kara_inline_backing
+            inline = bool(others) and KaraConfig.load().inline_backing
             if inline or any(
                 min(end, e) - max(start, s) >= BACKING_MIN_OVERLAP_MS for s, e in others
             ):
@@ -405,8 +406,8 @@ def _fa_kara_worker(vendor: Path, model_revision: str) -> subprocess.Popen[str]:
     # The vendored decoder reads these two from its environment (the text head is loaded only
     # when the bonus is on), so they belong to the worker's identity.
     decoder_environment = {
-        "FA_KARA_TEXT_BONUS": str(get_settings().fa_kara_text_bonus),
-        "FA_KARA_IN_LINE_GAP_COST": str(get_settings().fa_kara_in_line_gap_cost),
+        "FA_KARA_TEXT_BONUS": str(KaraConfig.load().text_bonus),
+        "FA_KARA_IN_LINE_GAP_COST": str(KaraConfig.load().in_line_gap_cost),
     }
     key = (str(vendor), model_revision, *decoder_environment.values())
     if (
@@ -447,10 +448,10 @@ def _stop_fa_kara_worker() -> None:
         return
     worker.terminate()
     try:
-        worker.wait(timeout=get_settings().karaoke_shutdown_grace_seconds)
+        worker.wait(timeout=KaraConfig.load().shutdown_grace_seconds)
     except subprocess.TimeoutExpired:
         worker.kill()
-        worker.wait(timeout=get_settings().karaoke_kill_grace_seconds)
+        worker.wait(timeout=KaraConfig.load().kill_grace_seconds)
 
 
 def _run_worker_job(
@@ -463,7 +464,7 @@ def _run_worker_job(
     selector = selectors.DefaultSelector()
     selector.register(worker.stdout, selectors.EVENT_READ)
     deadline = time.monotonic() + (
-        get_settings().karaoke_job_timeout_seconds if timeout is None else timeout
+        KaraConfig.load().job_timeout_seconds if timeout is None else timeout
     )
     response_line = bytearray()
     try:
@@ -485,7 +486,7 @@ def _run_worker_job(
     except BaseException:
         if worker.poll() is None:
             worker.kill()
-        worker.wait(timeout=get_settings().karaoke_kill_grace_seconds)
+        worker.wait(timeout=KaraConfig.load().kill_grace_seconds)
         raise
     finally:
         selector.close()
@@ -571,18 +572,18 @@ def _run_fa_kara(
     separate_vocals: bool | None = None,
 ) -> dict[str, object]:
     vendor = Path(__file__).resolve().parent / "vendor" / "fa_kara"
-    model_id = get_settings().fa_kara_model_id
+    model_id = KaraConfig.load().model_id
     model_revision = current_model_revision()
     snapshot = (
         Path(os.environ.get("HF_HOME", "/models/huggingface"))
         / "hub"
         / f"models--{model_id.replace('/', '--')}"
         / "snapshots"
-        / get_settings().fa_kara_revision
+        / KaraConfig.load().revision
     )
-    if get_settings().fa_kara_model_path:
+    if KaraConfig.load().model_path:
         # A local checkpoint; current_model_revision identifies it by its weights.
-        snapshot = Path(get_settings().fa_kara_model_path)
+        snapshot = Path(KaraConfig.load().model_path)
         model_id = str(snapshot)
     if not snapshot.is_dir():
         raise RuntimeError(f"FA-Kara model snapshot is missing: {model_id}@{model_revision}")
@@ -605,7 +606,7 @@ def _run_fa_kara(
         line_texts = _source_line_texts(source_lines or [])
         input_text = "\n".join(line_texts) if line_texts else lyrics_text.rstrip("\r\n")
         (work / "i.txt").write_text(input_text + "\n", encoding="utf-8")
-        aligner = get_settings().fa_kara_aligner.lower()
+        aligner = KaraConfig.load().aligner.lower()
         if aligner not in {"yohane", "mms"}:
             raise ValueError("FA_KARA_ALIGNER must be 'yohane' or 'mms'")
         command = [
@@ -618,9 +619,7 @@ def _run_fa_kara(
             "--model",
             aligner,
             "--lang",
-            language
-            if language in fa_kara_languages(get_settings().fa_kara_label_rules)
-            else "auto",
+            language if language in fa_kara_languages(KaraConfig.load().label_rules) else "auto",
         ]
         if not language or language in UNKNOWN_LANGUAGES:
             # Lyrics stored without a language (ingest-time detection failed or was unsure): the
@@ -628,30 +627,28 @@ def _run_fa_kara(
             command.extend(
                 [
                     "--detect_language",
-                    ",".join(sorted(fa_kara_languages(get_settings().fa_kara_label_rules))),
+                    ",".join(sorted(fa_kara_languages(KaraConfig.load().label_rules))),
                 ]
             )
-        if get_settings().fa_kara_label_rules != "v1":
-            command.extend(["--label_rules", get_settings().fa_kara_label_rules])
+        if KaraConfig.load().label_rules != "v1":
+            command.extend(["--label_rules", KaraConfig.load().label_rules])
         if aligner == "yohane":
             command.extend(["--hf_model_path", str(snapshot)])
         command.extend(["--head_correct", "0", "--tail_correct", "0"])
-        command.extend(["--min_letter_ms", str(get_settings().fa_kara_min_letter_ms)])
-        command.extend(["--min_token_ms", str(get_settings().fa_kara_min_token_ms)])
-        command.extend(["--timing_offset_ms", str(get_settings().fa_kara_timing_offset_ms)])
-        command.extend(["--duration_pace_ratio", str(get_settings().fa_kara_duration_pace_ratio)])
-        command.extend(
-            ["--vocal_activity_weight", str(get_settings().fa_kara_vocal_activity_weight)]
-        )
-        if get_settings().fa_kara_exact_frame_clock:
+        command.extend(["--min_letter_ms", str(KaraConfig.load().min_letter_ms)])
+        command.extend(["--min_token_ms", str(KaraConfig.load().min_token_ms)])
+        command.extend(["--timing_offset_ms", str(KaraConfig.load().timing_offset_ms)])
+        command.extend(["--duration_pace_ratio", str(KaraConfig.load().duration_pace_ratio)])
+        command.extend(["--vocal_activity_weight", str(KaraConfig.load().vocal_activity_weight)])
+        if KaraConfig.load().exact_frame_clock:
             command.append("--exact_frame_clock")
-        if get_settings().fa_kara_background_decoding:
+        if KaraConfig.load().background_decoding:
             command.append("--background_decoding")
-        if get_settings().fa_kara_blank_free_tokens:
+        if KaraConfig.load().blank_free_tokens:
             command.append("--blank_free_tokens")
-        if get_settings().fa_kara_inline_backing:
+        if KaraConfig.load().inline_backing:
             command.append("--inline_backing")
-        if get_settings().fa_kara_gap_onset_pull:
+        if KaraConfig.load().gap_onset_pull:
             command.append("--gap_onset_pull")
         if os.environ.get("FA_KARA_OPTIONAL_BRACKETS") == "1":
             # Experiment, off: inline bracketed words may leave the lead path. It did not help.
@@ -662,9 +659,9 @@ def _run_fa_kara(
             command.extend(
                 ["--vocal_activity_source", "external", "--vocal_activity_file", external_activity]
             )
-        if get_settings().fa_kara_fusion != "off":
-            command.extend(["--fusion", get_settings().fa_kara_fusion])
-        audio_speed = float(get_settings().fa_kara_audio_speed)
+        if KaraConfig.load().fusion != "off":
+            command.extend(["--fusion", KaraConfig.load().fusion])
+        audio_speed = float(KaraConfig.load().audio_speed)
         if not 0.5 <= audio_speed <= 1.5:
             raise ValueError("FA_KARA_AUDIO_SPEED must be between 0.5 and 1.5")
         if audio_speed != 1.0:
@@ -718,7 +715,7 @@ def backfill_karaoke(
     external_ids: list[str] | None = None,
 ) -> dict[str, int]:
     """Serialize alignment and release its resident model after the phase."""
-    while not _KARAOKE_LOCK.acquire(timeout=get_settings().karaoke_lock_poll_seconds):
+    while not _KARAOKE_LOCK.acquire(timeout=KaraConfig.load().lock_poll_seconds):
         get_check()()
     try:
         get_check()()
@@ -774,7 +771,7 @@ def _backfill_karaoke(
     report = progress or (lambda _: None)
     summary = {"total": 0, "aligned": 0, "failed": 0}
     with (
-        psycopg.connect(get_settings().database_url) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url) as connection,
         NavidromeClient(url, username, password) as client,
     ):
         library_id = resolve_library_id(connection, url)

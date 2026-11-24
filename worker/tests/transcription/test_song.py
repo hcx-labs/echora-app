@@ -1,4 +1,5 @@
-from core.settings import get_settings
+from core.errors import ConfigurationError
+from core.config import reset_config_cache
 
 import pytest
 from worker.transcription.song import parse_window, windows
@@ -35,16 +36,16 @@ def test_invalid_generation_is_not_published(text):
 
 def test_model_config_requires_pinned_revision(monkeypatch):
     monkeypatch.delenv("MOSS_MODEL_ID", raising=False)
-    get_settings.cache_clear()
+    reset_config_cache()
     monkeypatch.delenv("MOSS_REVISION", raising=False)
-    get_settings.cache_clear()
+    reset_config_cache()
     assert transcription_model() is None
     monkeypatch.setenv("MOSS_MODEL_ID", "example/model")
-    get_settings.cache_clear()
-    with pytest.raises(ValueError):
+    reset_config_cache()
+    with pytest.raises(ConfigurationError):
         transcription_model()
     monkeypatch.setenv("MOSS_REVISION", "a" * 40)
-    get_settings.cache_clear()
+    reset_config_cache()
     assert transcription_model() == ("example/model", "a" * 40)
 
 

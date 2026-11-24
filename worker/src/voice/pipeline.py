@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from core.settings import get_settings
+from core.db.config import DatabaseConfig
+from worker.models.config import ModelsConfig
 
 from collections.abc import Callable
 import hashlib
@@ -44,7 +45,7 @@ _model_lock = threading.Lock()
 
 
 def _model_directory() -> str:
-    directory = get_settings().essentia_models_dir
+    directory = ModelsConfig.load().essentia_dir
     return directory
 
 
@@ -52,7 +53,7 @@ def _require_model_file(filename: str) -> str:
     path = os.path.join(_model_directory(), filename)
     if not os.path.exists(path):
         raise FileNotFoundError(
-            f"Essentia model {filename} is missing from {get_settings().essentia_models_dir}; "
+            f"Essentia model {filename} is missing from {ModelsConfig.load().essentia_dir}; "
             "run `python -m worker.models.download` on a machine with network access"
         )
     return path
@@ -236,7 +237,7 @@ def backfill_voice(
     report = progress or (lambda _: None)
     summary = {"total": 0, "classified": 0, "failed": 0}
     with (
-        psycopg.connect(get_settings().database_url) as connection,
+        psycopg.connect(DatabaseConfig.load().database_url) as connection,
         NavidromeClient(url, username, password) as client,
     ):
         library_id = resolve_library_id(connection, url)

@@ -2,12 +2,12 @@
 
 import pytest
 
-from core.settings import get_settings
+from core.config import reset_config_cache
 from core.testing import database  # noqa: F401 - shared fixture
 
 
 @pytest.fixture(autouse=True)
 def reset_settings_cache():
-    get_settings.cache_clear()
+    reset_config_cache()
     yield
-    get_settings.cache_clear()
+    reset_config_cache()

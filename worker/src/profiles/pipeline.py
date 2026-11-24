@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.settings import get_settings, require_database_url
+from core.db.config import require_database_url
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from worker.recordings.config import RecordingConfig
 import asyncio
 from uuid import UUID
 from urllib.parse import unquote
@@ -11,15 +12,14 @@ from starlette.concurrency import run_in_threadpool
 
 import worker.recordings.calibration as recording_calibration
 import worker.recordings.search as recording_search
-from core.settings import get_settings
 
 
 async def _audio_body(request: Request) -> bytes:
     content = bytearray()
     try:
-        async with asyncio.timeout(get_settings().recording_upload_read_timeout_seconds):
+        async with asyncio.timeout(RecordingConfig.load().upload_read_timeout_seconds):
             async for chunk in request.stream():
-                if len(content) + len(chunk) > get_settings().recording_max_upload_bytes:
+                if len(content) + len(chunk) > RecordingConfig.load().max_upload_bytes:
                     raise HTTPException(413, "The recording exceeds the configured upload limit")
                 content.extend(chunk)
     except TimeoutError:

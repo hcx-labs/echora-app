@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.settings import get_settings
+from echora_analysis.config import MediaCacheConfig
 
 from dataclasses import dataclass
 from functools import lru_cache
@@ -53,7 +53,7 @@ class StreamCacheWriter:
             return
         try:
             self.client.rename(self.staging_key, self.key)
-            self.client.expire(self.key, get_settings().media_cache_ttl_seconds)
+            self.client.expire(self.key, MediaCacheConfig.load().ttl_seconds)
         except redis.RedisError:
             self.abort()
         else:
@@ -74,8 +74,8 @@ class MediaCache:
         self.client: redis.Redis[bytes] = redis.Redis.from_url(
             url,
             decode_responses=False,
-            socket_connect_timeout=get_settings().media_cache_connect_timeout_seconds,
-            socket_timeout=get_settings().media_cache_timeout_seconds,
+            socket_connect_timeout=MediaCacheConfig.load().connect_timeout_seconds,
+            socket_timeout=MediaCacheConfig.load().timeout_seconds,
         )
 
     def get(self, key: str) -> CachedMedia | None:
@@ -95,7 +95,7 @@ class MediaCache:
             self.client.set(
                 key,
                 f"{content_type}\0".encode() + content,
-                ex=get_settings().media_cache_ttl_seconds,
+                ex=MediaCacheConfig.load().ttl_seconds,
             )
         except redis.RedisError:
             pass
@@ -106,5 +106,5 @@ class MediaCache:
 
 @lru_cache(maxsize=1)
 def media_cache() -> MediaCache | None:
-    url = get_settings().redis_url
+    url = MediaCacheConfig.load().redis_url
     return MediaCache(url) if url else None

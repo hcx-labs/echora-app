@@ -1,7 +1,7 @@
 """Orchestration tests use no database or model downloads."""
 
 from core.testing import stub_module
-from core.settings import get_settings
+from core.config import reset_config_cache
 
 import sys
 from types import SimpleNamespace
@@ -29,7 +29,7 @@ def test_import_expands_only_selected_ids_without_reconciliation(monkeypatch, li
     library_helpers(main)
     stub_module(monkeypatch, "core.jobs.queue", jobs)
     monkeypatch.setenv("ECHORA_BATCH_SIZE", "2")
-    get_settings.cache_clear()
+    reset_config_cache()
     job = {
         "id": "parent",
         "kind": "import",
@@ -79,9 +79,9 @@ def test_recording_model_does_not_override_configured_batch_size(monkeypatch, li
     library_helpers(main)
     stub_module(monkeypatch, "core.jobs.queue", queue)
     monkeypatch.setenv("ECHORA_BATCH_SIZE", "128")
-    get_settings.cache_clear()
+    reset_config_cache()
     monkeypatch.setenv("ECHORA_RECORDING_MODEL_MANIFEST", "/local/manifest.json")
-    get_settings.cache_clear()
+    reset_config_cache()
     job = {
         "id": "parent",
         "kind": "import",

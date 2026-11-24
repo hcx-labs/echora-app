@@ -7,6 +7,8 @@ serialize cancellation/aggregation without serializing unrelated jobs.
 
 from __future__ import annotations
 
+from core.db.config import DatabaseConfig
+from core.jobs.config import QueueConfig
 from datetime import datetime
 from uuid import UUID, uuid4
 
@@ -14,7 +16,6 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from core.settings import get_settings
 
 ACTIVE = ("queued", "running", "waiting")
 TERMINAL = ("complete", "partial", "failed", "cancelled")
@@ -52,7 +53,7 @@ def _uuid(value):
 
 
 def _db():
-    database_url = get_settings().database_url
+    database_url = DatabaseConfig.load().database_url
     if not database_url:
         raise RuntimeError("DATABASE_URL is required")
     return psycopg.connect(database_url, row_factory=dict_row)
@@ -143,7 +144,7 @@ def _insert(db, kind, worker_type, user_id, connection_id, payload, dedupe_key, 
             Jsonb(payload if payload is not None else {}),
             dedupe_key,
             _uuid(parent_id),
-            get_settings().job_max_attempts,
+            QueueConfig.load().max_attempts,
         ),
     ).fetchone()
     if row:
@@ -387,7 +388,7 @@ def cancel(job_id, user_id):
 
 def _lease(seconds):
     if seconds is None:
-        seconds = get_settings().worker_lease_seconds
+        seconds = QueueConfig.load().lease_seconds
     return max(1, min(int(seconds), 86400))
 
 
@@ -515,8 +516,8 @@ def _retry(db, row, error):
         (
             error,
             min(
-                get_settings().job_retry_max_seconds,
-                get_settings().job_retry_base_seconds ** row["attempts"],
+                QueueConfig.load().retry_max_seconds,
+                QueueConfig.load().retry_base_seconds ** row["attempts"],
             ),
             row["id"],
         ),
@@ -575,7 +576,7 @@ class JobCancelled(BaseException):
 class JobContext:
     def __init__(self, job, *, lease_seconds=None):
         self.lease_seconds = (
-            get_settings().worker_lease_seconds if lease_seconds is None else lease_seconds
+            QueueConfig.load().lease_seconds if lease_seconds is None else lease_seconds
         )
         self.job = job
         self.job_id = job.get("job_id", job.get("id"))

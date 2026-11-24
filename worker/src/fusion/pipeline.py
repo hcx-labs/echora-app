@@ -13,7 +13,8 @@ mixes generations.
 
 from __future__ import annotations
 
-from core.settings import get_settings, require_database_url
+from worker.fusion.config import FusionConfig
+from core.db.config import require_database_url
 
 import hashlib
 import json
@@ -40,8 +41,8 @@ STD_FLOOR = 1e-6
 
 
 def fusion_weights() -> tuple[float, float]:
-    lyrics = float(get_settings().semantic_fusion_weight_lyrics)
-    audio = float(get_settings().semantic_fusion_weight_audio)
+    lyrics = float(FusionConfig.load().weight_lyrics)
+    audio = float(FusionConfig.load().weight_audio)
     total = lyrics + audio
     return lyrics / total, audio / total
 

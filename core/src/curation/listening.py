@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from core.integrations.config import LastfmConfig
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -11,8 +12,6 @@ import unicodedata
 from zoneinfo import ZoneInfo
 
 import httpx
-
-from core.settings import get_settings
 
 
 @dataclass(frozen=True)
@@ -46,7 +45,7 @@ def recent_listens(username: str, api_key: str, since: datetime) -> list[Listen]
             return list(cached[1])
     listens: list[Listen] = []
     page = 1
-    with httpx.Client(timeout=get_settings().listening_history_timeout_seconds) as client:
+    with httpx.Client(timeout=LastfmConfig.load().history_timeout_seconds) as client:
         while page <= 20:
             response = client.get(
                 "https://ws.audioscrobbler.com/2.0/",
@@ -148,7 +147,7 @@ def top_tracks(username: str, api_key: str, period: str, limit: int) -> list[Top
         cached = _top_cache.get(cache_key)
         if cached and time.monotonic() - cached[0] < 600:
             return list(cached[1])
-    with httpx.Client(timeout=get_settings().listening_history_timeout_seconds) as client:
+    with httpx.Client(timeout=LastfmConfig.load().history_timeout_seconds) as client:
         response = client.get(
             "https://ws.audioscrobbler.com/2.0/",
             params={

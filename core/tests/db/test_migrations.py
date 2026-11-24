@@ -1,5 +1,6 @@
 """Exercise migration configuration without importing the application engine."""
 
+from core.errors import ConfigurationError
 from contextlib import nullcontext
 from pathlib import Path
 import runpy
@@ -10,7 +11,7 @@ from alembic.config import Config
 import pytest
 
 import core.db  # noqa: F401 - the real package, before its modules are stubbed
-from core.settings import get_settings
+from core.config import reset_config_cache
 
 
 def run_offline_migrations(monkeypatch):
@@ -34,7 +35,7 @@ def run_offline_migrations(monkeypatch):
 def test_migration_accepts_case_insensitive_url_and_encoded_password(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("database_url", "postgresql://user:p%40ss%25word@example.invalid/echora")
-    get_settings.cache_clear()
+    reset_config_cache()
     observed = run_offline_migrations(monkeypatch)
     assert observed["url"] == "postgresql+psycopg://user:p%40ss%25word@example.invalid/echora"
 
@@ -42,6 +43,6 @@ def test_migration_accepts_case_insensitive_url_and_encoded_password(monkeypatch
 def test_migration_rejects_missing_database_url(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("database_url", raising=False)
-    get_settings.cache_clear()
-    with pytest.raises(RuntimeError, match="DATABASE_URL is required"):
+    reset_config_cache()
+    with pytest.raises(ConfigurationError, match="DATABASE_URL is required"):
         run_offline_migrations(monkeypatch)

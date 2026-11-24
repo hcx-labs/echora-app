@@ -10,6 +10,7 @@ User identity belongs to the job envelope, not the payload.
 
 from __future__ import annotations
 
+from worker.config import WorkerConfig
 from core.library.membership import (
     attach_user_library,
     reconcile_user_tracks,
@@ -17,7 +18,7 @@ from core.library.membership import (
     user_audio_track_ids,
 )
 from core.library.connections import load_connection
-from core.settings import get_settings, require_database_url
+from core.db.config import require_database_url
 
 from contextlib import ExitStack
 from dataclasses import asdict
@@ -238,7 +239,7 @@ def execute(job: dict, context) -> dict | None:
             )
             return build_semantic_fusion(progress=report)
         if kind != "analysis_batch":
-            size = int(get_settings().batch_size)
+            size = int(WorkerConfig.load().batch_size)
             if size <= 0:
                 raise ValueError("ECHORA_BATCH_SIZE must be positive")
             ids = payload.get("track_ids")

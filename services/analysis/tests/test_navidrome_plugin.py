@@ -856,8 +856,9 @@ def test_import_archives_provider_before_preserving_manual_lyrics_without_model_
         "uuid": __import__("uuid"),
         "psycopg": SimpleNamespace(connect=lambda _: nullcontext(connection)),
         "NavidromeClient": lambda *args: nullcontext(client),
-        "get_settings": lambda: SimpleNamespace(
-            database_url="unused", lyrics_model_id="unused", lyrics_revision="unused"
+        "DatabaseConfig": SimpleNamespace(load=lambda: SimpleNamespace(database_url="unused")),
+        "EmbeddingConfig": SimpleNamespace(
+            load=lambda: SimpleNamespace(lyrics_model_id="unused", lyrics_revision="unused")
         ),
         "resolve_library_id": lambda *args: library,
         "configure_representations": Mock(),
