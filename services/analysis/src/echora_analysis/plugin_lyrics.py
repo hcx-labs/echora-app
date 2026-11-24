@@ -8,10 +8,10 @@ import math
 import re
 from xml.etree import ElementTree as ET
 
-from .backing_vocals import BACKING_VOICE, separate_text, separate_voices, tag_bracketed_backing
+from core.lyrics.backing import BACKING_VOICE, separate_text, separate_voices, tag_bracketed_backing
 from .navidrome_integration import connect
 from .plugin_ranking import library_namespace
-from .navidrome_lyrics_sources import lyrics_paused
+from core.lyrics.sources import lyrics_paused
 
 TT = "http://www.w3.org/ns/ttml"
 TTM = "http://www.w3.org/ns/ttml#metadata"

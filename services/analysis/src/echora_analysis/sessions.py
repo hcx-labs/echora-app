@@ -11,9 +11,9 @@ from fastapi import APIRouter, Cookie, Header, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
-from .db import session_scope
-from .db_models import User, UserSession
-from .settings import get_settings
+from core.db.session import session_scope
+from core.db.models import User, UserSession
+from core.settings import get_settings
 
 
 def token_hash(token: str) -> str:

@@ -1,0 +1,302 @@
+"""Instance-wide, admin-trusted External AI configuration.
+
+The provider is an OpenAI-compatible endpoint ("openai", the default) or Claude through the
+official Anthropic SDK ("anthropic", see claude_client.py). For Claude the URL is optional and
+defaults to the Anthropic API.
+
+Local/private HTTP destinations are intentional: admins control network egress.
+Use network policy to restrict it where needed. HTTP exposes keys/lyrics on the
+network; prefer HTTPS off-host. Never log request bodies or authorization headers.
+URL is the API base (e.g. http://localhost:8000/v1), not a completion URL.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Literal
+from urllib.parse import urlsplit
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+
+DEFAULT_PROMPT = "Translate the song into natural, expressive lyrics that feel at home in the target language. Use the whole song for context. Aim to carry its meaning, emotion, imagery, voice, and energy rather than translating word for word. You may reshape phrasing, rhythm, rhyme, slang, and punctuation to make each line flow and sing naturally. Preserve recurring hooks in a recognizable way, but adapt them when the context calls for it.\n\nThe one structural constraint: each source line must produce exactly one translated line, in the same order. Do not merge, split, skip, or add lines. Preserve any supplied line IDs and follow the requested output format. Return only the translation."
+
+# Second pass over AI lyric transcriptions. The response contract is appended in code
+# (transcription_refinement.py), so an edited prompt cannot break the output format.
+DEFAULT_TRANSCRIPTION_PROMPT = """You proofread automatic lyric transcriptions of songs. The transcript was produced by a speech model listening to the song. It is mostly right, but some words are mis-heard.
+
+Work in two steps. First read the whole transcript and work out what the song is about: its story or theme, who is speaking to whom, recurring images and phrases, the chorus. Write this as a short summary. Then go line by line. A line must make sense on its own and in the context of the whole song. Where it does not, fix the mis-heard words with words that sound alike and fit the line, the neighbouring lines and the song (its theme, who is addressed, tense and person, recurring phrases). Fix as much of a line as that needs, but no more.
+
+Keep the words that are right; never rephrase a line that already makes sense, and never translate. Spell repeated lines (choruses, hooks) identically each time they are sung the same way. Write every line in the song's main script, keeping the same words. If you know this song's lyrics, they can help you choose between sound-alike words; never replace a line with what you remember when it does not sound like the transcript. Keep backing vocals in parentheses. Leave casing and punctuation as they are unless a fix needs it. If a line is right or you are unsure, return it unchanged."""
+
+
+class LanguagePair(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source: str
+    target: str
+
+    @field_validator("source", "target")
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        value = value.strip().replace("_", "-").lower()
+        if not re.fullmatch(r"[a-z]{2,3}(?:-[a-z0-9]{2,8})*", value):
+            raise ValueError("Expected a language tag")
+        return value
+
+    @model_validator(mode="after")
+    def different(self):
+        if self.source == self.target:
+            raise ValueError("Source and target must differ")
+        return self
+
+
+Provider = Literal["openai", "anthropic"]
+
+
+class ExternalAISettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    provider: Provider = "openai"
+    url: str = Field(default="", max_length=2048)
+    model: str = Field(default="", max_length=200)
+    prompt: str = Field(default=DEFAULT_PROMPT, min_length=1, max_length=8000)
+    language_pairs: list[LanguagePair] = Field(default_factory=list, max_length=64)
+    # On by default, but only acts while External AI itself is enabled.
+    transcription_refinement: bool = True
+    transcription_prompt: str = Field(
+        default=DEFAULT_TRANSCRIPTION_PROMPT, min_length=1, max_length=8000
+    )
+    # Its own model (a stronger one fixes mixed-language refrains); empty uses `model`.
+    transcription_model: str = Field(default="", max_length=200)
+    # Off by default: it sends every song's lyrics to the provider once.
+    lyric_themes: bool = False
+
+    @field_validator("url")
+    @classmethod
+    def endpoint(cls, value: str) -> str:
+        if not value:
+            return value
+        try:
+            parsed = urlsplit(value)
+            if (
+                any(c.isspace() or ord(c) < 32 for c in value)
+                or "\\" in value
+                or parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or "?" in value
+                or "#" in value
+            ):
+                raise ValueError()
+            _ = parsed.port
+        except ValueError:
+            raise ValueError(
+                "Expected an HTTP(S) base URL without userinfo, query or fragment"
+            ) from None
+        return value.rstrip("/")
+
+    @field_validator("model", "prompt", "transcription_prompt", "transcription_model")
+    @classmethod
+    def trim(cls, value):
+        return value.strip()
+
+    @model_validator(mode="after")
+    def coherent(self):
+        pairs = [(p.source, p.target) for p in self.language_pairs]
+        if len(set(pairs)) != len(pairs):
+            raise ValueError("Duplicate language pair")
+        if (
+            not self.prompt
+            or not self.transcription_prompt
+            or (self.enabled and self.provider == "openai" and not self.url)
+        ):
+            raise ValueError("Enabled API requires a URL; prompts cannot be blank")
+        return self
+
+    def ready(self) -> bool:
+        """Enabled with everything a request needs (Claude's URL defaults to the Anthropic API)."""
+        return bool(self.enabled and self.model and (self.url or self.provider == "anthropic"))
+
+
+class SettingsUpdate(ExternalAISettings):
+    # Omitted/null preserves; empty string clears; otherwise replaces.
+    api_key: SecretStr | None = Field(default=None, max_length=8192, exclude=True)
+
+
+class EndpointUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    provider: Provider = "openai"
+    url: str = Field(default="", max_length=2048)
+    # Shared by every External AI feature, so it lives with the endpoint.
+    model: str = Field(default="", max_length=200)
+    api_key: SecretStr | None = Field(default=None, max_length=8192, exclude=True)
+
+    @field_validator("url")
+    @classmethod
+    def endpoint(cls, value):
+        return ExternalAISettings.endpoint(value)
+
+    @field_validator("model")
+    @classmethod
+    def trim(cls, value):
+        return value.strip()
+
+    @model_validator(mode="after")
+    def coherent(self):
+        if self.enabled and self.provider == "openai" and not self.url:
+            raise ValueError("Enabled API requires a URL")
+        return self
+
+
+class TranslationUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    prompt: str = Field(default=DEFAULT_PROMPT, min_length=1, max_length=8000)
+    language_pairs: list[LanguagePair] = Field(default_factory=list, max_length=64)
+
+    @model_validator(mode="after")
+    def coherent(self):
+        validated = ExternalAISettings(**self.model_dump())
+        self.prompt = validated.prompt
+        return self
+
+
+class TranscriptionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    transcription_refinement: bool = True
+    transcription_prompt: str = Field(
+        default=DEFAULT_TRANSCRIPTION_PROMPT, min_length=1, max_length=8000
+    )
+    transcription_model: str = Field(default="", max_length=200)
+
+    @model_validator(mode="after")
+    def coherent(self):
+        validated = ExternalAISettings(**self.model_dump())
+        self.transcription_prompt = validated.transcription_prompt
+        self.transcription_model = validated.transcription_model
+        return self
+
+
+class ThemesUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    lyric_themes: bool = False
+
+
+class RedactedSettingsRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def redacted(request):
+            try:
+                return await handler(request)
+            except RequestValidationError:
+                # Pydantic model-level errors can echo the entire body, including keys.
+                raise HTTPException(422, "Invalid External AI settings") from None
+
+        return redacted
+
+
+def router(require_user, cipher):
+    import core.lyrics.translations as storage
+
+    api = APIRouter(
+        prefix="/settings/external-ai", tags=["settings"], route_class=RedactedSettingsRoute
+    )
+
+    def admin(user=Depends(require_user)):
+        if not user.get("is_admin"):
+            raise HTTPException(403, "Administrator access required")
+        return user
+
+    @api.get("")
+    def read_settings(user=Depends(admin)):
+        settings, encrypted = storage.load_settings()
+        return {**settings.model_dump(), "has_key": bool(encrypted)}
+
+    @api.put("")
+    def write_settings(body: SettingsUpdate, user=Depends(admin)):
+        encrypted = None
+        replace = body.api_key is not None
+        if replace:
+            secret = body.api_key.get_secret_value()
+            encrypted = cipher().encrypt(secret.encode()) if secret else None
+        settings = ExternalAISettings.model_validate(body.model_dump())
+        has_key = storage.save_settings(settings, encrypted, replace_key=replace)
+        return {**settings.model_dump(), "has_key": has_key}
+
+    def endpoint_response(value):
+        return {key: value[key] for key in ("enabled", "provider", "url", "model", "has_key")}
+
+    def translation_response(value):
+        return {key: value[key] for key in ("prompt", "language_pairs")}
+
+    def transcription_response(value):
+        # `enabled` is read-only here: the section only acts while External AI is on.
+        return {
+            **{
+                key: value[key]
+                for key in (
+                    "enabled",
+                    "transcription_refinement",
+                    "transcription_prompt",
+                    "transcription_model",
+                    "model",
+                )
+            },
+            "default_transcription_prompt": DEFAULT_TRANSCRIPTION_PROMPT,
+        }
+
+    def themes_response(value):
+        # `enabled` is read-only here, as for transcription.
+        return {key: value[key] for key in ("enabled", "lyric_themes")}
+
+    @api.get("/endpoint")
+    def read_endpoint(user=Depends(admin)):
+        return endpoint_response(read_settings(user))
+
+    @api.get("/translation")
+    def read_translation(user=Depends(admin)):
+        return translation_response(read_settings(user))
+
+    @api.get("/transcription")
+    def read_transcription(user=Depends(admin)):
+        return transcription_response(read_settings(user))
+
+    @api.get("/themes")
+    def read_themes(user=Depends(admin)):
+        return themes_response(read_settings(user))
+
+    @api.put("/themes")
+    def write_themes(body: ThemesUpdate, user=Depends(admin)):
+        return themes_response(storage.save_section(body.model_dump()))
+
+    @api.put("/transcription")
+    def write_transcription(body: TranscriptionUpdate, user=Depends(admin)):
+        return transcription_response(storage.save_section(body.model_dump()))
+
+    @api.put("/endpoint")
+    def write_endpoint(body: EndpointUpdate, user=Depends(admin)):
+        secret = body.api_key.get_secret_value() if body.api_key is not None else None
+        encrypted = cipher().encrypt(secret.encode()) if secret else None
+        return endpoint_response(
+            storage.save_section(body.model_dump(), encrypted, replace_key=secret is not None)
+        )
+
+    @api.put("/translation")
+    def write_translation(body: TranslationUpdate, user=Depends(admin)):
+        return translation_response(storage.save_section(body.model_dump()))
+
+    @api.delete("/translations")
+    def clear_translations(user=Depends(admin)):
+        try:
+            count = storage.clear_translations()
+        except RuntimeError:
+            raise HTTPException(
+                409, "Wait for active sync and lyrics jobs to stop before clearing translations"
+            ) from None
+        return {"deleted": count}
+
+    return api

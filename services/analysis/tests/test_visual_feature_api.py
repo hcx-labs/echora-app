@@ -11,10 +11,10 @@ import uuid
 
 import pytest
 
-from echora_analysis.settings import Settings
+from core.settings import Settings
 from echora_analysis.melody_preview import melody_preview
-from echora_analysis.processing_plan import audio_prerequisites, plan_audio
-from echora_analysis.visual_features import VISUAL_FEATURE_REVISION
+from worker.planning.audio import audio_prerequisites, plan_audio
+from worker.library.visual_features import VISUAL_FEATURE_REVISION
 
 
 class HttpError(Exception):
@@ -120,7 +120,7 @@ def test_api_reports_unsupported_cache_without_serving_empty_features():
 
 
 def test_planner_revision_two_missing_cache_only_requires_shared_mono_decode(monkeypatch):
-    from echora_analysis.settings import get_settings
+    from core.settings import get_settings
 
     monkeypatch.delenv("ECHORA_RECORDING_MODEL_MANIFEST", raising=False)
     get_settings.cache_clear()

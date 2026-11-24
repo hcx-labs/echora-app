@@ -2,7 +2,7 @@
 line-length = 100
 target-version = "py312"
 src = ["core", "worker", "backend"]
-extend-exclude = ["services", "data", "**/vendor"]
+extend-exclude = ["data", "**/vendor", "**/migrations/versions"]
 
 [format]
 # PEP 8 through Ruff's Black-compatible style.

@@ -9,7 +9,7 @@ import uuid
 import numpy as np
 import psycopg
 
-from echora_analysis.lyrics_analysis import LyricsEmbeddingModel
+from core.embeddings.text import LyricsEmbeddingModel
 
 QUERIES = [
     "relationship breakup broken heart",
@@ -66,5 +66,5 @@ if __name__ == "__main__":
     try:
         _run_queries(model, queries)
     finally:
-        from echora_analysis.models import release_model
+        from core.embeddings.audio_models import release_model
         release_model(model)

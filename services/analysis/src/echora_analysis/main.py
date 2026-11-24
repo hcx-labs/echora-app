@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
 import random
-import secrets
 import threading
 import time
 import uuid
@@ -18,7 +17,6 @@ from authlib.integrations.starlette_client import OAuth, OAuthError
 import igraph as ig
 import numpy as np
 import psycopg
-from cryptography.fernet import Fernet, InvalidToken
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from sklearn.metrics import adjusted_rand_score, silhouette_score
@@ -26,6 +24,7 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, HttpUrl, SecretStr
@@ -33,78 +32,57 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import RedirectResponse, StreamingResponse
 
-from .artists import (
-    fit_artist_profile,
-    representative_indices,
-    soft_chamfer_similarity,
-    weighted_center,
-)
-from .audio_descriptors import DESCRIPTOR_REVISION
-from .waveforms import WAVEFORM_REVISION
-from .visual_features import VISUAL_FEATURE_REVISION
+from .artists import fit_artist_profile, representative_indices, soft_chamfer_similarity, weighted_center
+from worker.library.descriptors import DESCRIPTOR_REVISION
+from worker.library.waveforms import WAVEFORM_REVISION
+from worker.library.visual_features import VISUAL_FEATURE_REVISION
 from .melody_preview import melody_preview
-from .audio_profiles import (
-    AUDIO_PROFILE_REVISION,
-    SUPPORTED_PROFILE_MODELS,
-)
-from .concepts import (
-    combine_concept_percentiles,
-    empirical_percentiles,
-    expand_tag_groups,
-    predefined_concepts,
-    score_concept,
-)
-from .curations import (
-    CURATION_SCORING_REVISION,
-    EXAMPLE_COMPONENT_WEIGHTS,
-    MATCH_PERCENTILE,
-    rank_curation,
-)
-from .db import session_scope
-from . import jobs, sessions
-from .settings import get_settings
-from .db_models import (
-    Curation,
-    NavidromeConnection,
-    OidcAllowedEmail,
-    OidcSetting,
-    User,
-    UserPreference,
-    UserSession,
-)
-from .hum_search import DEFAULT_CORPUS_SIZE, search_corpus
-from .journeys import (
-    normalize_rows as normalize_journey_rows,
-    select_journey,
-    select_multistop_journey,
-    spherical_targets,
-)
-from .listening_history import (
-    TOP_TRACK_PERIODS,
-    match_navidrome_play_counts,
-    match_top_tracks,
-    navidrome_play_counts,
-    recent_listens,
-    top_tracks,
-    track_listen_counts,
-)
-from .language_detection import LANGUAGE_NAMES, PRIMARY_SHARE, language_affinity
-from .karaoke_pipeline import KARAOKE_PIPELINE_REVISION
-from .melody_config import MELODY_CONTOUR_REVISION
+from worker.profiles.pipeline import AUDIO_PROFILE_REVISION, SUPPORTED_PROFILE_MODELS
+from core.curation.concepts import combine_concept_percentiles, empirical_percentiles, predefined_concepts, score_concept
+from core.db.session import session_scope
+from core.curation.preview import CurationRecipe, preview_curation as preview_recipe
+from core.errors import ConflictError, EchoraError, IntegrationError, InvalidQueryError, NotFoundError
+from core.library.connections import credential_cipher, load_connection
+from core.library.membership import attach_user_library, relink_renumbered_sources
+from . import sessions
+import core.jobs.queue as jobs
+from core.settings import get_settings
+from core.db.models import Curation, NavidromeConnection, OidcAllowedEmail, OidcSetting, User, UserPreference, UserSession
+from worker.melody.index import DEFAULT_CORPUS_SIZE, search_corpus
+from core.curation.journeys import normalize_rows as normalize_journey_rows, select_journey, spherical_targets
+from core.curation.listening import TOP_TRACK_PERIODS, match_navidrome_play_counts, match_top_tracks, navidrome_play_counts, top_tracks
+from worker.kara.pipeline import KARAOKE_PIPELINE_REVISION
+from core.revisions import MELODY_CONTOUR_REVISION
 from .media_cache import cache_key, media_cache
-from .lyrics_analysis import shared_lyrics_model
-from .lyric_themes import PROMPT_REVISION as LYRIC_THEMES_REVISION
-from .navidrome import NavidromeClient, media_navidrome_client
-from .representations import configure_representations
+from core.embeddings.text import shared_lyrics_model
+from worker.themes.pipeline import PROMPT_REVISION as LYRIC_THEMES_REVISION
+from core.integrations.navidrome import NavidromeClient, media_navidrome_client
+from core.embeddings.representations import configure_representations
 
 from .recording_routes import create_router as recording_router
-from .external_ai import router as external_ai_router
-from .external_processing import compute_for, router as external_processing_router
-from .motion_artwork import router as motion_artwork_router
+from core.integrations.external_ai import router as external_ai_router
+from worker.remote.settings import compute_for, router as external_processing_router
+from worker.artwork.settings import router as motion_artwork_router
 from .navidrome_integration import settings_router as navidrome_integration_router
 from .plugin_routes import router as navidrome_plugin_router
 
 app = FastAPI(title="Echora analysis", version="0.3.0")
+
+# Domain errors carry messages written for the user; anything else stays a server error.
+_ERROR_STATUS = (
+    (NotFoundError, 404),
+    (ConflictError, 409),
+    (InvalidQueryError, 422),
+    (IntegrationError, 502),
+)
+
+
+@app.exception_handler(EchoraError)
+async def _echora_error(request: Request, error: EchoraError) -> JSONResponse:
+    for kind, status in _ERROR_STATUS:
+        if isinstance(error, kind):
+            return JSONResponse({"detail": str(error)}, status_code=status)
+    raise error
 # Browser-facing media (covers, streams) is served cross-origin from the web app
 # when NEXT_PUBLIC_ANALYSIS_ORIGIN is set; canvas palette extraction needs CORS.
 # Origins are explicit: reflecting arbitrary origins with credentials would let
@@ -245,50 +223,11 @@ class ConceptLensRequest(BaseModel):
     representation: str = Field(default="hybrid", pattern="^(semantic|lyrics|hybrid)$")
 
 
-class SoundProfileRequest(BaseModel):
-    """Library-relative targets for measured audio descriptors."""
-
-    pace: float | None = Field(default=None, ge=0, le=1)
-    energy: float | None = Field(default=None, ge=0, le=1)
-    brightness: float | None = Field(default=None, ge=0, le=1)
-    motion: float | None = Field(default=None, ge=0, le=1)
-    vocals: float | None = Field(default=None, ge=0, le=1)
-    dynamics: float | None = Field(default=None, ge=0, le=1)
-    instrumental_only: bool = False
 
 
-class CurationPreviewRequest(BaseModel):
-    curation_type: str = Field(
-        default="combined", pattern="^(combined|language|examples|time_of_day|sonic_journey)$"
-    )
-    positive_prompt: str = Field(default="", max_length=2000)
-    negative_prompt: str = Field(default="", max_length=2000)
-    sound_prompts: list[str] = Field(default_factory=list, max_length=12)
-    themes_prompts: list[str] = Field(default_factory=list, max_length=12)
-    sound_negative_prompts: list[str] = Field(default_factory=list, max_length=12)
-    themes_negative_prompts: list[str] = Field(default_factory=list, max_length=12)
-    sound_weight: int = Field(default=50, ge=0, le=100)
-    sound_profile: SoundProfileRequest = Field(default_factory=SoundProfileRequest)
-    positive_track_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
-    negative_track_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
-    familiarity_percent: int = Field(default=70, ge=0, le=100)
-    period_start: str | None = Field(default=None, pattern="^(?:[01]\\d|2[0-3]):[0-5]\\d$")
-    period_end: str | None = Field(default=None, pattern="^(?:[01]\\d|2[0-3]):[0-5]\\d$")
-    time_of_day_enabled: bool = False
-    lookback_days: int = Field(default=7, ge=1, le=90)
-    track_limit: int = Field(default=30, ge=5, le=200)
-    refresh_mode: str = Field(default="stable", pattern="^(stable|fresh)$")
-    target_language: str = Field(default="", pattern="^$|^[a-z]{2,3}$")
-    language_strictness: str = Field(default="primarily", pattern="^(only|primarily|sprinkle)$")
-    existing_track_ids: list[uuid.UUID] = Field(default_factory=list, max_length=200)
-    # Sonic journey: ordered waypoints through fused audio+lyrics space.
-    journey_start_track_id: uuid.UUID | None = None
-    journey_stop_track_ids: list[uuid.UUID] = Field(default_factory=list, max_length=5)
-    journey_end_track_id: uuid.UUID | None = None
-    journey_lyrics_weight: int = Field(default=25, ge=0, le=100)
 
 
-class CurationCreateRequest(CurationPreviewRequest):
+class CurationCreateRequest(CurationRecipe):
     name: str = Field(min_length=1, max_length=120)
     refresh_enabled: bool = True
 
@@ -312,16 +251,11 @@ def _credentials(request: Credentials) -> tuple[str, str, str]:
     return str(request.url).rstrip("/"), request.username, request.password.get_secret_value()
 
 
-def _cipher() -> Fernet:
-    key = get_settings().credential_encryption_key
-    if not key:
-        raise RuntimeError("CREDENTIAL_ENCRYPTION_KEY is required")
-    return Fernet(key.encode())
 
 
 def _save_connection(credentials: tuple[str, str, str], user_id: uuid.UUID) -> str:
     url, username, password = credentials
-    encrypted = _cipher().encrypt(password.encode())
+    encrypted = credential_cipher().encrypt(password.encode())
     with session_scope() as session:
         stored = session.scalar(
             select(NavidromeConnection).where(
@@ -342,80 +276,12 @@ def _save_connection(credentials: tuple[str, str, str], user_id: uuid.UUID) -> s
         return str(stored.id)
 
 
-def _attach_user_library(user_id: uuid.UUID, source_url: str) -> None:
-    namespace = uuid.uuid5(uuid.NAMESPACE_URL, source_url.rstrip("/"))
-    with psycopg.connect(get_settings().database_url) as connection, connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO user_libraries (user_id, library_id)
-               SELECT %s, id FROM libraries WHERE namespace=%s
-               ON CONFLICT DO NOTHING""",
-            (user_id, namespace),
-        )
 
 
-def _reconcile_user_tracks(
-    user_id: uuid.UUID, source_url: str, external_ids: list[str]
-) -> dict[str, int]:
-    from .source_visibility import update_memberships
-
-    namespace = uuid.uuid5(uuid.NAMESPACE_URL, source_url.rstrip("/"))
-    with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
-        connection.cursor() as cursor,
-    ):
-        # A first full catalog can precede all source/identity discovery.
-        cursor.execute(
-            """INSERT INTO libraries (name, root_path, namespace)
-               VALUES ('Navidrome', %s, %s)
-               ON CONFLICT (namespace) DO UPDATE SET root_path=EXCLUDED.root_path
-               RETURNING id""",
-            (source_url.rstrip("/"), namespace),
-        )
-        library_id = cursor.fetchone()["id"]
-        return update_memberships(connection, library_id, user_id, external_ids, full=True)
 
 
-def _load_connection(
-    connection_id: str, user_id: uuid.UUID | None = None
-) -> tuple[str, str, str] | None:
-    try:
-        identifier = uuid.UUID(connection_id)
-    except ValueError:
-        return None
-    with session_scope() as session:
-        filters = [NavidromeConnection.id == identifier]
-        if user_id is not None:
-            filters.append(NavidromeConnection.owner_user_id == user_id)
-        stored = session.scalar(select(NavidromeConnection).where(*filters))
-        if stored is None:
-            return None
-        stored.last_used_at = datetime.now(timezone.utc)
-        url, username, encrypted_password = (
-            stored.url,
-            stored.username,
-            bytes(stored.encrypted_password),
-        )
-    try:
-        password = _cipher().decrypt(encrypted_password).decode()
-    except InvalidToken as error:
-        raise RuntimeError("Stored Navidrome credentials cannot be decrypted") from error
-    return url, username, password
 
 
-def _user_audio_track_ids(user_id: uuid.UUID) -> list[uuid.UUID]:
-    with psycopg.connect(get_settings().database_url) as connection, connection.cursor() as cursor:
-        cursor.execute(
-            """SELECT DISTINCT utl.track_id
-               FROM user_track_links utl
-               JOIN current_embeddings e ON e.track_id=utl.track_id
-               JOIN analysis_runs ar ON ar.id=e.run_id
-               WHERE utl.user_id=%s
-                 AND e.embedding_type='audio-track' AND e.window_index IS NULL
-                 AND ar.model_name=ANY(%s)
-               ORDER BY utl.track_id""",
-            (user_id, list(SUPPORTED_PROFILE_MODELS)),
-        )
-        return [row[0] for row in cursor.fetchall()]
 
 
 def require_user(echora_session: str | None = Cookie(default=None)) -> dict[str, object]:
@@ -426,7 +292,7 @@ def _session_user(token: str | None) -> dict[str, object]:
     return sessions.session_user(token)
 
 
-app.include_router(external_ai_router(require_user, _cipher))
+app.include_router(external_ai_router(require_user, credential_cipher))
 app.include_router(external_processing_router(require_user))
 app.include_router(motion_artwork_router(require_user))
 app.include_router(recording_router(require_user))
@@ -596,7 +462,7 @@ def save_onboarding(
         stored.updated_at = datetime.now(timezone.utc)
         selected_url = selected.url if selected else None
     if selected_url is not None:
-        _attach_user_library(user["id"], selected_url)
+        attach_user_library(user["id"], selected_url)
     return {
         "onboarding_complete": preference.complete,
         "navidrome_connection_id": preference.connection_id,
@@ -710,7 +576,7 @@ def update_huggingface_token(
     user = _session_user(echora_session)
     if not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Administrator access required")
-    from .huggingface_token import TokenRejected, save
+    from worker.models.huggingface_token import TokenRejected, save
 
     # Never echo the token or Hugging Face's response.
     try:
@@ -838,7 +704,7 @@ def update_navidrome(
             raise HTTPException(status_code=404, detail="User preferences are unavailable")
         preference.navidrome_connection_id = connection_id
         preference.updated_at = datetime.now(timezone.utc)
-    _attach_user_library(user["id"], credentials[0])
+    attach_user_library(user["id"], credentials[0])
     return {
         "id": connection_id,
         "url": credentials[0],
@@ -880,7 +746,7 @@ def update_lastfm(
         if preference is None:
             raise HTTPException(status_code=404, detail="User preferences are unavailable")
         preference.lastfm_username = request.username.strip()
-        preference.lastfm_api_key_encrypted = _cipher().encrypt(api_key.encode())
+        preference.lastfm_api_key_encrypted = credential_cipher().encrypt(api_key.encode())
         preference.updated_at = datetime.now(timezone.utc)
     return {"connected": True, "username": request.username.strip(), "scrobbles": total}
 
@@ -1081,7 +947,7 @@ def navidrome_sample(
 ) -> dict[str, object]:
     """Random tracks from a saved connection, so onboarding needs no password after connecting."""
     user = _session_user(echora_session)
-    credentials = _load_connection(connection_id, user["id"])
+    credentials = load_connection(connection_id, user["id"])
     if credentials is None:
         raise HTTPException(status_code=404, detail="Connection not found")
     try:
@@ -1108,7 +974,7 @@ def start_connection_import(
     user = _session_user(echora_session)
     track_ids = sorted(set(request.track_ids))
     selection = hashlib.sha256("\n".join(track_ids).encode()).hexdigest()
-    if _load_connection(connection_id, user["id"]) is None:
+    if load_connection(connection_id, user["id"]) is None:
         raise HTTPException(status_code=404, detail="Connection not found")
     return jobs.enqueue(
         "import",
@@ -1125,7 +991,7 @@ def navidrome_catalog(
     connection_id: str, echora_session: str | None = Cookie(default=None)
 ) -> dict[str, object]:
     user = _session_user(echora_session)
-    credentials = _load_connection(connection_id, user["id"])
+    credentials = load_connection(connection_id, user["id"])
     if credentials is None:
         raise HTTPException(status_code=404, detail="Connection not found")
     try:
@@ -1142,7 +1008,7 @@ def navidrome_sync_status(
     connection_id: str, echora_session: str | None = Cookie(default=None)
 ) -> dict[str, object]:
     user = _session_user(echora_session)
-    credentials = _load_connection(connection_id, user["id"])
+    credentials = load_connection(connection_id, user["id"])
     if credentials is None:
         raise HTTPException(status_code=404, detail="Connection not found")
     try:
@@ -1155,7 +1021,7 @@ def navidrome_sync_status(
     namespace = uuid.uuid5(uuid.NAMESPACE_URL, credentials[0].rstrip("/"))
     with psycopg.connect(get_settings().database_url) as connection, connection.cursor() as cursor:
         # Heal a renumbered library here too, so it never shows as unanalyzed.
-        _relink_renumbered_sources(connection, credentials[0], tracks)
+        relink_renumbered_sources(connection, credentials[0], tracks)
         cursor.execute(
             """
             SELECT ts.external_id FROM track_sources ts
@@ -1165,7 +1031,7 @@ def navidrome_sync_status(
             (namespace,),
         )
         processed = {str(row[0]) for row in cursor.fetchall()}
-        from .recording_search import index_status
+        from worker.recordings.search import index_status
 
         recording_index = index_status(
             connection, namespace, [track.id for track in tracks], user["id"]
@@ -1191,27 +1057,13 @@ def navidrome_sync_status(
     }
 
 
-def _relink_renumbered_sources(connection, url: str, tracks) -> int:
-    from .source_relink import relink_sources
-
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT id FROM libraries WHERE namespace=%s",
-            (uuid.uuid5(uuid.NAMESPACE_URL, url.rstrip("/")),),
-        )
-        library = cursor.fetchone()
-    if library is None:
-        return 0
-    relinked = relink_sources(connection, library[0], {track.id: track.raw for track in tracks})
-    connection.commit()
-    return relinked
 
 
 def _enqueue_connection_job(
     kind: str, connection_id: str, user: dict[str, object], payload: dict[str, object] | None = None
 ) -> dict[str, object]:
     # Validate ownership without putting decrypted credentials into job payloads.
-    if _load_connection(connection_id, user["id"]) is None:
+    if load_connection(connection_id, user["id"]) is None:
         raise HTTPException(status_code=404, detail="Connection not found")
     return jobs.enqueue(
         kind,
@@ -1745,8 +1597,8 @@ def track_lyrics(
     provenance = row.get("provenance") or {}
     source_lines = provenance.get("lines") or []
     karaoke_lines = row.get("karaoke_lines") or []
-    from .translation_pipeline import source_lines as translation_source_lines
-    from .translation_storage import load_translations
+    from worker.translation.pipeline import source_lines as translation_source_lines
+    from core.lyrics.translations import load_translations
 
     original_lines = translation_source_lines(row)
     translations = [
@@ -1909,7 +1761,7 @@ def stream_track(
     echora_session: str | None = Cookie(default=None),
 ) -> Response:
     user = _session_user(echora_session)
-    credentials = _load_connection(connection_id, user["id"])
+    credentials = load_connection(connection_id, user["id"])
     if credentials is None:
         raise HTTPException(status_code=404, detail="Connection not found")
     quality = request.query_params.get("quality", "original")
@@ -2008,7 +1860,7 @@ def scrobble_play(
     from the player: failures must never interrupt listening, hence 204-empty
     on success and a bare 502 the client ignores on failure."""
     user = _session_user(echora_session)
-    credentials = _load_connection(request.connection_id, user["id"])
+    credentials = load_connection(request.connection_id, user["id"])
     if credentials is None:
         raise HTTPException(status_code=404, detail="Connection not found")
     try:
@@ -2031,7 +1883,7 @@ def cover_art(
     echora_session: str | None = Cookie(default=None),
 ) -> Response:
     user = _session_user(echora_session)
-    credentials = _load_connection(connection_id, user["id"])
+    credentials = load_connection(connection_id, user["id"])
     if credentials is None:
         raise HTTPException(status_code=404, detail="Connection not found")
     bounded_size = min(max(size, 64), 1600)
@@ -2105,7 +1957,7 @@ def start_hum_index(
     user = _session_user(echora_session)
     track_limit = min(max(track_limit, 1), 500)
     connection_id = user.get("navidrome_connection_id")
-    credentials = _load_connection(str(connection_id), user["id"]) if connection_id else None
+    credentials = load_connection(str(connection_id), user["id"]) if connection_id else None
     if credentials is None:
         raise HTTPException(status_code=409, detail="Connect Navidrome before building a hum index")
     return jobs.enqueue(
@@ -2560,772 +2412,33 @@ def concept_lens(
     }
 
 
-def _curation_corpus(
-    user_id: uuid.UUID,
-    connection_id: uuid.UUID,
-) -> tuple[
-    list[dict[str, object]],
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    list[tuple[np.ndarray, np.ndarray] | None],
-    np.ndarray | None,
-    np.ndarray,
-    list[tuple[np.ndarray, np.ndarray] | None],
-]:
-    with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
-        connection.cursor() as cursor,
-    ):
-        cursor.execute(
-            """WITH selected_embeddings AS (
-                 SELECT DISTINCT ON (e.track_id) e.track_id, e.embedding::text AS embedding,
-                        e.run_id
-                 FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
-                 WHERE e.embedding_type='audio-track' AND e.window_index IS NULL
-                   AND ar.model_name='muq_mulan'
-                 ORDER BY e.track_id, ar.created_at DESC
-               )
-               SELECT DISTINCT ON (t.id) t.id, t.title, t.artist, t.album, t.duration_seconds,
-                      selected_embeddings.embedding, lyrics_embedding.embedding AS lyrics_embedding,
-                      selected_embeddings.run_id AS muq_run_id,
-                      acoustic_embedding.run_id AS mert_run_id,
-                      lyrics_embedding.run_id AS lyrics_run_id,
-                      voice_embedding.embedding AS voice_embedding,
-                      theme_embedding.embedding AS theme_embedding,
-                      acoustic_embedding.embedding AS acoustic_embedding,
-                      muq_profile.id AS muq_profile_id, mert_profile.id AS mert_profile_id,
-                      ts.external_id AS source_id, ts.source_data->>'coverArt' AS cover_art,
-                      member.group_id::text AS recording_group_id,
-                      descriptors.descriptors AS audio_descriptors,
-                      vocal_activity.activity AS vocal_activity
-               FROM selected_embeddings
-               JOIN tracks t ON t.id=selected_embeddings.track_id
-               JOIN track_sources ts ON ts.track_id=t.id AND ts.source_type='subsonic'
-               JOIN libraries l ON l.id=ts.library_id
-               JOIN user_track_links ul ON ul.library_id=l.id AND ul.track_id=t.id AND ul.user_id=%s
-               JOIN navidrome_connections nc ON nc.id=%s
-                 AND lower(rtrim(nc.url, '/'))=lower(rtrim(l.root_path, '/'))
-               LEFT JOIN recording_group_members member ON member.track_id=t.id
-               LEFT JOIN LATERAL (
-                 SELECT descriptors FROM track_audio_descriptors
-                 WHERE track_id=t.id AND status IN ('complete', 'partial')
-                 ORDER BY created_at DESC LIMIT 1
-               ) descriptors ON true
-               LEFT JOIN LATERAL (
-                 SELECT activity.activity FROM track_vocal_activity activity
-                 JOIN current_analysis_runs ar ON ar.id=activity.run_id
-                 WHERE activity.track_id=t.id AND ar.kind='voice_classification'
-                 ORDER BY activity.created_at DESC LIMIT 1
-               ) vocal_activity ON true
-               LEFT JOIN LATERAL (
-                 SELECT e.embedding::text AS embedding, e.run_id
-                 FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
-                 WHERE e.track_id=t.id AND e.embedding_type='audio-track'
-                   AND e.window_index IS NULL AND ar.model_name='mert'
-                 ORDER BY ar.created_at DESC LIMIT 1
-               ) acoustic_embedding ON true
-               LEFT JOIN LATERAL (
-                 SELECT tap.id FROM current_audio_profiles tap
-                 JOIN analysis_runs profile_run ON profile_run.id=tap.profile_run_id
-                 WHERE tap.track_id=t.id AND tap.source_run_id=selected_embeddings.run_id
-                   AND tap.model_name='muq_mulan'
-                 ORDER BY tap.created_at DESC LIMIT 1
-               ) muq_profile ON true
-               LEFT JOIN LATERAL (
-                 SELECT tap.id FROM current_audio_profiles tap
-                 JOIN analysis_runs profile_run ON profile_run.id=tap.profile_run_id
-                 WHERE tap.track_id=t.id AND tap.source_run_id=acoustic_embedding.run_id
-                   AND tap.model_name='mert'
-                 ORDER BY tap.created_at DESC LIMIT 1
-               ) mert_profile ON true
-               LEFT JOIN LATERAL (
-                 SELECT e.embedding::text AS embedding, e.run_id
-                 FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
-                 WHERE e.track_id=t.id AND e.embedding_type='lyrics' AND e.window_index IS NULL
-                   AND ar.model_name='bge_m3'
-                 ORDER BY ar.created_at DESC LIMIT 1
-               ) lyrics_embedding ON true
-               LEFT JOIN LATERAL (
-                 SELECT e.embedding::text AS embedding
-                 FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
-                 WHERE e.track_id=t.id AND e.embedding_type='voice-gender' AND ar.model_name='mtg-jamendo-voice-gender-v2'
-                 ORDER BY ar.created_at DESC LIMIT 1
-               ) voice_embedding ON true
-               LEFT JOIN LATERAL (
-                 SELECT th.embedding::text AS embedding
-                 FROM track_lyric_themes th JOIN lyrics ly ON ly.track_id=th.track_id
-                 WHERE th.track_id=t.id AND th.status='ready' AND th.prompt_revision=%s
-                   AND th.source_checksum=encode(sha256(convert_to(ly.text, 'UTF8')), 'hex')
-                 LIMIT 1
-               ) theme_embedding ON true
-               ORDER BY t.id, ts.id""",
-            (user_id, connection_id, LYRIC_THEMES_REVISION),
-        )
-        rows = cursor.fetchall()
-        profile_ids = [
-            value
-            for row in rows
-            for value in (row.get("muq_profile_id"), row.get("mert_profile_id"))
-            if value is not None
-        ]
-        mode_rows: list[dict[str, object]] = []
-        if profile_ids:
-            cursor.execute(
-                """SELECT profile_id, mode_index, duration_weight, embedding::text AS embedding
-                   FROM audio_modes WHERE profile_id=ANY(%s)
-                   ORDER BY profile_id, mode_index""",
-                (profile_ids,),
-            )
-            mode_rows = cursor.fetchall()
-    if not rows:
-        raise HTTPException(
-            status_code=409, detail="No semantic embeddings are available in this library"
-        )
-    matrix = np.stack([np.fromstring(row.pop("embedding").strip("[]"), sep=",") for row in rows])
-    lyrics_available = np.asarray(
-        [row.get("lyrics_embedding") is not None for row in rows], dtype=bool
-    )
-    lyrics_matrix = np.zeros((len(rows), 1024), dtype=np.float32)
-    for index, row in enumerate(rows):
-        encoded = row.pop("lyrics_embedding")
-        if encoded is not None:
-            lyrics_matrix[index] = np.fromstring(str(encoded).strip("[]"), sep=",")
-    theme_available = np.asarray(
-        [row.get("theme_embedding") is not None for row in rows], dtype=bool
-    )
-    theme_matrix = np.zeros((len(rows), 1024), dtype=np.float32)
-    for index, row in enumerate(rows):
-        encoded = row.pop("theme_embedding")
-        if encoded is not None:
-            theme_matrix[index] = np.fromstring(str(encoded).strip("[]"), sep=",")
-    voice_available = np.asarray(
-        [row.get("voice_embedding") is not None for row in rows], dtype=bool
-    )
-    voice_matrix = np.zeros((len(rows), 3), dtype=np.float32)
-    for index, row in enumerate(rows):
-        encoded = row.pop("voice_embedding")
-        if encoded is not None:
-            voice_matrix[index] = np.fromstring(str(encoded).strip("[]"), sep=",")
-    acoustic_available = np.asarray(
-        [row.get("acoustic_embedding") is not None for row in rows], dtype=bool
-    )
-    acoustic_dimension = next(
-        (
-            len(np.fromstring(str(row["acoustic_embedding"]).strip("[]"), sep=","))
-            for row in rows
-            if row.get("acoustic_embedding") is not None
-        ),
-        0,
-    )
-    acoustic_matrix = np.zeros((len(rows), acoustic_dimension), dtype=np.float32)
-    for index, row in enumerate(rows):
-        encoded = row.pop("acoustic_embedding")
-        if encoded is not None:
-            acoustic_matrix[index] = np.fromstring(str(encoded).strip("[]"), sep=",")
-    grouped_modes: dict[uuid.UUID, list[dict[str, object]]] = {}
-    for mode_row in mode_rows:
-        grouped_modes.setdefault(mode_row["profile_id"], []).append(mode_row)
-    modes_by_profile: dict[uuid.UUID, tuple[np.ndarray, np.ndarray]] = {}
-    for profile_id, members in grouped_modes.items():
-        if members:
-            modes_by_profile[profile_id] = (
-                np.stack(
-                    [np.fromstring(str(row["embedding"]).strip("[]"), sep=",") for row in members]
-                ),
-                np.asarray([row["duration_weight"] for row in members], dtype=np.float32),
-            )
-    for row in rows:
-        row["representation_runs"] = {
-            model: str(run_id)
-            for model, run_id in (
-                ("muq_mulan", row.pop("muq_run_id")),
-                ("mert", row.pop("mert_run_id")),
-                ("bge_m3", row.pop("lyrics_run_id")),
-            )
-            if run_id is not None
-        }
-    semantic_modes = [modes_by_profile.get(row.pop("muq_profile_id")) for row in rows]
-    acoustic_modes = [modes_by_profile.get(row.pop("mert_profile_id")) for row in rows]
-    for row in rows:
-        descriptors = row.pop("audio_descriptors", None) or {}
-        rhythm = descriptors.get("rhythm") or {}
-        spectral = descriptors.get("spectral_curve") or []
-        loudness = descriptors.get("loudness") or {}
-        activity = row.pop("vocal_activity", None) or {}
-        activity_windows = activity.get("windows") or []
-
-        def _mean(values: list[object], field: str) -> float | None:
-            usable = [
-                float(item[field])
-                for item in values
-                if isinstance(item, dict)
-                and item.get(field) is not None
-                and np.isfinite(float(item[field]))
-            ]
-            return float(np.mean(usable)) if usable else None
-
-        row["sound_descriptors"] = {
-            "pace": rhythm.get("bpm"),
-            "energy": descriptors.get("rms_dbfs"),
-            "brightness": _mean(spectral, "centroid_hz"),
-            "motion": _mean(spectral, "positive_spectral_flux"),
-            "vocals": _mean(activity_windows, "vocal_activation"),
-            "dynamics": loudness.get("range_lu"),
-        }
-    return (
-        rows,
-        matrix,
-        lyrics_matrix,
-        lyrics_available,
-        voice_matrix,
-        voice_available,
-        semantic_modes,
-        acoustic_matrix if acoustic_dimension else None,
-        acoustic_available,
-        acoustic_modes,
-        theme_matrix,
-        theme_available,
-    )
 
 
-# Use theme descriptions once they cover this share of the tracks that have lyrics.
-THEME_COVERAGE_THRESHOLD = 0.5
 
 
-def _theme_overlay(
-    lyrics_matrix: np.ndarray,
-    lyrics_available: np.ndarray,
-    theme_matrix: np.ndarray,
-    theme_available: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, bool]:
-    """The vectors the Themes channel compares queries and examples against.
-
-    Theme descriptions (lyric_themes.py) replace whole-lyric embeddings once they cover most
-    of the tracks with lyrics. The two live in different regions of the BGE-M3 space, so they
-    are never ranked together: a track with lyrics but no description yet is treated like one
-    without lyrics (neutral) until a sync describes it.
-    """
-    lyric_count = int(lyrics_available.sum())
-    covered = int((theme_available & lyrics_available).sum())
-    if lyric_count == 0 or covered < THEME_COVERAGE_THRESHOLD * lyric_count:
-        return lyrics_matrix, lyrics_available, False
-    return theme_matrix, theme_available.copy(), True
 
 
-SONIC_AUDIO_SPLIT = (0.70, 0.30)  # MuQ : MERT within the audio share
-SONIC_SCORING_REVISION = 1
 
 
-def _preview_sonic_journey(
-    request: CurationPreviewRequest,
-    rows: list[dict[str, object]],
-    matrix: np.ndarray,
-    acoustic_matrix: np.ndarray | None,
-    lyrics_matrix: np.ndarray,
-    lyrics_available: np.ndarray,
-) -> dict[str, object]:
-    identifiers = {str(row["id"]): index for index, row in enumerate(rows)}
-    waypoints = [
-        request.journey_start_track_id,
-        *request.journey_stop_track_ids,
-        request.journey_end_track_id,
-    ]
-    if not waypoints[0] or not waypoints[-1]:
-        raise HTTPException(status_code=422, detail="Pick a start and an end track")
-    if waypoints[0] == waypoints[-1]:
-        raise HTTPException(
-            status_code=422, detail="Journey start and end must be different tracks"
-        )
-    indices: list[int] = []
-    for waypoint in waypoints:
-        index = identifiers.get(str(waypoint))
-        if index is None:
-            raise HTTPException(status_code=404, detail="A journey stop lacks audio analysis")
-        indices.append(index)
-    if len(set(indices)) != len(indices):
-        raise HTTPException(status_code=422, detail="Each journey stop must be a different track")
-    if acoustic_matrix is None:
-        raise HTTPException(
-            status_code=409, detail="MERT analysis has not run for this library yet"
-        )
-
-    def _norm(values: np.ndarray) -> np.ndarray:
-        return normalize_journey_rows(np.asarray(values, dtype=np.float32))
-
-    lyrics_share = request.journey_lyrics_weight / 100.0
-    audio = np.concatenate(
-        [
-            _norm(matrix) * np.sqrt(SONIC_AUDIO_SPLIT[0]),
-            _norm(acoustic_matrix) * np.sqrt(SONIC_AUDIO_SPLIT[1]),
-        ],
-        axis=1,
-    )
-    fused = np.concatenate(
-        [
-            audio * np.sqrt(1 - lyrics_share),
-            _norm(lyrics_matrix) * np.sqrt(lyrics_share),
-        ],
-        axis=1,
-    )
-
-    with (
-        psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
-        connection.cursor() as cursor,
-    ):
-        cursor.execute(
-            "SELECT track_id::text AS id, group_id::text AS group_id FROM recording_group_members WHERE track_id=ANY(%s)",
-            ([row["id"] for row in rows],),
-        )
-        groups_by_id = {row["id"]: row["group_id"] for row in cursor.fetchall()}
-    steps = select_multistop_journey(
-        fused,
-        indices,
-        request.track_limit,
-        [row.get("artist") for row in rows],
-        [groups_by_id.get(str(row["id"])) for row in rows],
-    )
-    tracks = []
-    for position, (index, target_similarity, transition_similarity) in enumerate(steps):
-        row = rows[index]
-        tracks.append(
-            {
-                "id": row["id"],
-                "title": row["title"],
-                "artist": row.get("artist"),
-                "album": row.get("album"),
-                "duration_seconds": row.get("duration_seconds"),
-                "source_id": row.get("source_id"),
-                "cover_art": row.get("cover_art"),
-                "position": position,
-                "score": float(target_similarity),
-                "percentile": float(target_similarity),
-                "retained": False,
-                "waypoint": index in indices,
-                "evidence": {
-                    "target_similarity": float(target_similarity),
-                    "transition_similarity": float(transition_similarity),
-                    "lyrics_available": bool(lyrics_available[index])
-                    if index < len(lyrics_available)
-                    else False,
-                },
-            }
-        )
-    lyrics_weight = request.journey_lyrics_weight / 100.0
-    return {
-        "tracks": tracks,
-        "references": {"positive": [], "negative": []},
-        "corpus_size": len(rows),
-        "selection": {
-            "requested": request.track_limit,
-            "selected": len(tracks),
-            "shortfall": max(0, request.track_limit - len(tracks)),
-            "match_basis": "sonic_journey",
-        },
-        "curation_type": "sonic_journey",
-        "model": "muq_mulan+mert+bge_m3",
-        "weights": {
-            "muq_mulan": SONIC_AUDIO_SPLIT[0] * (1 - lyrics_weight),
-            "mert": SONIC_AUDIO_SPLIT[1] * (1 - lyrics_weight),
-            "lyrics": lyrics_weight,
-        },
-        "journey": {
-            "start_track_id": str(request.journey_start_track_id),
-            "stop_track_ids": [str(value) for value in request.journey_stop_track_ids],
-            "end_track_id": str(request.journey_end_track_id),
-            "lyrics_weight": request.journey_lyrics_weight,
-            "waypoint_count": len(indices),
-        },
-        "scoring_revision": SONIC_SCORING_REVISION,
-        "lyrics_coverage": int(lyrics_available.sum()),
-    }
 
 
-def _preview_curation(
-    user_id: uuid.UUID,
-    connection_id: uuid.UUID,
-    request: CurationPreviewRequest,
-) -> dict[str, object]:
-    (
-        rows,
-        matrix,
-        lyrics_matrix,
-        lyrics_available,
-        voice_matrix,
-        voice_available,
-        semantic_modes,
-        acoustic_matrix,
-        acoustic_available,
-        acoustic_modes,
-        theme_matrix,
-        theme_available,
-    ) = _curation_corpus(user_id, connection_id)
-    if request.curation_type == "sonic_journey":
-        return _preview_sonic_journey(
-            request, rows, matrix, acoustic_matrix, lyrics_matrix, lyrics_available
-        )
-    raw_lyrics_coverage = int(lyrics_available.sum())
-    lyrics_matrix, lyrics_available, themes_active = _theme_overlay(
-        lyrics_matrix, lyrics_available, theme_matrix, theme_available
-    )
-    language_map: dict[str, dict[str, object]] = {}
-    if request.target_language:
-        with (
-            psycopg.connect(get_settings().database_url, row_factory=dict_row) as connection,
-            connection.cursor() as cursor,
-        ):
-            cursor.execute(
-                """SELECT l.track_id::text AS id, l.provenance->'languages' AS distribution
-                   FROM lyrics l WHERE l.provenance ? 'languages'"""
-            )
-            language_map = {
-                row["id"]: row["distribution"] for row in cursor.fetchall() if row["distribution"]
-            }
-    time_of_day_enabled = request.time_of_day_enabled or request.curation_type == "time_of_day"
-    if time_of_day_enabled and (not request.period_start or not request.period_end):
-        raise HTTPException(status_code=422, detail="Choose a start and end time")
-    if request.curation_type == "language" and not (
-        request.positive_prompt.strip()
-        or request.sound_prompts
-        or request.themes_prompts
-        or request.target_language
-    ):
-        raise HTTPException(
-            status_code=422,
-            detail="Pick a language or add a positive direction for this language curation",
-        )
-    if request.curation_type == "examples" and not request.positive_track_ids:
-        raise HTTPException(status_code=422, detail="Add at least one Songs like track")
-    overlap = set(request.positive_track_ids) & set(request.negative_track_ids)
-    if overlap:
-        raise HTTPException(
-            status_code=422, detail="A track cannot appear in both Songs like and Songs not like"
-        )
-    with session_scope() as session:
-        preference = session.get(UserPreference, user_id)
-        if preference is None:
-            raise HTTPException(status_code=404, detail="User preferences are unavailable")
-        timezone_name = preference.timezone
-        lastfm_username = preference.lastfm_username
-        encrypted_key = (
-            bytes(preference.lastfm_api_key_encrypted)
-            if preference.lastfm_api_key_encrypted
-            else None
-        )
-    listen_counts: dict[str, int] | None = None
-    recent_ids: set[str] | None = None
-    period_counts: dict[str, int] = {}
-    if lastfm_username and encrypted_key:
-        try:
-            api_key = _cipher().decrypt(encrypted_key).decode()
-            listens = recent_listens(
-                lastfm_username,
-                api_key,
-                datetime.now(timezone.utc) - timedelta(days=request.lookback_days),
-            )
-            all_counts, period_counts = track_listen_counts(
-                rows,
-                listens,
-                timezone_name,
-                request.period_start if time_of_day_enabled else None,
-                request.period_end if time_of_day_enabled else None,
-            )
-            listen_counts = period_counts if time_of_day_enabled else all_counts
-            recent_ids = set(all_counts)
-        except Exception as error:
-            raise HTTPException(
-                status_code=502, detail=f"Could not read Last.fm listening history: {error}"
-            ) from error
-    elif time_of_day_enabled:
-        raise HTTPException(
-            status_code=409,
-            detail="Connect Last.fm in Settings before creating a time-of-day curation",
-        )
-    sound_profile = request.sound_profile.model_dump(exclude_none=True, exclude_defaults=True)
-    instrumental_only = bool(sound_profile.pop("instrumental_only", False))
-    effective_positive_ids = list(request.positive_track_ids)
-    time_of_day_track_ids: list[uuid.UUID] = []
-    if time_of_day_enabled:
-        time_of_day_track_ids = [uuid.UUID(identifier) for identifier in period_counts]
-        if not time_of_day_track_ids:
-            raise HTTPException(
-                status_code=409,
-                detail="No matched listens were found in that time period during the lookback window",
-            )
-    sound_tags = [tag.strip() for tag in request.sound_prompts if tag.strip()]
-    theme_tags = [tag.strip() for tag in request.themes_prompts if tag.strip()]
-    sound_negatives = [tag.strip() for tag in request.sound_negative_prompts if tag.strip()]
-    theme_negatives = [tag.strip() for tag in request.themes_negative_prompts if tag.strip()]
-    structured = bool(sound_tags or theme_tags or sound_negatives or theme_negatives)
-    semantic_prompts = (
-        sound_tags
-        if structured
-        else ([request.positive_prompt] if request.positive_prompt.strip() else [])
-    )
-    theme_prompts = (
-        theme_tags
-        if structured
-        else ([request.positive_prompt] if request.positive_prompt.strip() else [])
-    )
-    visible_ids = {str(row["id"]) for row in rows}
-    has_language_constraint = bool(request.target_language)
-    if (
-        not has_language_constraint
-        and not semantic_prompts
-        and not theme_prompts
-        and not sound_profile
-        and not instrumental_only
-        and not any(
-            str(value) in visible_ids for value in [*effective_positive_ids, *time_of_day_track_ids]
-        )
-    ):
-        raise HTTPException(
-            status_code=422, detail="None of the Songs like tracks are available in this library"
-        )
-    lyrics_model = shared_lyrics_model()
-
-    def _tag_query_centers(tags: list[str]) -> list[np.ndarray]:
-        centers: list[np.ndarray] = []
-        for group in expand_tag_groups(tags):
-            embedded = lyrics_model.embed_queries(group)
-            center = np.asarray(embedded, dtype=np.float32).mean(axis=0)
-            centers.append(center / max(float(np.linalg.norm(center)), 1e-8))
-        return centers
-
-    positive_queries = _tag_query_centers(theme_prompts) if theme_prompts else None
-    lyrics_negatives = (
-        theme_negatives
-        if structured
-        else ([request.negative_prompt] if request.negative_prompt.strip() else [])
-    )
-    negative_queries = (
-        np.asarray(_tag_query_centers(lyrics_negatives), dtype=np.float32)
-        if lyrics_negatives
-        else None
-    )
-    shuffle_seed = secrets.randbits(63)
-    language_mode = bool(request.target_language)
-    language_eligible_ids: set[str] | None = None
-    if language_mode and request.language_strictness == "only":
-        language_eligible_ids = {
-            str(row["id"])
-            for row in rows
-            if language_affinity(language_map.get(str(row["id"])), request.target_language)
-            >= PRIMARY_SHARE
-        }
-        if not language_eligible_ids:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "No tracks with confident "
-                    f"{LANGUAGE_NAMES.get(request.target_language, request.target_language)} "
-                    "lyrics were found in this library"
-                ),
-            )
-    rank_limit = (
-        len(rows) if language_mode and language_eligible_ids is None else request.track_limit
-    )
-    expanded_sound_prompts = expand_tag_groups(sound_tags) if structured and sound_tags else None
-    expanded_sound_negatives = (
-        expand_tag_groups(sound_negatives) if structured and sound_negatives else None
-    )
-    has_sound_profile = bool(sound_profile)
-    tracks, references = rank_curation(
-        rows,
-        matrix,
-        request.positive_prompt,
-        request.negative_prompt,
-        rank_limit,
-        request.refresh_mode,
-        [str(value) for value in request.existing_track_ids],
-        [str(value) for value in effective_positive_ids],
-        [str(value) for value in request.negative_track_ids],
-        lyrics_matrix,
-        lyrics_available,
-        positive_queries,
-        negative_queries,
-        listen_counts,
-        recent_ids,
-        request.familiarity_percent,
-        shuffle_seed,
-        voice_matrix=voice_matrix,
-        voice_available=voice_available,
-        sound_prompts=expanded_sound_prompts,
-        themes_prompts=expand_tag_groups(theme_tags) if structured and theme_tags else None,
-        sound_negative_prompts=expanded_sound_negatives,
-        themes_negative_prompts=expand_tag_groups(theme_negatives)
-        if structured and theme_negatives
-        else None,
-        sound_weight=request.sound_weight if structured else None,
-        sound_profile=sound_profile,
-        instrumental_only=instrumental_only,
-        semantic_modes=semantic_modes,
-        acoustic_matrix=acoustic_matrix,
-        acoustic_available=acoustic_available,
-        acoustic_modes=acoustic_modes,
-        context_track_ids=[str(value) for value in time_of_day_track_ids],
-        eligible_track_ids=language_eligible_ids,
-        # Profile targets are preference scores, not semantic relevance claims.
-        # A profile-only recipe therefore ranks the measured library without
-        # applying the embedding match cutoff intended for text and examples.
-        minimum_match_percentile=(
-            0.0
-            if (has_sound_profile or instrumental_only)
-            and not (
-                semantic_prompts or theme_prompts or effective_positive_ids or time_of_day_track_ids
-            )
-            else MATCH_PERCENTILE
-        ),
-    )
-    language_report: dict[str, object] | None = None
-    if language_mode:
-        affinity = {
-            str(track["id"]): language_affinity(
-                language_map.get(str(track["id"])), request.target_language
-            )
-            for track in tracks
-        }
-        if request.language_strictness == "primarily":
-            ranked = sorted(tracks, key=lambda track: float(track["percentile"]), reverse=True)
-            primary = [track for track in ranked if affinity[str(track["id"])] >= PRIMARY_SHARE]
-            filler = [track for track in ranked if affinity[str(track["id"])] < PRIMARY_SHARE]
-            tracks = (primary + filler)[: request.track_limit]
-            language_report = {
-                "target": request.target_language,
-                "strictness": "primarily",
-                "matched_tracks": len(primary),
-                "requested": request.track_limit,
-            }
-        elif request.language_strictness == "sprinkle":
-            boosted = [
-                (0.85 * float(track["percentile"]) + 0.15 * affinity[str(track["id"])], track)
-                for track in tracks
-            ]
-            tracks = [track for _, track in sorted(boosted, key=lambda item: -item[0])]
-            tracks = tracks[: request.track_limit]
-            language_report = {
-                "target": request.target_language,
-                "strictness": "sprinkle",
-                "matched_tracks": sum(value >= PRIMARY_SHARE for value in affinity.values()),
-                "requested": request.track_limit,
-            }
-        else:
-            language_report = {
-                "target": request.target_language,
-                "strictness": "only",
-                "matched_tracks": len(tracks),
-                "requested": request.track_limit,
-            }
-    if (
-        not structured
-        and not request.positive_prompt.strip()
-        and not (effective_positive_ids or time_of_day_track_ids)
-    ):
-        weights = {"semantic": 0.0, "lyrics": 0.0}
-    elif structured and (sound_tags or sound_negatives) and not (theme_tags or theme_negatives):
-        weights = {"semantic": 1.0, "lyrics": 0.0}
-    elif structured and (theme_tags or theme_negatives) and not (sound_tags or sound_negatives):
-        weights = {"semantic": 0.0, "lyrics": 1.0}
-    elif structured:
-        weights = {
-            "semantic": request.sound_weight / 100.0,
-            "lyrics": (100 - request.sound_weight) / 100.0,
-        }
-    else:
-        weights = {"semantic": 0.45, "lyrics": 0.55}
-    signal_weights: dict[str, float] = {}
-    has_sound = bool(sound_tags or sound_negatives)
-    has_themes = bool(theme_tags or theme_negatives)
-    if has_sound and has_themes:
-        signal_weights["sound"] = request.sound_weight / 100.0
-        signal_weights["themes"] = (100 - request.sound_weight) / 100.0
-    elif has_sound:
-        signal_weights["sound"] = 1.0
-    elif has_themes:
-        signal_weights["themes"] = 1.0
-    elif request.positive_prompt.strip():
-        signal_weights["free_form"] = 1.0
-    if effective_positive_ids or request.negative_track_ids:
-        signal_weights["examples"] = 1.0
-    if time_of_day_track_ids:
-        signal_weights["time_of_day"] = 1.0
-    if has_sound_profile:
-        signal_weights["sound_profile"] = 1.0
-    if instrumental_only:
-        signal_weights["instrumental_only"] = 1.0
-    signal_total = sum(signal_weights.values())
-    if signal_total:
-        signal_weights = {name: value / signal_total for name, value in signal_weights.items()}
-    return {
-        "tracks": tracks,
-        "references": references,
-        "corpus_size": len(rows),
-        "selection": {
-            "requested": request.track_limit,
-            "selected": len(tracks),
-            "shortfall": max(0, request.track_limit - len(tracks)),
-            "below_threshold_filling": False,
-            "match_basis": "library_relative",
-            "confidence_calibrated": False,
-        },
-        "representation_runs": {
-            model: sorted(
-                {
-                    row["representation_runs"][model]
-                    for row in rows
-                    if model in row["representation_runs"]
-                }
-            )
-            for model in ("muq_mulan", "mert", "bge_m3")
-        },
-        "curation_type": request.curation_type,
-        "model": "muq_mulan+mert+bge_m3",
-        "weights": weights,
-        "signal_weights": signal_weights,
-        "scoring_revision": CURATION_SCORING_REVISION,
-        "example_component_weights": EXAMPLE_COMPONENT_WEIGHTS,
-        "audio_profile_coverage": {
-            "muq_mulan": sum(profile is not None for profile in semantic_modes),
-            "mert": sum(profile is not None for profile in acoustic_modes),
-            "mert_global": int(acoustic_available.sum()),
-        },
-        "lyrics_coverage": raw_lyrics_coverage,
-        "theme_coverage": int(theme_available.sum()),
-        "lyrics_representation": "themes" if themes_active else "lyrics",
-        "shuffle_seed": shuffle_seed,
-        "language": language_report,
-        "familiarity": {
-            "percent": request.familiarity_percent,
-            "active": listen_counts is not None,
-            "lookback_days": request.lookback_days,
-            "familiar_tracks": sum(
-                track["evidence"]["selection_pool"] == "familiar" for track in tracks
-            ),
-            "discovery_tracks": sum(
-                track["evidence"]["selection_pool"] == "discovery" for track in tracks
-            ),
-            "matched_listens": sum((listen_counts or {}).values()),
-        },
-    }
 
 
 def _refresh_curation(curation_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, object]:
-    from . import curation_jobs
+    import worker.curation.jobs as curation_jobs
 
     return curation_jobs.enqueue(curation_id, user_id)
 
 
 @app.post("/library/curations/preview")
 def preview_curation(
-    request: CurationPreviewRequest, echora_session: str | None = Cookie(default=None)
+    request: CurationRecipe, echora_session: str | None = Cookie(default=None)
 ) -> dict[str, object]:
     user = _session_user(echora_session)
     connection_id = user.get("navidrome_connection_id")
     if connection_id is None:
         raise HTTPException(status_code=409, detail="No Navidrome connection is configured")
-    return _preview_curation(user["id"], connection_id, request)
+    return preview_recipe(user["id"], connection_id, request)
 
 
 @app.get("/library/curations")
@@ -3431,7 +2544,7 @@ def replace_curation(
 ) -> dict[str, object]:
     """Replace a saved recipe and generate a new playlist revision."""
     user = _session_user(echora_session)
-    from . import curation_jobs
+    import worker.curation.jobs as curation_jobs
 
     with curation_jobs.locked(curation_id) as lock_connection:
         try:
@@ -3496,7 +2609,7 @@ def update_curation(
 ) -> dict[str, object]:
     user = _session_user(echora_session)
     values = request.model_dump(exclude_none=True)
-    from . import curation_jobs
+    import worker.curation.jobs as curation_jobs
 
     with curation_jobs.locked(curation_id) as lock_connection:
         with session_scope() as session:
@@ -3533,7 +2646,7 @@ def delete_curation(
     echora_session: str | None = Cookie(default=None),
 ) -> Response:
     user = _session_user(echora_session)
-    from . import curation_jobs
+    import worker.curation.jobs as curation_jobs
 
     with curation_jobs.locked(curation_id) as lock_connection:
         with session_scope() as session:
@@ -3553,7 +2666,7 @@ def delete_curation(
         # Delete remotely first so a Navidrome failure does not leave an orphaned
         # playlist after Echora has already forgotten its ID.
         if delete_navidrome and playlist_id:
-            credentials = _load_connection(str(connection_id))
+            credentials = load_connection(str(connection_id))
             if credentials is None:
                 raise HTTPException(
                     status_code=409,
@@ -4496,7 +3609,7 @@ def _navidrome_ranking(user_id: str, connection_id: str) -> list[tuple[str, int]
         cached = _navidrome_top_cache.get(key)
     if cached and time.monotonic() - cached[0] < _NAVIDROME_TOP_TTL_SECONDS:
         return cached[1]
-    credentials = _load_connection(connection_id, uuid.UUID(user_id))
+    credentials = load_connection(connection_id, uuid.UUID(user_id))
     if credentials is None:
         return None
     with NavidromeClient(*credentials) as client:
@@ -4557,7 +3670,7 @@ def library_top_tracks(
         try:
             # Ask for more than we show: some top tracks are not in this library.
             entries = top_tracks(
-                username, _cipher().decrypt(encrypted_key).decode(), period, min(limit * 5, 200)
+                username, credential_cipher().decrypt(encrypted_key).decode(), period, min(limit * 5, 200)
             )
         except Exception as error:
             raise HTTPException(

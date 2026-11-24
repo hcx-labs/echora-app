@@ -14,8 +14,8 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field
 
-from .settings import get_settings
-from .navidrome_lyrics_sources import lyrics_paused
+from core.settings import get_settings
+from core.lyrics.sources import lyrics_paused
 
 
 class RankingProfile(BaseModel):

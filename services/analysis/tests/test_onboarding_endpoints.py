@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from echora_analysis import main
+import echora_analysis.main as main
 
 
 def track(i):
@@ -22,7 +22,7 @@ def track(i):
 def signed_in(monkeypatch):
     monkeypatch.setattr(main, "_session_user", lambda session: {"id": "user"})
     owned = {"conn": ("http://navidrome", "me", "secret")}
-    monkeypatch.setattr(main, "_load_connection", lambda cid, uid: owned.get(cid))
+    monkeypatch.setattr(main, "load_connection", lambda cid, uid: owned.get(cid))
 
 
 def test_sample_reads_random_tracks_from_the_saved_connection(signed_in, monkeypatch):

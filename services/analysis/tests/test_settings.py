@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from echora_analysis.settings import Settings, get_settings, require_database_url
+from core.settings import Settings, get_settings, require_database_url
 
 
 @pytest.fixture(autouse=True)
@@ -100,7 +100,7 @@ def test_empty_models_preserved(monkeypatch):
 
 
 def test_public_ui_is_an_explicit_allowlist():
-    from echora_analysis.settings import public_ui_settings
+    from core.settings import public_ui_settings
 
     expected = {
         "job_poll_ms": 1200, "batch_poll_ms": 1500, "hum_index_poll_ms": 2500,
@@ -116,7 +116,7 @@ def test_public_ui_is_an_explicit_allowlist():
 
 
 def test_operational_http_settings(monkeypatch):
-    from echora_analysis.navidrome import NavidromeClient
+    from core.integrations.navidrome import NavidromeClient
 
     monkeypatch.setenv("ECHORA_NAVIDROME_TIMEOUT_SECONDS", "7")
     monkeypatch.setenv("ECHORA_NAVIDROME_READ_TIMEOUT_SECONDS", "9")

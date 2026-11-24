@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .settings import get_settings
+from core.settings import get_settings
 
 from dataclasses import dataclass
 from functools import lru_cache

@@ -9,13 +9,8 @@ import uuid
 from fastapi import HTTPException
 import numpy as np
 
-from .artists import (
-    fit_artist_profile,
-    representative_indices,
-    soft_chamfer_similarity,
-    weighted_center,
-)
-from .journeys import normalize_rows, select_journey, spherical_targets
+from .artists import fit_artist_profile, representative_indices, soft_chamfer_similarity, weighted_center
+from core.curation.journeys import normalize_rows, select_journey, spherical_targets
 from .navidrome_integration import connect
 
 DIMENSIONS = {"muq": 512, "mert": 768, "lyrics": 1024}

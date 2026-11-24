@@ -1,6 +1,6 @@
 """Recording API boundaries and isolated-schema lifecycle integration tests."""
 
-from echora_analysis.settings import get_settings
+from core.settings import get_settings
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,9 +16,9 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from echora_analysis import jobs, recording_search as search
+import core.jobs.queue as jobs
+import worker.recordings.search as search
 from echora_analysis.recording_routes import create_router
-from test_jobs import database  # noqa: F401 -- shared isolated-schema fixture
 
 
 @pytest.fixture
@@ -85,7 +85,8 @@ def test_bounded_decode():
 
 
 def test_policy_requires_calibration_and_matching_representation(monkeypatch, tmp_path):
-    from echora_analysis import recording_encoder, recording_matcher
+    import worker.recordings.encoder as recording_encoder
+    import worker.recordings.matcher as recording_matcher
     monkeypatch.setattr(recording_encoder, "config_from_env", lambda: SimpleNamespace(representation_id="one"))
     path = tmp_path / "policy.json"
     monkeypatch.setenv("ECHORA_RECORDING_MATCH_POLICY", str(path))
@@ -99,26 +100,6 @@ def test_policy_requires_calibration_and_matching_representation(monkeypatch, tm
     path.write_text(json.dumps(data))
     with pytest.raises(ValueError):
         search.search_configuration()
-
-
-@pytest.fixture
-def recording_db(database):  # noqa: F811 -- pytest fixture injection
-    with database() as db:
-        db.execute("""CREATE TABLE users(id uuid PRIMARY KEY);
-            CREATE TABLE tracks(id uuid PRIMARY KEY,title text,artist text,album text,duration_seconds float);
-            CREATE TABLE user_track_links(user_id uuid,track_id uuid,external_id text,library_id uuid);
-            CREATE TABLE libraries(id uuid PRIMARY KEY,namespace uuid,root_path text);
-            CREATE TABLE navidrome_connections(id uuid PRIMARY KEY,owner_user_id uuid,url text);
-            CREATE TABLE user_preferences(user_id uuid PRIMARY KEY,navidrome_connection_id uuid);
-            CREATE TABLE track_sources(track_id uuid,library_id uuid,external_id text,source_type text,source_data jsonb);
-            CREATE TABLE recording_group_members(track_id uuid PRIMARY KEY,group_id uuid);""")
-        migration = runpy.run_path(str(Path(__file__).resolve().parents[1] / "alembic/versions/0044_recording_search.py"))
-        with patch("alembic.op.execute", side_effect=db.execute):
-            migration["upgrade"]()
-        diagnostic_migration = runpy.run_path(str(Path(__file__).resolve().parents[1] / "alembic/versions/0046_recording_diagnostics.py"))
-        with patch("alembic.op.execute", side_effect=db.execute):
-            diagnostic_migration["upgrade"]()
-    return database
 
 
 def test_queue_admission_fifo_and_terminal_audio_erasure(recording_db):
@@ -181,8 +162,8 @@ def test_references_scope_before_search_and_results_recheck_access(recording_db)
 
 
 def test_worker_roundtrip_and_configuration_fence(recording_db, monkeypatch):
-    from echora_analysis import recording_encoder
-    from echora_analysis.recording_matcher import MatchPolicy
+    import worker.recordings.encoder as recording_encoder
+    from worker.recordings.matcher import MatchPolicy
     owner, track, library = uuid4(), uuid4(), uuid4()
     matrix = np.eye(128, dtype="<f4")[:30]
     config = SimpleNamespace(representation_id="model")
@@ -226,7 +207,7 @@ def test_cancel_api_is_owner_and_kind_scoped(api, monkeypatch):
 
 def test_sync_index_status_scopes_catalog_owner_and_representation(recording_db, monkeypatch):
     from psycopg.rows import tuple_row
-    from echora_analysis import recording_encoder
+    import worker.recordings.encoder as recording_encoder
     owner, other, library, elsewhere, namespace = [uuid4() for _ in range(5)]
     monkeypatch.setattr(recording_encoder, "config_from_env", lambda: SimpleNamespace(representation_id="current"))
     monkeypatch.delenv("ECHORA_RECORDING_MATCH_POLICY", raising=False)
@@ -254,7 +235,7 @@ def test_sync_index_status_scopes_catalog_owner_and_representation(recording_db,
 
 def test_sync_index_status_disabled_and_invalid_model(monkeypatch):
     from unittest.mock import MagicMock
-    from echora_analysis import recording_encoder
+    import worker.recordings.encoder as recording_encoder
     connection = MagicMock()
     monkeypatch.setattr(recording_encoder, "config_from_env", lambda: None)
     result = search.index_status(connection, uuid4(), ["song"], uuid4())
@@ -266,7 +247,7 @@ def test_sync_index_status_disabled_and_invalid_model(monkeypatch):
 
 
 def test_query_and_library_decoders_agree_on_stereo_resampling():
-    from echora_analysis.audio import decode_audio
+    from core.media.audio import decode_audio
     rate = 48000
     t = np.arange(rate * 2) / rate
     stereo = np.stack([np.sin(2 * np.pi * 440 * t), .5 * np.sin(2 * np.pi * 997 * t)], axis=1)
@@ -286,7 +267,8 @@ def test_query_and_library_decoders_agree_on_stereo_resampling():
 def test_store_fingerprints_full_track_reuse_and_source_identity(monkeypatch):
     import hashlib
     from unittest.mock import MagicMock
-    from echora_analysis import audio, recording_encoder
+    import core.media.audio as audio
+    import worker.recordings.encoder as recording_encoder
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     content = b"original source"

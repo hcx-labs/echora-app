@@ -8,8 +8,9 @@ from urllib.parse import unquote
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from starlette.concurrency import run_in_threadpool
 
-from . import recording_calibration, recording_search
-from .settings import get_settings
+import worker.recordings.calibration as recording_calibration
+import worker.recordings.search as recording_search
+from core.settings import get_settings
 
 
 async def _audio_body(request: Request) -> bytes:
@@ -57,7 +58,7 @@ def create_router(user_dependency) -> APIRouter:
 
     @router.delete("/search/{job_id}")
     def cancel(job_id: UUID, user=Depends(user_dependency)):
-        from . import jobs
+        import core.jobs.queue as jobs
         job = jobs.get_job(job_id, user["id"])
         if job is None or job["kind"] != "recording_search":
             raise HTTPException(404, "Recording search not found")

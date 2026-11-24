@@ -19,9 +19,9 @@ from sqlalchemy.orm import sessionmaker
 def auth(monkeypatch):
     monkeypatch.setenv('DATABASE_URL', os.getenv('TEST_DATABASE_URL', 'postgresql://localhost/unused'))
     monkeypatch.setenv('ECHORA_SESSION_TRUSTED_ORIGINS', 'http://testserver')
-    from echora_analysis.settings import get_settings
+    from core.settings import get_settings
     get_settings.cache_clear()
-    from echora_analysis import sessions
+    import echora_analysis.sessions as sessions
     yield sessions
     get_settings.cache_clear()
 
@@ -31,7 +31,7 @@ def database(auth, monkeypatch):
     url = os.getenv('TEST_DATABASE_URL')
     if not url:
         pytest.skip('TEST_DATABASE_URL is required for isolated PostgreSQL session tests')
-    from echora_analysis.db_models import User, UserPreference, UserSession, NavidromeConnection
+    from core.db.models import User, UserPreference, UserSession, NavidromeConnection
     schema = 'test_sessions_' + uuid4().hex
     with psycopg.connect(url, autocommit=True) as db:
         db.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(schema)))
@@ -186,7 +186,7 @@ def test_migration_preserves_legacy_deadlines():
     import runpy
     from pathlib import Path
     from unittest.mock import patch
-    module = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'alembic/versions/0050_session_activity.py'))
+    module = runpy.run_path(str(Path(__file__).resolve().parents[3] / 'core/src/db/migrations/versions/0050_session_activity.py'))
     commands = []
     with patch('alembic.op.execute', side_effect=commands.append):
         module['upgrade']()
@@ -237,7 +237,7 @@ def test_legacy_migration_on_postgresql(auth, database):
             stored.expires_at = created + timedelta(hours=2)
     with scope() as session:
         session.execute(text('ALTER TABLE user_sessions DROP COLUMN absolute_expires_at, DROP COLUMN last_renewed_at'))
-        migration = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'alembic/versions/0050_session_activity.py'))
+        migration = runpy.run_path(str(Path(__file__).resolve().parents[3] / 'core/src/db/migrations/versions/0050_session_activity.py'))
         with patch('alembic.op.execute', side_effect=lambda command: session.execute(text(command))):
             migration['upgrade']()
     with scope() as session:

@@ -3,9 +3,8 @@ from uuid import uuid4
 
 import pytest
 
-from echora_analysis import jobs, recording_search as search
-from test_jobs import database  # noqa: F401
-from test_recording_search import recording_db  # noqa: F401
+import core.jobs.queue as jobs
+import worker.recordings.search as search
 
 
 def arm(database, owner, *, expired=False):

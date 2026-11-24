@@ -188,7 +188,7 @@ Set `OIDC_REQUIRE_VERIFIED_EMAIL=true` if your provider verifies addresses and y
 ```sh
 docker compose build analysis
 docker compose run --rm --no-deps -e HF_HUB_OFFLINE=0 analysis \
-  python -m echora_analysis.download_models
+  python -m worker.models.download
 ```
 
 Run it again whenever an update changes the pinned models. To add motion artwork's models, follow [its guide](docs/motion-artwork.md).

@@ -1,14 +1,7 @@
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from core.config import (
-    EchoraConfig,
-    compute,
-    config_classes,
-    reset_config_cache,
-    secret,
-    setting,
-)
+from core.config import EchoraConfig, compute, config_classes, reset_config_cache, secret, setting
 
 
 class _AlignConfig(EchoraConfig, env_prefix="ECHORA_TESTALIGN_"):

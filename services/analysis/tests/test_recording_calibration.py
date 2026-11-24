@@ -1,8 +1,9 @@
 """Private disk retention, consent, owner scope and HTTP calibration contracts."""
 
-from echora_analysis.settings import get_settings
+from core.settings import get_settings
 
 from datetime import datetime, timezone
+import io
 import os
 from pathlib import Path
 import runpy
@@ -11,12 +12,25 @@ from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import numpy as np
 import pytest
+import wave
 
-from echora_analysis import recording_calibration as calibration, recording_encoder, recording_search
+from core.testing import apply_migrations
+import worker.recordings.calibration as calibration
+import worker.recordings.encoder as recording_encoder
+import worker.recordings.search as recording_search
 from echora_analysis.recording_routes import create_router
-from test_jobs import database  # noqa: F401 -- shared isolated schema fixture
-from test_recording_search import recording_db, _wav  # noqa: F401
+
+
+def _wav(seconds):
+    stream = io.BytesIO()
+    with wave.open(stream, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(8000)
+        writer.writeframes(np.zeros(int(seconds * 8000), dtype="<i2").tobytes())
+    return stream.getvalue()
 
 
 @pytest.fixture
@@ -27,10 +41,7 @@ def calibration_db(recording_db, monkeypatch, tmp_path):  # noqa: F811 -- fixtur
     get_settings.cache_clear()
     with recording_db() as db:
         db.execute("CREATE TABLE IF NOT EXISTS users(id uuid PRIMARY KEY)")
-        migration = runpy.run_path(str(Path(__file__).resolve().parents[1] /
-                                       "alembic/versions/0045_recording_calibration.py"))
-        with patch("alembic.op.execute", side_effect=db.execute):
-            migration["upgrade"]()
+        apply_migrations(db, "0045_recording_calibration")
     return recording_db
 
 

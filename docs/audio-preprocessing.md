@@ -60,7 +60,7 @@ The cache is private service data, not a playback API or authorization mechanism
 
 ## Deployment and validation
 
-Provision model snapshots with the existing `echora_analysis.download_models` command in online mode before starting offline workers. Docker startup only prunes managed snapshots; it does not fetch missing models. Legacy `FA_KARA_DEMUCS_MODEL` and `FA_KARA_VOCAL_SEPARATION` no longer select the service's vocal-only input.
+Provision model snapshots with the existing `worker.models.download` command in online mode before starting offline workers. Docker startup only prunes managed snapshots; it does not fetch missing models. Legacy `FA_KARA_DEMUCS_MODEL` and `FA_KARA_VOCAL_SEPARATION` no longer select the service's vocal-only input.
 
 New karaoke and melody recipe identities make old results eligible for regeneration on the next applicable job. Hum search selects only the current Roformer melody revision. Refresh the existing index with a melody-index job or an entire-library sync with hum processing enabled before searching. Old contours remain stored for provenance; no bulk deletion or rebuild happens at deployment. Failed separation does not publish a full-mix-only result as a completed new recipe. Sources with insufficient pitch evidence can still be omitted after successful separation.
 

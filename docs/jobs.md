@@ -6,8 +6,8 @@ The API submits jobs and exposes owner-scoped `GET /jobs` and `GET /jobs/{id}`. 
 
 Two worker types share PostgreSQL:
 
-- `python -m echora_analysis.worker analysis`: sync, selected imports, analysis backfills and hum indexes.
-- `python -m echora_analysis.worker scheduled`: due-curation polling and manual/scheduled curation refreshes.
+- `python -m worker.executor analysis`: sync, selected imports, analysis backfills and hum indexes.
+- `python -m worker.executor scheduled`: due-curation polling and manual/scheduled curation refreshes.
 
 Each worker process claims one job at a time and supervises an isolated executor subprocess. Multiple processes can claim different batches. Device selection remains in the existing model implementations; CPU and GPU use the same pipeline. Size worker counts for available RAM/VRAM: automatic CUDA detection is not resource admission control.
 

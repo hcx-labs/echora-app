@@ -13,7 +13,7 @@ def api(monkeypatch):
     monkeypatch.setenv(
         "DATABASE_URL", os.getenv("TEST_DATABASE_URL", "postgresql://localhost/unused")
     )
-    from echora_analysis import main
+    import echora_analysis.main as main
     from fastapi.testclient import TestClient
 
     user_id = uuid4()
@@ -51,7 +51,7 @@ def test_sync_returns_before_catalog_scan_and_never_queues_secrets(api, monkeypa
     main, client, user_id = api
     connection_id = uuid4()
     monkeypatch.setattr(
-        main, "_load_connection", Mock(return_value=("https://music", "user", "secret"))
+        main, "load_connection", Mock(return_value=("https://music", "user", "secret"))
     )
     client_factory = Mock(side_effect=AssertionError("API must not scan Navidrome"))
     monkeypatch.setattr(main, "NavidromeClient", client_factory)
@@ -77,7 +77,7 @@ def test_sync_rejects_foreign_connection(api, monkeypatch):
     connection_id = uuid4()
     load = Mock(return_value=None)
     enqueue = Mock()
-    monkeypatch.setattr(main, "_load_connection", load)
+    monkeypatch.setattr(main, "load_connection", load)
     monkeypatch.setattr(main.jobs, "enqueue", enqueue)
     assert client.post(f"/navidrome/connections/{connection_id}/sync", json={}).status_code == 404
     load.assert_called_once_with(str(connection_id), user_id)

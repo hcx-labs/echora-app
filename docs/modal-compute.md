@@ -71,7 +71,7 @@ To deploy by hand, from `services/analysis` with a Modal token configured:
 
 ```sh
 ECHORA_MODAL_IMAGE=ghcr.io/hackslashx/echora-analysis-gpu:<version> \
-  PYTHONPATH=src modal deploy -m echora_analysis.modal_app
+  modal deploy -m worker.remote.modal_app
 ```
 
 ## Interactive features

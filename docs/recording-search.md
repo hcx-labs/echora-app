@@ -81,7 +81,7 @@ All analysis jobs use the existing queue order. Recording queries have no schedu
 
 ## Native model provisioning
 
-Recording bundles are handled by the existing `python -m echora_analysis.download_models` command, alongside the other analysis models. Download and verification code lives in `echora_analysis.recording_download`, not in deployment scripts. This support requires a release after 0.1.20.
+Recording bundles are handled by the existing `python -m worker.models.download` command, alongside the other analysis models. Download and verification code lives in `worker.recordings.download`, not in deployment scripts. This support requires a release after 0.1.20.
 
 Configure the provisioning process with:
 

@@ -17,9 +17,9 @@ from psycopg import sql
 from psycopg.rows import dict_row
 import pytest
 
-from echora_analysis import navidrome_integration as auth
-from echora_analysis import plugin_ranking as ranking
-from echora_analysis import plugin_lyrics as lyrics
+import echora_analysis.navidrome_integration as auth
+import echora_analysis.plugin_ranking as ranking
+import echora_analysis.plugin_lyrics as lyrics
 from echora_analysis.plugin_routes import router
 
 
@@ -457,7 +457,7 @@ def database(monkeypatch):
             "0055_navidrome_integration.py",
             "0056_navidrome_original_lyrics.py",
         ):
-            migration_path = Path(__file__).parents[1] / "alembic/versions" / filename
+            migration_path = Path(__file__).parents[3] / "core/src/db/migrations/versions" / filename
             spec = importlib.util.spec_from_file_location("integration_migration", migration_path)
             migration = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(migration)
@@ -773,7 +773,7 @@ def test_manual_enable_is_blocked_and_off_preference_is_not_restored_as_on(datab
 
 
 def test_original_snapshots_keep_full_structure_last_available_and_enriched_lyrics(database):
-    from echora_analysis.navidrome_lyrics_sources import store_original
+    from core.lyrics.sources import store_original
 
     db = database
     _, library, track = seed_saved_lyrics(db)
@@ -827,7 +827,7 @@ def test_import_archives_provider_before_preserving_manual_lyrics_without_model_
     from unittest.mock import Mock
     from collections.abc import Callable
 
-    path = Path(__file__).parents[1] / "src/echora_analysis/lyrics_pipeline.py"
+    path = Path(__file__).parents[3] / "worker/src/lyrics/pipeline.py"
     tree = ast.parse(path.read_text())
     function = next(
         node

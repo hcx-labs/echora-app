@@ -4,7 +4,7 @@
 PYTHONPATH=services/analysis/src python scripts/export-runtime-settings.py
 """
 
-from echora_analysis.settings import Settings
+from core.settings import Settings
 
 
 def template() -> str:

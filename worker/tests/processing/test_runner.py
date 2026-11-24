@@ -4,13 +4,7 @@ import pytest
 
 from core.config import EchoraConfig, setting
 from core.errors import JobCancelled, ModelUnavailableError, ProcessingError
-from worker.processing import (
-    Item,
-    ItemResult,
-    ProcessingContext,
-    Processor,
-    run_stage,
-)
+from worker.processing import Item, ItemResult, ProcessingContext, Processor, run_stage
 
 
 class _Config(EchoraConfig, env_prefix="ECHORA_TEST_RUNNER_"):

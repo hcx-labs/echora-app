@@ -53,6 +53,10 @@ class NotFoundError(EchoraError):
     """The requested resource does not exist or is not visible to the caller."""
 
 
+class ConflictError(EchoraError):
+    """The request conflicts with the resource's current state (a refresh still running)."""
+
+
 class SearchError(EchoraError):
     """A search request failed."""
 

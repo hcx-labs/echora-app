@@ -1,6 +1,0 @@
-from .roformer import MODEL_ID, SEPARATION_REVISION
-
-MELODY_SEPARATOR_MODEL = MODEL_ID
-MELODY_SEPARATOR_REVISION = SEPARATION_REVISION
-MELODY_CONTOUR_REVISION = f"multi-source-roformer-residual-v3:{SEPARATION_REVISION}"
-MELODY_EXTRACTOR = "roformer-overlap2-residual-plus-essentia-melodia"

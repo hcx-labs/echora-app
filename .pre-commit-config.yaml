@@ -1,5 +1,6 @@
 minimum_pre_commit_version: '4.0.0'
-exclude: '^services/analysis/src/echora_analysis/vendor/'
+# Vendored research code follows its upstream: neither formatted nor linted.
+exclude: '(^|/)vendor/'
 # pre-commit preserves unstaged edits while formatting the staged version.
 repos:
   - repo: local
@@ -13,5 +14,5 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.6
     hooks:
+      # Each file takes its nearest Ruff config: ruff.toml at the root.
       - id: ruff-format
-        args: [--config, services/analysis/pyproject.toml]

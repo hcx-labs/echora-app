@@ -1,4 +1,6 @@
-from echora_analysis.settings import get_settings
+from core.curation.preview import curation_corpus
+from core.library.membership import reconcile_user_tracks
+from core.settings import get_settings
 
 import os
 import uuid
@@ -7,10 +9,8 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from echora_analysis.analysis_attempts import start_attempt, record_track, finish_attempt
-from echora_analysis.representations import (
-    config_hash, configure_representations, embedding_config, model_settings,
-)
+from worker.library.attempts import start_attempt, record_track, finish_attempt
+from core.embeddings.representations import config_hash, configure_representations, embedding_config, model_settings
 
 
 def test_default_contract_preserves_existing_audio_configuration():
@@ -111,7 +111,7 @@ def test_revision_switch_reduces_coverage_instead_of_mixing_spaces(db, monkeypat
 @pytest.fixture()
 def visible_track(db, monkeypatch):
     from contextlib import contextmanager
-    from echora_analysis import main
+    import echora_analysis.main as main
 
     run = add_run(db)
     track = add_embedding(db, run)
@@ -140,7 +140,7 @@ def test_curation_corpus_reports_exact_representation_and_ignores_incompatible(d
     main, user, _, connection_id, track, run = visible_track
     other = add_run(db, revision="incompatible")
     add_embedding(db, other, track)
-    rows, matrix, *_ = main._curation_corpus(user, connection_id)
+    rows, matrix, *_ = curation_corpus(user, connection_id)
     assert matrix.shape == (1, 512)
     assert rows[0]["representation_runs"] == {"muq_mulan": str(run)}
 
@@ -155,8 +155,8 @@ def test_descriptor_endpoint_enforces_visibility_and_reports_pending(visible_tra
 
 
 def test_planner_retries_partial_descriptors_and_keeps_current_audio(db, visible_track):
-    from echora_analysis.processing_plan import plan_audio
-    from echora_analysis.audio_descriptors import DESCRIPTOR_REVISION
+    from worker.planning.audio import plan_audio
+    from worker.library.descriptors import DESCRIPTOR_REVISION
     _, _, library, _, track, _ = visible_track
     plan = plan_audio(db, library, ["song"])
     assert not plan.needs_muq
@@ -169,7 +169,7 @@ def test_planner_retries_partial_descriptors_and_keeps_current_audio(db, visible
 
 def test_waveform_endpoint_visibility_and_pending(visible_track, db):
     from fastapi import HTTPException
-    from echora_analysis.waveforms import WAVEFORM_REVISION
+    from worker.library.waveforms import WAVEFORM_REVISION
     main, _, _, _, track, _ = visible_track
     assert main.track_waveform(track, "test")["status"] == "pending"
     with pytest.raises(HTTPException) as error:
@@ -182,8 +182,8 @@ def test_waveform_endpoint_visibility_and_pending(visible_track, db):
 
 
 def test_waveform_planner_skips_current_and_retries_old_revision(db, visible_track):
-    from echora_analysis.processing_plan import plan_audio
-    from echora_analysis.waveforms import WAVEFORM_REVISION
+    from worker.planning.audio import plan_audio
+    from worker.library.waveforms import WAVEFORM_REVISION
     _, _, library, _, track, _ = visible_track
     assert plan_audio(db, library, ["song"]).waveform_external_ids == frozenset({"song"})
     db.execute("INSERT INTO track_waveforms (track_id, revision, duration_seconds, peaks) VALUES (%s,%s,10,'[0,1]')", (track, WAVEFORM_REVISION))
@@ -195,8 +195,8 @@ def test_waveform_planner_skips_current_and_retries_old_revision(db, visible_tra
 def test_visual_feature_endpoint_visibility_and_planner(db, visible_track):
     from fastapi import HTTPException
     from echora_analysis.main import track_visual_features
-    from echora_analysis.processing_plan import plan_audio
-    from echora_analysis.visual_features import VISUAL_FEATURE_REVISION
+    from worker.planning.audio import plan_audio
+    from worker.library.visual_features import VISUAL_FEATURE_REVISION
 
     _, _, library, _, track, _ = visible_track
     assert plan_audio(db, library, ["song"]).visual_feature_external_ids == frozenset({"song"})
@@ -214,7 +214,7 @@ def test_visual_feature_endpoint_visibility_and_planner(db, visible_track):
     assert response["visual_features"]["features"]["bands"] == [[0.1]]
     assert response["enrichment"] == {"descriptors": None, "vocal_activity": None, "melody": None}
     # Read-time enrichment appears without a visual-cache rerun.
-    from echora_analysis.audio_descriptors import DESCRIPTOR_REVISION
+    from worker.library.descriptors import DESCRIPTOR_REVISION
     db.execute("INSERT INTO track_audio_descriptors (track_id, revision, status, descriptors) VALUES (%s,%s,'complete',%s)",
                (track, DESCRIPTOR_REVISION, Jsonb({"rhythm": {"bpm": 120}})))
     assert track_visual_features(track, "test")["enrichment"]["descriptors"]["descriptors"]["rhythm"]["bpm"] == 120
@@ -249,13 +249,13 @@ def test_catalog_reconciliation_deduplicates_identical_source_tracks(db, visible
                (uuid.uuid5(uuid.NAMESPACE_URL, 'http://test'), library))
     db.execute("INSERT INTO track_sources(library_id,track_id,source_type,external_id) VALUES (%s,%s,'subsonic','alias')",
                (library, track))
-    result = main._reconcile_user_tracks(user, 'http://test', ['song', 'alias'])
+    result = reconcile_user_tracks(user, 'http://test', ['song', 'alias'])
     assert result['linked'] == 1
     assert db.execute('SELECT external_id FROM user_track_links WHERE user_id=%s', (user,)).fetchall() == [('alias',)]
 
 
 def test_sync_selection_respects_mode_and_library_scope(db, visible_track):
-    from echora_analysis.sync_plan import select_sync_tracks
+    from worker.planning.sync import select_sync_tracks
     _, _, library, _, _, _ = visible_track
     db.execute('UPDATE libraries SET namespace=%s WHERE id=%s',
                (uuid.uuid5(uuid.NAMESPACE_URL, 'http://test'), library))
