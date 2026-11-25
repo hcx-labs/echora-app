@@ -263,7 +263,7 @@ def test_compute_choice_respects_permission_and_default(monkeypatch):
         "allow_users": False,
         "default_compute": "modal",
     }
-    monkeypatch.setattr(external_processing, "_connect", lambda: nullcontext(MagicMock()))
+    monkeypatch.setattr(external_processing, "connect", lambda **_: nullcontext(MagicMock()))
     monkeypatch.setattr(external_processing, "load", lambda db=None: row)
     admin = {"value": True}
     monkeypatch.setattr(external_processing, "_is_admin", lambda db, user: admin["value"])
@@ -282,8 +282,8 @@ def test_compute_choice_respects_permission_and_default(monkeypatch):
 def preparation_database(monkeypatch):
     monkeypatch.setattr(external_processing, "remote_settings", compute_settings)
     db = MagicMock()
-    db.execute.return_value.fetchone.return_value = {"locked": True}
-    monkeypatch.setattr(external_processing, "_connect", lambda: nullcontext(db))
+    db.cursor.return_value.__enter__.return_value.fetchone.return_value = {"locked": True}
+    monkeypatch.setattr(external_processing, "connect", lambda **_: nullcontext(db))
     monkeypatch.setattr(external_processing, "config", lambda row=None: CONFIG)
     recorded = []
     monkeypatch.setattr(
@@ -301,7 +301,7 @@ def test_preparation_records_ready_state_under_a_lock(monkeypatch):
     factory.assert_called_once_with(CONFIG, compute_settings())
     assert recorded[0]["status"] == "preparing" and recorded[-1]["status"] == "ready"
     assert recorded[-1]["deployed_code"] == "code" and recorded[-1]["deployed_models"] == "models"
-    statements = [call.args[0] for call in db.execute.call_args_list]
+    statements = [call.args[0] for call in db.mock_calls if call[0].endswith("execute")]
     assert any("pg_try_advisory_lock" in s for s in statements) and any(
         "pg_advisory_unlock" in s for s in statements
     )
@@ -789,8 +789,9 @@ def test_settings_report_a_stored_hugging_face_token_without_decrypting_it(monke
         huggingface_token, "token_or_none", Mock(side_effect=AssertionError("decrypted"))
     )
     db = MagicMock()
-    db.execute.return_value.fetchone.return_value = {"stored": True}
+    cursor = db.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value = {"stored": True}
     assert external_processing._has_hf_token(db) is True
-    assert "IS NOT NULL" in db.execute.call_args.args[0]
-    db.execute.return_value.fetchone.return_value = None
+    assert "IS NOT NULL" in cursor.execute.call_args.args[0]
+    cursor.fetchone.return_value = None
     assert external_processing._has_hf_token(db) is False

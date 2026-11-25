@@ -12,12 +12,12 @@ from backend.api.endpoint import Endpoint
 from backend.api.requests import PutRequest
 from backend.api.v1.settings._deps import admin_required
 from backend.api.v1.settings._external_processing import ExternalProcessingView
+from core.db.connection import connect
 from worker.remote.config import RemoteConfig
 from worker.remote.constants import GPU_TYPES
 from worker.remote.session import ModalConfig, workspace
 from worker.remote.settings import (
     _cipher,
-    _connect,
     _has_hf_token,
     _public,
     _record,
@@ -66,7 +66,7 @@ class ExternalProcessingSettingsUpdate(Endpoint):
     def handle(
         self, body: ExternalProcessingUpdate, user: SessionUser = Depends(admin_required)
     ) -> dict:
-        with _connect() as db:
+        with connect() as db:
             current = load(db)
             secret = (
                 body.token_secret.get_secret_value().strip()

@@ -53,3 +53,31 @@ def test_karaoke_and_hum_switches_unbind_karaoke_from_synced_lines(db):
 def test_unknown_switch_is_refused(db):
     with pytest.raises(ValueError, match="Unknown feature switch"):
         store.set_switch(db, "singleton=false; --", True, unbind_karaoke=False)
+
+
+def test_huggingface_token_and_external_processing_round_trip(db):
+    assert store.huggingface_token(db) is None and not store.has_huggingface_token(db)
+    store.save_huggingface_token(db, b"secret", "hcX02")
+    assert store.has_huggingface_token(db)
+    assert store.huggingface_token(db) == {
+        "hf_token_encrypted": b"secret",
+        "hf_token_account": "hcX02",
+    }
+    store.save_huggingface_token(db, None, None)
+    assert not store.has_huggingface_token(db)
+
+    db.execute("""CREATE TEMP TABLE external_processing_settings (
+        singleton boolean PRIMARY KEY, status text, gpu text DEFAULT 'L40S')""")
+    assert store.external_processing(db) is None
+    store.save_external_processing(db, status="ready")
+    store.save_external_processing(db, gpu="H100")
+    assert store.external_processing(db) == {"singleton": True, "status": "ready", "gpu": "H100"}
+
+    assert store.try_advisory_lock(db, 0x5445535421)
+    store.advisory_unlock(db, 0x5445535421)
+
+    db.execute("""CREATE TEMP TABLE jobs (id int, kind text, status text, progress jsonb,
+        error text, created_at timestamptz)""")
+    db.execute("""INSERT INTO jobs VALUES (1, 'modal_setup', 'complete', NULL, NULL, now() - interval '1 hour'),
+        (2, 'modal_setup', 'failed', NULL, 'x', now()), (3, 'other', 'queued', NULL, NULL, now())""")
+    assert store.latest_job(db, "modal_setup")["id"] == 2

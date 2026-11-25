@@ -9,9 +9,11 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+from psycopg import Connection
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, joinedload
 
+from core.db.connection import fetch_one
 from core.db.models import (
     NavidromeConnection,
     OidcAllowedEmail,
@@ -198,3 +200,9 @@ def drop_session(session: Session, token_hash: str) -> None:
 def drop_expired_sessions(session: Session, now: datetime) -> None:
     """Forget every session whose idle deadline has passed."""
     session.execute(delete(UserSession).where(UserSession.expires_at < now))
+
+
+def is_admin(db: Connection, user_id: uuid.UUID) -> bool:
+    """Whether the account is an administrator (on a psycopg connection)."""
+    row = fetch_one(db, "SELECT is_admin FROM users WHERE id=%s", (user_id,))
+    return bool(row and row["is_admin"])

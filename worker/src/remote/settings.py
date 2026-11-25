@@ -14,6 +14,8 @@ from collections.abc import Callable
 from datetime import datetime
 
 from core.db.connection import connect
+from core.settings import store as settings_store
+from core.users import store as users
 from worker.remote.compute import compute_settings
 from worker.remote.config import RemoteConfig
 from worker.remote.constants import GPU_TYPES
@@ -26,16 +28,12 @@ PREPARE_LOCK = 0x45434D4F44414C  # "ECMODAL"
 SETUP_JOB = "modal_setup"
 
 
-def _connect():
-    return connect(dict_rows=True)
-
-
 def load(db=None) -> dict[str, object]:
     """The stored settings row, or defaults when none was saved."""
     if db is None:
-        with _connect() as db:
+        with connect() as db:
             return load(db)
-    row = db.execute("SELECT * FROM external_processing_settings WHERE singleton").fetchone()
+    row = settings_store.external_processing(db)
     return (
         dict(row)
         if row
@@ -92,8 +90,7 @@ def remote_settings() -> dict[str, object]:
 
 
 def _is_admin(db, user_id) -> bool:
-    row = db.execute("SELECT is_admin FROM users WHERE id=%s", (user_id,)).fetchone()
-    return bool(row and row["is_admin"])
+    return users.is_admin(db, user_id)
 
 
 def compute_for(user_id, requested: str | None) -> str:
@@ -103,7 +100,7 @@ def compute_for(user_id, requested: str | None) -> str:
     """
     if requested == "local":
         return "local"
-    with _connect() as db:
+    with connect() as db:
         row = load(db)
         usable = bool(row["enabled"] and row["token_id"] and row["token_secret_encrypted"])
         allowed = usable and (row["allow_users"] or _is_admin(db, user_id))
@@ -115,14 +112,7 @@ def compute_for(user_id, requested: str | None) -> str:
 
 
 def _record(db, **values) -> None:
-    db.execute(
-        "INSERT INTO external_processing_settings (singleton) VALUES (true) ON CONFLICT DO NOTHING"
-    )
-    assignments = ", ".join(f"{name}=%s" for name in values)
-    db.execute(
-        f"UPDATE external_processing_settings SET {assignments} WHERE singleton",
-        tuple(values.values()),
-    )
+    settings_store.save_external_processing(db, **values)
 
 
 def prepare(
@@ -132,12 +122,9 @@ def prepare(
     session_factory=ModalSession,
 ) -> ModalSession:
     """Bring the Modal workspace up to date with this worker, and return a ready session."""
-    with _connect() as db:
-        db.autocommit = True
+    with connect(autocommit=True) as db:
         progress({"phase": "modal", "message": "Waiting for other Modal preparation"})
-        while not db.execute(
-            "SELECT pg_try_advisory_lock(%s) AS locked", (PREPARE_LOCK,)
-        ).fetchone()["locked"]:
+        while not settings_store.try_advisory_lock(db, PREPARE_LOCK):
             check()
             import time
 
@@ -174,7 +161,7 @@ def prepare(
             )
             return session
         finally:
-            db.execute("SELECT pg_advisory_unlock(%s)", (PREPARE_LOCK,))
+            settings_store.advisory_unlock(db, PREPARE_LOCK)
 
 
 def open_session(
@@ -223,18 +210,11 @@ def _public(
 
 def _has_hf_token(db) -> bool:
     """Whether a Hugging Face token is stored; presence only, the token is not decrypted."""
-    row = db.execute(
-        "SELECT hf_token_encrypted IS NOT NULL AS stored FROM analysis_settings WHERE singleton"
-    ).fetchone()
-    return bool(row and row["stored"])
+    return settings_store.has_huggingface_token(db)
 
 
 def _setup_job(db) -> dict[str, object] | None:
-    row = db.execute(
-        """SELECT id, status, progress, error, created_at FROM jobs WHERE kind=%s
-                        ORDER BY created_at DESC LIMIT 1""",
-        (SETUP_JOB,),
-    ).fetchone()
+    row = settings_store.latest_job(db, SETUP_JOB)
     if not row:
         return None
     progress = row["progress"] or {}
