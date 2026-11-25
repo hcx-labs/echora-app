@@ -15,5 +15,5 @@ class LibraryConfig(EchoraConfig, env_prefix="ECHORA_LIBRARY_"):
         0,
         ge=0,
         legacy="ECHORA_SOURCE_RECHECK_SECONDS",
-        description="Revalidate a song's source after this long (0: never).",
+        description="Revalidate a song's source after this long (0: on every full sync).",
     )
