@@ -15,6 +15,7 @@ import httpx
 from openai import APIConnectionError, APIError, APIStatusError, OpenAI, omit
 
 from core.integrations.claude import ClaudeError, complete_json
+from worker.artwork.errors import WriterError
 from worker.artwork.prompts import CAMERA_RETRY, CAMERA_RULE, I2V_SYSTEM_PROMPT
 from worker.artwork.render import clean_prompt, zooms
 
@@ -42,10 +43,6 @@ CLAUDE_ERRORS = {
     "transport_failure": "The prompt writer endpoint is unreachable",
     "refusal": "The prompt writer declined this cover",
 }
-
-
-class WriterError(RuntimeError):
-    """The endpoint failed or returned something that is not a usable prompt."""
 
 
 def _validate(raw: bytes) -> tuple[str, int]:

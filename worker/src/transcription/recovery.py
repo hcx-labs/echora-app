@@ -5,6 +5,8 @@ import logging
 import re
 import tempfile
 
+from worker.transcription.errors import WindowDecodeError
+
 
 def diagnostic_writer(track_id):
     """Keep failed-window text in private, container-local files for investigation."""
@@ -40,14 +42,6 @@ def stalled_segments(text):
         return False
     tail = [(float(a), float(b), t.strip()) for a, t, b in matches[-4:]]
     return len(set(tail)) == 1
-
-
-class WindowDecodeError(ValueError):
-    """A window's transcript could not be decoded; ``tokens`` counts what was generated."""
-
-    def __init__(self, message, tokens=0):
-        super().__init__(message)
-        self.tokens = tokens
 
 
 def recover_window(

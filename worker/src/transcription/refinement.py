@@ -20,6 +20,7 @@ from openai import APIConnectionError, APIError, OpenAI, omit
 
 from core.integrations.claude import ClaudeError, complete_json
 from core.integrations.external_ai import ExternalAISettings
+from worker.transcription.errors import RefinementError
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +52,6 @@ SCHEMA = {
     "required": ["summary", "lines"],
     "additionalProperties": False,
 }
-
-
-class RefinementError(Exception):
-    """The external AI gave no usable refined transcript."""
 
 
 def enabled(settings: ExternalAISettings) -> bool:

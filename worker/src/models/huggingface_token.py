@@ -13,6 +13,7 @@ import psycopg
 
 from core.db.config import require_database_url
 from core.library.config import CredentialsConfig
+from worker.models.errors import TokenRejected
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,6 @@ def _cipher():
     if not key:
         raise RuntimeError("CREDENTIAL_ENCRYPTION_KEY is required")
     return Fernet(key.encode())
-
-
-class TokenRejected(ValueError):
-    """Hugging Face refused the token."""
 
 
 def account(token: str) -> str:

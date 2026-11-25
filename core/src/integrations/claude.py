@@ -12,10 +12,12 @@ from __future__ import annotations
 import anthropic
 import httpx2
 
+from core.errors import IntegrationError
+
 DEFAULT_BASE_URL = "https://api.anthropic.com"
 
 
-class ClaudeError(Exception):
+class ClaudeError(IntegrationError):
     """A failed Claude request, by code.
 
     `code` is one of: missing_key, endpoint_failure, transport_failure, refusal,

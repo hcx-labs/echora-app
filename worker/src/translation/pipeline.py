@@ -10,7 +10,6 @@ import psycopg
 from psycopg.rows import dict_row
 
 from core.db.config import require_database_url
-from core.errors import ProcessingError
 from core.integrations.external_ai import LanguagePair
 from core.library.connections import credential_cipher
 from core.lyrics.translations import (
@@ -23,6 +22,7 @@ from core.lyrics.translations import (
 from worker.kara.aligner import label_rules
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
 from worker.translation.client import translate
+from worker.translation.errors import TranslationFailedError
 
 logger = logging.getLogger(__name__)
 
@@ -96,10 +96,6 @@ class TranslationItem(Item):
     pair: LanguagePair
     foreign: tuple[int, ...] | None = None
     """For a song already in the target language: the lines in other languages, else None."""
-
-
-class TranslationFailedError(ProcessingError):
-    """The endpoint gave no usable translation. ``stage`` is the safe error code."""
 
 
 class TranslationProcessor(Processor[None, TranslationItem, list[dict]]):

@@ -18,13 +18,7 @@ from pathlib import Path
 
 import httpx
 
-
-class ComfyUIError(RuntimeError):
-    """ComfyUI rejected a graph, failed while running it, or is unreachable."""
-
-
-class ComfyUIUnavailable(ComfyUIError):
-    """ComfyUI is not installed here, could not start, or cannot be reached."""
+from worker.artwork.errors import ComfyUIError, ComfyUIUnavailable
 
 
 def model_paths_config() -> str:

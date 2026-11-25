@@ -15,6 +15,7 @@ from uuid import UUID, uuid4
 
 import core.jobs.queue as jobs
 from worker.recordings.config import RecordingConfig
+from worker.recordings.errors import CalibrationDisabled, TrackUnavailable
 from worker.recordings.search import SAMPLE_RATE, QueueFull, decode_query
 
 CONSENT_VERSION = "save-for-calibration-v1"
@@ -30,14 +31,6 @@ _PUBLIC = (
     "expected_title",
     "expected_artist",
 )
-
-
-class CalibrationDisabled(ValueError):
-    """Recording calibration is switched off."""
-
-
-class TrackUnavailable(ValueError):
-    """A calibration song cannot be read."""
 
 
 def enabled() -> bool:

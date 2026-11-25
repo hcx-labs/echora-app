@@ -13,10 +13,11 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from core.db.config import require_database_url
+from core.errors import EchoraError
 from core.integrations.external_ai import ExternalAISettings, LanguagePair
 
 
-class TranslationError(ValueError):
+class TranslationError(EchoraError, ValueError):
     """Safe error code only: never expose remote bodies, lyrics or keys."""
 
 

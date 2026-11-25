@@ -19,13 +19,10 @@ from psycopg.types.json import Jsonb
 
 import core.jobs.queue as jobs
 from worker.recordings.config import RecordingConfig
+from worker.recordings.errors import QueueFull
 
 MAX_CLIP_SECONDS = 20
 SAMPLE_RATE = 8000
-
-
-class QueueFull(ValueError):
-    """Too many recording searches are waiting."""
 
 
 def search_configuration():

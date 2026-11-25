@@ -36,6 +36,7 @@ from core.integrations.external_ai import ExternalAISettings
 from core.library.connections import credential_cipher
 from core.revisions import LYRIC_THEMES_REVISION
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
+from worker.themes.errors import ThemeError
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +65,6 @@ SCHEMA = {
     "additionalProperties": False,
 }
 PROMPT_REVISION = LYRIC_THEMES_REVISION
-
-
-class ThemeError(Exception):
-    """The external AI gave no usable theme description."""
 
 
 def enabled(settings: ExternalAISettings) -> bool:
