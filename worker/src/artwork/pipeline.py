@@ -17,6 +17,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
+from typing import Any
 from pathlib import Path
 
 import psycopg
@@ -24,6 +25,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from core.db.config import DatabaseConfig
+from core.errors import InputUnavailableError
 from core.library.connections import credential_cipher
 from core.media.config import MotionArtworkConfig
 from worker.artwork.comfyui import ComfyUI, ComfyUIError, ComfyUIUnavailable, launch, output_items
@@ -42,6 +44,7 @@ from worker.artwork.render import (
     zooms,
 )
 from worker.artwork.settings import MotionArtworkSettings, artwork_path, load_settings
+from worker.processing import Item, ItemResult, ProcessingContext, Processor
 
 logger = logging.getLogger(__name__)
 # Covers are fetched at a fixed size so a cover's identity does not depend on render settings.
@@ -253,159 +256,217 @@ def _cover_locks(cover_sha256s: list[str]):
                 )
 
 
-def render_batch(
-    credentials: tuple[str, str, str],
-    user_id,
-    external_ids: list[str],
-    *,
-    mode: str = "missing",
-    progress: Callable[[dict], None],
-    check: Callable[[], None],
-    prompts: dict | None = None,
-) -> dict | None:
-    """Render missing loops for a sync or import batch's tracks.
+class ArtworkItem(Item):
+    """A song of the batch, with what its loop's prompt may use."""
 
-    `prompts` are those prepare_prompts wrote at the start of the batch, keyed by
-    (external ID, cover SHA-256); covers without one get their prompt written here.
+    track: dict[str, Any]
+    """plan_tracks' row: track_id, external_id, title, album, artist, cover_art_id, lyrics."""
 
-    None when motion artwork is disabled or not generated in syncs at the batch's location (this
-    server or Modal). Loops made with other settings are kept unless the regenerate-outdated
-    setting is on. `mode="all"` also replaces loops that already exist for the current settings.
+
+class MotionArtworkProcessor(Processor[None, ArtworkItem, dict]):
+    """Renders the missing motion artwork loops of a sync or import batch's songs.
+
+    Runs only when motion artwork is on and generated in syncs at the batch's location (this
+    server or Modal); otherwise ``enabled`` is false and the batch summary has no
+    ``motion_artwork`` key. Loops made with other settings are kept unless the
+    regenerate-outdated setting is on; ``mode="all"`` also replaces current loops. Prompts
+    written by ``prepare_prompts`` (keyed by external id, cover SHA-256 and recipe) are used;
+    covers without one get theirs written here. Rendering runs in phases across every cover (see
+    ``render_loops``), so results arrive as each phase finishes. A failed render is stored as
+    failed (outcome ``failed`` with an output). ComfyUI being unavailable is not an error: the
+    stage stops and reports ``unavailable``.
     """
-    from core.compute import location
-    from core.integrations.navidrome import NavidromeClient
-    from worker.remote.session import current as current_remote
 
-    with _connect() as connection, connection.cursor() as cursor:
-        settings = load_settings(cursor)
-        on_modal = location() == "modal"
-        if not (
-            settings.enabled
-            and (settings.generate_on_modal if on_modal else settings.generate_during_sync)
-        ):
-            return None
-        tracks = plan_tracks(cursor, user_id, credentials[0], external_ids)
-    recipe = settings.recipe()
-    summary = {"tracks": len(tracks), "rendered": 0, "reused": 0, "errors": 0}
-    pending: dict[str, dict] = {}
-    cover_cache: dict[str, tuple[bytes, str]] = {}
-    with NavidromeClient(*credentials) as navidrome:
-        for index, track in enumerate(tracks):
-            check()
-            progress(
-                {
-                    "phase": "motion-artwork",
-                    "message": "Checking track artwork",
-                    "completed": index,
-                    "total": len(tracks),
-                    "unit": "tracks",
-                }
-            )
-            try:
-                if track["cover_art_id"] not in cover_cache:
-                    cover_cache[track["cover_art_id"]] = navidrome.cover_art(
-                        track["cover_art_id"], COVER_FETCH_SIZE
-                    )
-                data, content_type = cover_cache[track["cover_art_id"]]
-            except Exception:
-                summary["errors"] += 1
-                continue
-            cover_sha = hashlib.sha256(data).hexdigest()
-            asset_key = hashlib.sha256(f"{cover_sha}:{track['track_id']}".encode()).hexdigest()
-            with _connect() as connection, connection.cursor() as cursor:
-                cursor.execute(
-                    """INSERT INTO track_motion_artwork (track_id, cover_sha256, cover_art_id, checked_at)
-                       VALUES (%s,%s,%s,now()) ON CONFLICT (track_id) DO UPDATE SET
-                         cover_sha256=EXCLUDED.cover_sha256, cover_art_id=EXCLUDED.cover_art_id, checked_at=now()""",
-                    (track["track_id"], asset_key, track["cover_art_id"]),
-                )
-            if mode == "missing" and _complete(asset_key, recipe, settings.regenerate_outdated):
-                summary["reused"] += 1
-                continue
-            pending[asset_key] = {
-                **track,
-                "sha256": asset_key,
-                "cover_sha256": cover_sha,
-                "data": data,
-                "content_type": content_type,
-            }
-    if not pending:
-        return summary
-    covers = list(pending.values())
-    for cover in covers:
-        cover["seed"] = recipe.seed if recipe.seed is not None else secrets.randbelow(2**31)
-        if recipe.prompt_mode == "fixed":
-            cover["prompt"] = (
-                recipe.fixed_prompt.replace("{title}", cover["title"] or "")
-                .replace("{album}", cover["album"] or "")
-                .replace("{artist}", cover["artist"] or "")
-                .replace("{lyrics}", cover["lyrics"] or "")
-            )
+    name = "motion-artwork"
+    summary_key = "motion_artwork"
+    counters = ("rendered", "reused")
+    total_key = "tracks"
+    failure_key = "errors"
+    activity = "Rendering motion artwork"
 
-    def failed(cover: dict, error: Exception | str) -> None:
+    def __init__(self, mode: str = "missing", prompts: dict | None = None) -> None:
+        super().__init__()
+        self.mode = mode
+        self.prompts = prompts or {}
+        self.enabled = False
+        self.timings: dict | None = None
+        self.unavailable: str | None = None
+
+    def plan(self, context: ProcessingContext) -> list[ArtworkItem]:
         with _connect() as connection, connection.cursor() as cursor:
-            _record(
-                cursor,
-                cover_sha256=cover["sha256"],
-                recipe=recipe,
-                status="failed",
-                error=str(error)[:500],
+            self.settings = load_settings(cursor)
+            self.on_modal = context.location == "modal"
+            self.enabled = self.settings.enabled and (
+                self.settings.generate_on_modal
+                if self.on_modal
+                else self.settings.generate_during_sync
             )
-        summary["errors"] += 1
-        cover["failed"] = True
-
-    with _cover_locks([cover["sha256"] for cover in covers]) as owned:
-        # Another worker is rendering a cover, or finished it meanwhile.
-        ready = [
-            cover
-            for cover in covers
-            if cover["sha256"] in owned
-            and not (
-                mode == "missing"
-                and _complete(cover["sha256"], recipe, settings.regenerate_outdated)
+            if not self.enabled:
+                return []
+            tracks = plan_tracks(
+                cursor, context.user_id, context.library_url, list(context.track_ids)
             )
+        self.recipe = self.settings.recipe()
+        return [
+            ArtworkItem(key=str(track["track_id"]), label=_label(track), track=dict(track))
+            for track in tracks
         ]
-        summary["reused"] += len(covers) - len(ready)
-        by_sha = {cover["sha256"]: cover for cover in ready}
-        try:
-            if ready and recipe.prompt_mode == "external":
-                # Prompts written at the start of the batch, before any GPU stage.
-                for cover in ready:
-                    # Keyed by recipe too: a prompt written for other settings is not reused.
-                    prepared = (prompts or {}).get(
-                        (cover["external_id"], cover["cover_sha256"], recipe.hash())
+
+    def process(self, context, items):
+        from core.integrations.navidrome import NavidromeClient
+
+        recipe, settings = self.recipe, self.settings
+        pending: list[tuple[ArtworkItem, dict]] = []
+        cover_cache: dict[str, tuple[bytes, str]] = {}
+        with NavidromeClient(*context.library) as navidrome:
+            for index, item in enumerate(items):
+                context.check()
+                context.publish(
+                    {
+                        "phase": "motion-artwork",
+                        "message": "Checking track artwork",
+                        "completed": index,
+                        "total": len(items),
+                        "unit": "tracks",
+                    }
+                )
+                track = item.track
+                try:
+                    if track["cover_art_id"] not in cover_cache:
+                        cover_cache[track["cover_art_id"]] = navidrome.cover_art(
+                            track["cover_art_id"], COVER_FETCH_SIZE
+                        )
+                    data, content_type = cover_cache[track["cover_art_id"]]
+                except Exception:  # noqa: BLE001 - one song's cover
+                    yield ItemResult.failed(item, InputUnavailableError("Cover unavailable"))
+                    continue
+                cover_sha = hashlib.sha256(data).hexdigest()
+                asset_key = hashlib.sha256(f"{cover_sha}:{track['track_id']}".encode()).hexdigest()
+                with _connect() as connection, connection.cursor() as cursor:
+                    cursor.execute(
+                        """INSERT INTO track_motion_artwork (track_id, cover_sha256, cover_art_id, checked_at)
+                           VALUES (%s,%s,%s,now()) ON CONFLICT (track_id) DO UPDATE SET
+                             cover_sha256=EXCLUDED.cover_sha256, cover_art_id=EXCLUDED.cover_art_id, checked_at=now()""",
+                        (track["track_id"], asset_key, track["cover_art_id"]),
                     )
-                    if prepared:
-                        cover.update(prepared)
-                unwritten = [cover for cover in ready if not cover.get("prompt")]
-                if unwritten:
-                    # External AI is reached from this server in both locations.
-                    _write_external_prompts(recipe, unwritten, progress, check, failed)
-            if ready:
-                if on_modal:
-                    remote = current_remote()
-                    if remote is None:
-                        raise ComfyUIUnavailable("Modal is not connected for this batch")
-                    events = remote.motion_artwork(settings, recipe, ready)
+                if self.mode == "missing" and _complete(
+                    asset_key, recipe, settings.regenerate_outdated
+                ):
+                    yield ItemResult(item=item, outcome="reused")
+                    continue
+                cover = {
+                    **track,
+                    "sha256": asset_key,
+                    "cover_sha256": cover_sha,
+                    "data": data,
+                    "content_type": content_type,
+                }
+                pending.append((item, cover))
+        if not pending:
+            return
+        for _, cover in pending:
+            cover["seed"] = recipe.seed if recipe.seed is not None else secrets.randbelow(2**31)
+            if recipe.prompt_mode == "fixed":
+                cover["prompt"] = (
+                    recipe.fixed_prompt.replace("{title}", cover["title"] or "")
+                    .replace("{album}", cover["album"] or "")
+                    .replace("{artist}", cover["artist"] or "")
+                    .replace("{lyrics}", cover["lyrics"] or "")
+                )
+        yield from self._render(context, pending)
+
+    def _render(self, context, pending):
+        recipe, settings = self.recipe, self.settings
+        failures: list[tuple[dict, str]] = []
+
+        def failed(cover: dict, error: Exception | str) -> None:
+            cover["failed"] = True
+            failures.append((cover, str(error)[:500]))
+
+        def drain():
+            while failures:
+                cover, error = failures.pop(0)
+                yield ItemResult(
+                    item=self.items[cover["sha256"]], outcome="failed", output={"error": error}
+                )
+
+        self.items = {cover["sha256"]: item for item, cover in pending}
+        self.covers = {cover["sha256"]: cover for _, cover in pending}
+        self.cover_keys = {item.key: cover["sha256"] for item, cover in pending}
+        with _cover_locks(list(self.covers)) as owned:
+            # Another worker is rendering a cover, or finished it meanwhile.
+            ready = []
+            for sha, cover in self.covers.items():
+                if sha in owned and not (
+                    self.mode == "missing" and _complete(sha, recipe, settings.regenerate_outdated)
+                ):
+                    ready.append(cover)
                 else:
-                    events = render_loops(settings, recipe, ready, check)
+                    yield ItemResult(item=self.items[sha], outcome="reused")
+            try:
+                if ready and recipe.prompt_mode == "external":
+                    # Prompts written at the start of the batch, before any GPU stage.
+                    for cover in ready:
+                        # Keyed by recipe too: a prompt written for other settings is not reused.
+                        prepared = self.prompts.get(
+                            (cover["external_id"], cover["cover_sha256"], recipe.hash())
+                        )
+                        if prepared:
+                            cover.update(prepared)
+                    unwritten = [cover for cover in ready if not cover.get("prompt")]
+                    if unwritten:
+                        # External AI is reached from this server in both locations.
+                        _write_external_prompts(
+                            recipe, unwritten, context.publish, context.check, failed
+                        )
+                    yield from drain()
+                if not ready:
+                    return
+                if self.on_modal:
+                    if context.remote is None:
+                        raise ComfyUIUnavailable("Modal is not connected for this batch")
+                    events = context.remote.motion_artwork(settings, recipe, ready)
+                else:
+                    events = render_loops(settings, recipe, ready, context.check)
                 for event in events:
-                    check()
+                    context.check()
                     if "progress" in event:
-                        progress(event["progress"])
+                        context.publish(event["progress"])
                     elif "failed" in event:
-                        failed(by_sha[event["failed"]], event["error"])
+                        failed(self.covers[event["failed"]], event["error"])
+                        yield from drain()
                     elif "rendered" in event:
-                        cover = by_sha[event["rendered"]]
-                        _store(cover, recipe, event)
-                        summary["rendered"] += 1
+                        # The file is in a working directory: persist() moves it right away.
+                        item = self.items[event["rendered"]]
+                        yield ItemResult(item=item, outcome="rendered", output=event)
                     elif "timings" in event:
-                        summary["timings"] = event["timings"]
-        except ComfyUIUnavailable as error:
-            # Motion artwork is optional: the rest of the batch has already finished.
-            logger.warning("Motion artwork skipped: %s", error)
-            summary["unavailable"] = str(error)
-    return summary
+                        self.timings = event["timings"]
+            except ComfyUIUnavailable as error:
+                # Motion artwork is optional: the rest of the batch has already finished.
+                logger.warning("Motion artwork skipped: %s", error)
+                self.unavailable = str(error)
+
+    def persist(self, context, item: ArtworkItem, output: dict) -> None:
+        cover = self.covers[self.cover_keys[item.key]]
+        if "error" in output:
+            with _connect() as connection, connection.cursor() as cursor:
+                _record(
+                    cursor,
+                    cover_sha256=cover["sha256"],
+                    recipe=self.recipe,
+                    status="failed",
+                    error=output["error"],
+                )
+        else:
+            _store(cover, self.recipe, output)
+
+    def facts(self) -> dict[str, object]:
+        facts: dict[str, object] = {}
+        if self.timings is not None:
+            facts["timings"] = self.timings
+        if self.unavailable is not None:
+            facts["unavailable"] = self.unavailable
+        return facts
 
 
 def prepare_prompts(
@@ -423,7 +484,7 @@ def prepare_prompts(
     regenerate-outdated setting, only those whose loop has the current recipe). A
     brand-new song is prompted with the lyrics Navidrome has now; one that is
     transcribed later in the batch is prompted without lyrics.
-    Returns prompts keyed by (external ID, cover SHA-256, recipe hash) for render_batch, or None
+    Returns prompts keyed by (external ID, cover SHA-256, recipe hash) for MotionArtworkProcessor, or None
     when motion artwork does not run here or writes no External AI prompts.
     """
     from core.compute import location

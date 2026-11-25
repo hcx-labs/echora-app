@@ -191,17 +191,12 @@ def _prepare_artwork_prompts(batch: Batch) -> Any:
 
 
 def _motion_artwork(batch: Batch) -> dict[str, Any]:
-    from worker.artwork.pipeline import render_batch
+    from worker.artwork.pipeline import MotionArtworkProcessor
 
-    artwork = render_batch(
-        batch.library,
-        batch.user_id,
-        batch.track_ids,
-        progress=batch.report,
-        check=batch.check,
-        prompts=batch.prepared.get("motion_artwork"),
-    )
-    return {} if artwork is None else {"motion_artwork": artwork}
+    processor = MotionArtworkProcessor(prompts=batch.prepared.get("motion_artwork"))
+    summary = run_stage(processor, batch.context()).as_dict()
+    # Off at this location: the batch summary has no motion artwork key.
+    return {"motion_artwork": summary} if processor.enabled else {}
 
 
 def _fingerprint_processor() -> Processor:

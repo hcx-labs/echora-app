@@ -499,14 +499,21 @@ def batch(database, monkeypatch):
     monkeypatch.setattr("core.integrations.navidrome.NavidromeClient", FakeNavidrome)
 
     def run(**options):
-        return motion_artwork_jobs.render_batch(
-            ("http://navidrome", "u", "p"),
-            owner,
-            external_ids,
-            progress=lambda update: None,
-            check=lambda: None,
-            **options,
+        """The motion artwork stage's summary for the batch, or None when it does not run."""
+        from core.compute import location
+        from worker.processing import ProcessingContext, run_stage
+        from worker.remote.session import current
+
+        context = ProcessingContext(
+            location=location(),
+            remote=current(),
+            user_id=owner,
+            library=("http://navidrome", "u", "p"),
+            track_ids=tuple(external_ids),
         )
+        processor = motion_artwork_jobs.MotionArtworkProcessor(**options)
+        summary = run_stage(processor, context).as_dict()
+        return summary if processor.enabled else None
 
     return {"owner": owner, "library": library, "external_ids": external_ids, "run": run}
 
