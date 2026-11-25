@@ -10,6 +10,7 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from core.db.connection import connect
 from core.errors import NotFoundError
+from core.plugin import store
 
 
 class RevokePluginKey(Endpoint):
@@ -20,12 +21,7 @@ class RevokePluginKey(Endpoint):
     status_code = 204
 
     def handle(self, key_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> Response:
-        with connect(dict_rows=True) as db:
-            row = db.execute(
-                """UPDATE navidrome_api_keys SET revoked_at=coalesce(revoked_at,now())
-                WHERE id=%s AND user_id=%s RETURNING id""",
-                (key_id, user["id"]),
-            ).fetchone()
-            if row is None:
+        with connect() as db:
+            if not store.revoke_key(db, key_id, user["id"]):
                 raise NotFoundError("Integration key not found")
         return Response(status_code=204)

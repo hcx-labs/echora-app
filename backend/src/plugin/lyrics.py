@@ -11,9 +11,11 @@ from xml.etree import ElementTree as ET
 
 from backend.plugin.scope import library_namespace
 from core.db.connection import connect
+from core.lyrics import store as lyrics
 from core.lyrics.backing import BACKING_VOICE, separate_text, separate_voices, tag_bracketed_backing
 from core.lyrics.sources import lyrics_paused
 from core.lyrics.translations import source_checksum
+from core.plugin import store
 
 TT = "http://www.w3.org/ns/ttml"
 TTM = "http://www.w3.org/ns/ttml#metadata"
@@ -267,25 +269,6 @@ def load_lyrics(principal, source_id):
             # Empty is Navidrome's normal provider fallback signal. Never change
             # the saved preference or revoke the key to suppress lyrics alone.
             return {"lyrics": []}
-        row = db.execute(
-            """SELECT t.id,l.text,l.language,l.provenance,k.lines AS karaoke_lines
-            FROM user_source_memberships visible
-            JOIN libraries lib ON lib.id=visible.library_id AND lib.namespace=%s
-            JOIN track_sources ts ON ts.library_id=visible.library_id AND ts.external_id=visible.external_id
-                AND ts.source_type='subsonic'
-            JOIN tracks t ON t.id=ts.track_id
-            LEFT JOIN lyrics l ON l.track_id=t.id
-            LEFT JOIN karaoke_lyrics_variants k ON k.track_id=t.id AND k.bounded=false
-            WHERE visible.user_id=%s AND visible.external_id=%s LIMIT 1""",
-            (library_namespace(principal), principal["user_id"], source_id),
-        ).fetchone()
-        translations = (
-            db.execute(
-                """SELECT * FROM lyric_translations
-            WHERE track_id=%s AND status='ready' ORDER BY target_language,provenance""",
-                (row["id"],),
-            ).fetchall()
-            if row
-            else []
-        )
+        row = store.song_lyrics(db, principal["user_id"], library_namespace(principal), source_id)
+        translations = lyrics.ready_translations(db, row["id"]) if row else []
     return lyrics_response(row, translations, principal["profile"])

@@ -10,7 +10,7 @@ from typing import Any, TypedDict, cast
 
 from psycopg import Connection
 
-from core.db.connection import fetch_one
+from core.db.connection import fetch_all, fetch_one
 
 
 class LyricsText(TypedDict):
@@ -160,3 +160,13 @@ def synced_without_karaoke(db: Connection, pipeline_revision: str) -> int:
         (pipeline_revision,),
     )
     return int(row["pending"]) if row else 0
+
+
+def ready_translations(db: Connection, track_id: uuid.UUID) -> list[dict[str, Any]]:
+    """The song's ready translations by target language (every stored column)."""
+    return fetch_all(
+        db,
+        """SELECT * FROM lyric_translations
+        WHERE track_id=%s AND status='ready' ORDER BY target_language,provenance""",
+        (track_id,),
+    )

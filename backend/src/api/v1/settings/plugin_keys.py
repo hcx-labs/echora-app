@@ -11,6 +11,7 @@ from backend.api.requests import PostRequest
 from backend.api.v1.settings._plugin import GeneratedKey
 from backend.settings.plugin_integration import issue_key, profile_from
 from core.db.connection import connect
+from core.plugin import store
 
 
 class KeyCreate(PostRequest):
@@ -34,10 +35,8 @@ class CreatePluginKey(Endpoint):
     ) -> dict[str, object]:
         response.headers["Cache-Control"] = "no-store"
         with connect(dict_rows=True) as db:
-            db.execute("SELECT id FROM users WHERE id=%s FOR UPDATE", (user["id"],))
-            row = db.execute(
-                "SELECT * FROM navidrome_integrations WHERE user_id=%s", (user["id"],)
-            ).fetchone()
+            store.lock_owner(db, user["id"])
+            row = store.integration(db, user["id"])
             if not row or not row["enabled"] or not row["connection_id"]:
                 raise HTTPException(400, "Enable the integration before generating keys")
             return issue_key(

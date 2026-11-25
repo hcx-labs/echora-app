@@ -19,6 +19,9 @@ class FakeDb:
     def fetchone(self):
         return self.rows.pop(0) if self.rows else None
 
+    def cursor(self, **_):
+        return self
+
     def __enter__(self):
         return self
 
