@@ -179,6 +179,7 @@ def test_worker_aligns_the_audio_as_given_without_line_times(
         assert request.timing_offset_ms == 0
         assert not request.gap_onset_pull and request.inline_backing
         assert not request.optional_brackets
+        assert (request.text_bonus, request.in_line_gap_cost) == (0.4, 0.2)
         return {
             "ok": True,
             "document": {
@@ -593,7 +594,7 @@ def test_overlap_between_lines_is_not_a_second_voice():
     assert all("voice" not in s for line in lines for s in line["syllables"])
 
 
-def test_worker_environment_carries_the_decoder_weights(monkeypatch, tmp_path):
+def test_worker_is_replaced_when_the_text_head_is_needed(monkeypatch, tmp_path):
     reset_config_cache()
     seen = []
 
@@ -612,13 +613,14 @@ def test_worker_environment_carries_the_decoder_weights(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline, "_FA_KARA_WORKER", None)
     monkeypatch.setattr(pipeline, "_FA_KARA_WORKER_KEY", None)
     worker = pipeline._fa_kara_worker("revision")
-    assert (seen[0]["FA_KARA_TEXT_BONUS"], seen[0]["FA_KARA_IN_LINE_GAP_COST"]) == ("0.4", "0.2")
     assert pipeline._fa_kara_worker("revision") is worker and len(seen) == 1
-    # A changed weight is a different decoder: the worker is replaced.
+    # Another bonus still uses the text head: same worker. No bonus: a worker without it.
     monkeypatch.setenv("FA_KARA_TEXT_BONUS", "0.1")
     reset_config_cache()
-    assert pipeline._fa_kara_worker("revision") is not worker
-    assert seen[-1]["FA_KARA_TEXT_BONUS"] == "0.1" and "terminated" in seen
+    assert pipeline._fa_kara_worker("revision") is worker
+    monkeypatch.setenv("FA_KARA_TEXT_BONUS", "0")
+    reset_config_cache()
+    assert pipeline._fa_kara_worker("revision") is not worker and "terminated" in seen
     reset_config_cache()
 
 

@@ -360,13 +360,8 @@ def _validate_alignment_document(document: object) -> dict[str, object]:
 
 def _fa_kara_worker(model_revision: str) -> subprocess.Popen[str]:
     global _FA_KARA_WORKER, _FA_KARA_WORKER_KEY
-    # The decoder reads these two from its environment (the text head is loaded only when the
-    # bonus is on), so they belong to the worker's identity.
-    decoder_environment = {
-        "FA_KARA_TEXT_BONUS": str(KaraConfig.load().text_bonus),
-        "FA_KARA_IN_LINE_GAP_COST": str(KaraConfig.load().in_line_gap_cost),
-    }
-    key = (model_revision, *decoder_environment.values())
+    # A worker holds one checkpoint, with or without its text head (loaded for a text bonus).
+    key = (model_revision, KaraConfig.load().text_bonus > 0)
     if (
         _FA_KARA_WORKER is not None
         and _FA_KARA_WORKER.poll() is None
@@ -382,7 +377,6 @@ def _fa_kara_worker(model_revision: str) -> subprocess.Popen[str]:
         "NUMBA_CACHE_DIR": str(numba_cache),
         # The worker imports this package as the parent process does.
         "PYTHONPATH": os.pathsep.join(filter(None, [*sys.path, os.environ.get("PYTHONPATH")])),
-        **decoder_environment,
     }
     _FA_KARA_WORKER = subprocess.Popen(
         [sys.executable, "-m", "worker.kara.aligner.worker"],
@@ -518,7 +512,6 @@ def _run_fa_kara(
         input_text = "\n".join(line_texts) if line_texts else lyrics_text.rstrip("\r\n")
         config = KaraConfig.load()
         languages = fa_kara_languages(config.label_rules)
-        external_activity = os.environ.get("FA_KARA_VOCAL_ACTIVITY_FILE")
         request = AlignRequest(
             audio_path=str(audio_path),
             text=input_text,
@@ -540,11 +533,8 @@ def _run_fa_kara(
             blank_free_tokens=config.blank_free_tokens,
             inline_backing=config.inline_backing,
             gap_onset_pull=config.gap_onset_pull,
-            # Experiment, off: inline bracketed words may leave the lead path. It did not help.
-            optional_brackets=os.environ.get("FA_KARA_OPTIONAL_BRACKETS") == "1",
-            # Listening tests: activity from another model on the same mix (listen_align_mix.py).
-            vocal_activity_source="external" if external_activity else "energy",
-            vocal_activity_file=external_activity or None,
+            text_bonus=config.text_bonus,
+            in_line_gap_cost=config.in_line_gap_cost,
             fusion=config.fusion,
             audio_speed=config.audio_speed,
         )

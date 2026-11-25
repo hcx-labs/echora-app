@@ -43,5 +43,9 @@ class AlignRequest(BaseModel):
     optional_brackets: bool = False
     """Experiment, off: inline bracketed words may leave the lead path."""
     gap_onset_pull: bool = False
+    text_bonus: float = 0.0
+    """Weight of the checkpoint's text head in the lead decode (0: not loaded)."""
+    in_line_gap_cost: float = 0.0
+    """Cost per blank frame inside a line."""
     fusion: Literal["off", "on", "gate0"] = "off"
     audio_speed: float = 1.0

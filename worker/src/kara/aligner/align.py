@@ -193,7 +193,7 @@ def align(request: AlignRequest) -> dict:
     audio_channels, sr = _read_audio(request.audio_path)
     y_processed = _time_stretch(audio_channels.mean(axis=1), request.audio_speed)
     print("Aligning...")
-    from worker.kara.aligner.decoder import align_audio_with_timeline
+    from worker.kara.aligner.decoder import MAX_BLANK_HOLD_SECONDS, align_audio_with_timeline
 
     opening_backing_lines = set()
     background_lines = None
@@ -209,8 +209,8 @@ def align(request: AlignRequest) -> dict:
         # hears them and the background head does not ("Ah-ah" over an intro): placed on the
         # background head they were squeezed against the first lead line, whose first word took
         # the intro instead. Keep them on the lead path, in order; they stay backing lines for
-        # display. FA_KARA_B0_OPENING_ON_LEAD=0 puts them back on the background head.
-        if os.environ.get("FA_KARA_B0_OPENING_ON_LEAD", "1") == "1" and not all(background_lines):
+        # display.
+        if not all(background_lines):
             with_tokens = [i for i, tokens in enumerate(alignment_token_lines) if tokens]
             for position, flag in enumerate(background_lines):
                 if not flag:
@@ -248,6 +248,8 @@ def align(request: AlignRequest) -> dict:
         optional_tokens=inline_flags() if request.optional_brackets else None,
         inline_backing_tokens=inline_flags() if request.inline_backing else None,
         gap_onset_pull=request.gap_onset_pull,
+        text_bonus=request.text_bonus,
+        in_line_gap_cost=request.in_line_gap_cost,
         fusion=request.fusion,
     )
     if len(alignment_results) != len(alignment_tokens):
@@ -333,7 +335,6 @@ def align(request: AlignRequest) -> dict:
             "inference_passes": max(
                 (int(result.get("inference_passes", 1)) for result in alignment_results), default=0
             ),
-            "line_count": len(canonical_lines),
             "token_count": len(finite_scores),
             "mean_ctc_score": sum(finite_scores) / len(finite_scores) if finite_scores else 0.0,
             "minimum_ctc_score": min(finite_scores) if finite_scores else 0.0,
@@ -349,9 +350,7 @@ def align(request: AlignRequest) -> dict:
             "checkpoint_identity": file_identity(hf_model_path)
             if hf_model_path and os.path.exists(hf_model_path)
             else None,
-            "max_blank_hold_seconds": float(
-                os.environ.get("FA_KARA_MAX_BLANK_HOLD_SECONDS", "0.2")
-            ),
+            "max_blank_hold_seconds": MAX_BLANK_HOLD_SECONDS,
             "model_path": hf_model_path,
             "device": "cuda" if __import__("torch").cuda.is_available() else "cpu",
             "normalization_language": language,

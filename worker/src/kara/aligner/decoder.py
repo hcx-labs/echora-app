@@ -1,11 +1,8 @@
 import logging
 import os
-from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import cast
 
 import math
-import time
 
 import torch
 import torchaudio
@@ -14,7 +11,6 @@ from torchaudio.functional import (
     merge_tokens,
     resample,
 )
-from torchaudio.pipelines import MMS_FA
 from torchaudio.pipelines._wav2vec2 import aligner
 from transformers import (
     AutoConfig,
@@ -44,56 +40,17 @@ AUX_HEADS_FILE = "aux_heads.safetensors"
 F0_BINS = 360
 VOCAL_ACTIVITY_SOURCES = ("energy", "vad", "external")
 
+CHUNK_OVERLAP_SECONDS = 2
+"""Context shared by adjacent 45 s chunks (half kept on each side)."""
+MAX_BLANK_HOLD_SECONDS = 0.2
+"""How long a word's display end may hold through the blank frames after it."""
+LINE_END_EXTEND_SECONDS = 1.2
+"""How far a line's last word may extend through frames where its letters outscore blank."""
+
 logger = logging.getLogger(__name__)
 
 TokenizerFn = Callable[[list[str]], list[list[int]]]
-_WAV2VEC_ALIGNER_CACHE: dict[tuple[str, bool], "Wav2Vec2ForcedAligner"] = {}
-_MMS_ALIGNER_CACHE: "TorchAudioForcedAligner | None" = None
-
-
-class ForcedAligner(ABC):
-    @abstractmethod
-    def tokenize(
-        self,
-        batch: list[str],
-    ) -> list[list[int]]: ...
-
-    @abstractmethod
-    def align(
-        self,
-        tokens: list[list[int]],
-        waveform: torch.Tensor,
-        sample_rate: int,
-    ) -> tuple[torch.Tensor, list[list[TokenSpan]], int]: ...
-
-
-class TorchAudioForcedAligner(ForcedAligner):
-    """
-    https://pytorch.org/audio/stable/tutorials/forced_alignment_for_multilingual_data_tutorial.html
-    """
-
-    bundle = MMS_FA
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.tokenizer = self.bundle.get_tokenizer()
-        self.model = self.bundle.get_model()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # pyright: ignore[reportPrivateImportUsage]
-        self.model.to(self.device)
-        self.aligner = self.bundle.get_aligner()
-
-    def tokenize(self, batch: list[str]):
-        return cast(list[list[int]], self.tokenizer(batch))
-
-    def align(self, tokens: list[list[int]], waveform: torch.Tensor, sample_rate: int):
-        logger.info(f"TorchAudioForcedAligner: running MMS_FA on {self.device}")
-        waveform = resample(waveform, sample_rate, int(self.bundle.sample_rate))
-        waveform = waveform.mean(0, keepdim=True)
-        with torch.inference_mode():
-            emission, _ = self.model(waveform.to(self.device))
-            emission = cast(torch.Tensor, emission)
-        token_spans = self.aligner(emission[0], tokens)
-        return emission, token_spans, int(self.bundle.sample_rate)
+_WAV2VEC_ALIGNER_CACHE: dict[tuple, "Wav2Vec2ForcedAligner"] = {}
 
 
 def _inference_chunk_starts(
@@ -107,7 +64,7 @@ def _inference_chunk_starts(
     ]
 
 
-class Wav2Vec2ForcedAligner(ForcedAligner):
+class Wav2Vec2ForcedAligner:
     """CTC emissions from a fine-tuned checkpoint. ``wav2vec2`` checkpoints (MMS, omniASR: every
     shipped model) take the waveform through ``Wav2Vec2Processor``; a ``wav2vec2-bert`` checkpoint
     (w2v-BERT 2.0 / Sylla-600M, picked from ``config.json``) takes stacked fbank frames through
@@ -120,8 +77,8 @@ class Wav2Vec2ForcedAligner(ForcedAligner):
         use_gpu: bool = True,
         fusion: str = "off",
         fusion_model: str | None = None,
+        text_head: bool = False,
     ) -> None:
-        super().__init__()
         self.model_id = model
         self.backbone = _backbone(model)
         if self.backbone == "wav2vec2-bert":
@@ -152,11 +109,11 @@ class Wav2Vec2ForcedAligner(ForcedAligner):
                 self.model.lm_head.out_features,
             ).to(self.device)
         self.last_background_log_probs: torch.Tensor | None = None
-        # §5j text-conditioned head (``config.text_aligner``): loaded only when FA_KARA_TEXT_BONUS > 0 asks
-        # the lead decode to use it; the stitched fused frame embeddings are then kept for it.
+        # §5j text-conditioned head (``config.text_aligner``): loaded only when a text bonus asks the
+        # lead decode to use it (``text_head``); the stitched fused frame embeddings are then kept for it.
         self.text_aligner = None
         text_record = getattr(self.model.config, "text_aligner", None)
-        if text_record and float(os.environ.get("FA_KARA_TEXT_BONUS", "0")) > 0:
+        if text_record and text_head:
             self.text_aligner = _load_text_aligner(model, dict(text_record)).to(self.device)
         self.last_hidden: torch.Tensor | None = None
         # §5f MuQ fusion: a checkpoint trained with the frozen MuQ branch carries ``fusion`` in
@@ -246,10 +203,7 @@ class Wav2Vec2ForcedAligner(ForcedAligner):
         waveform = resample(waveform, sample_rate, target_sample_rate).mean(0)
         duration_seconds = waveform.numel() / target_sample_rate
         chunk_samples = 45 * target_sample_rate
-        # Shared context between adjacent 45 s chunks (half kept on each side). 2 s is the shipped
-        # value; FA_KARA_CHUNK_OVERLAP_SECONDS (B, opt-in) widens it so edge frames see more context.
-        overlap_seconds = int(os.environ.get("FA_KARA_CHUNK_OVERLAP_SECONDS", "2"))
-        overlap_samples = overlap_seconds * target_sample_rate
+        overlap_samples = CHUNK_OVERLAP_SECONDS * target_sample_rate
         emissions = []
         edge_parts: list[torch.Tensor] = []
         vad_parts: list[torch.Tensor] = []
@@ -360,7 +314,7 @@ class Wav2Vec2ForcedAligner(ForcedAligner):
             waveform.numel(),
             sample_rate=target_sample_rate,
             backbone=self.backbone,
-            overlap_seconds=overlap_seconds,
+            overlap_seconds=CHUNK_OVERLAP_SECONDS,
         )
         if self.last_frame_times.shape[0] != emission.shape[0]:
             logger.warning(
@@ -723,10 +677,9 @@ def _display_span_results(
     """Token times in seconds. ``offset`` moves every time by a fixed amount (timing calibration);
     ``token_offsets`` (S2 onset-class table) adds a per-token amount, ``fractions`` a sub-frame
     start per token, ``frame_times`` the exact chunk clock (E3)."""
-    import os
-
-    limit = float(os.environ.get("FA_KARA_MAX_BLANK_HOLD_SECONDS", "0.2"))
-    display = _assign_ctc_blank_holds(spans, ranges, frame_duration, limit, second_stream)
+    display = _assign_ctc_blank_holds(
+        spans, ranges, frame_duration, MAX_BLANK_HOLD_SECONDS, second_stream
+    )
     results = []
     for index, (token, raw, held) in enumerate(zip(tokens, spans, display, strict=True)):
         shift = offset + (token_offsets[index] if token_offsets is not None else 0.0)
@@ -751,9 +704,6 @@ def _decode_background_blocks(
     min_token_ms,
     blank_free_tokens,
     margin_seconds=1.0,
-    lead_emission=None,
-    fallback_score=0.0,
-    lead_in_order=False,
 ):
     """B0: decode each block of consecutive background lines on the background head.
 
@@ -761,16 +711,7 @@ def _decode_background_blocks(
     after it (plus ``margin_seconds``), so an echo may sit on, or just after, the lead it answers.
     Inside the window the block is one duration-floored CTC path, as the lead; a window never starts
     before the previous block's end, so background lines keep their order. Returns the blocks
-    with their token indexes (input order), line sizes and spans (global frames).
-
-    Opt-in experiments (2026-11-11), both off by default:
-    ``fallback_score`` > 0 with ``lead_emission`` and ``lead_in_order``, for an opening block only:
-    when the background head hears it so faintly
-    that its letters average below that probability, decode it again on the lead head, so a backing
-    line the backing head misses goes where a voice is actually heard (on a full mix the backing
-    head can be silent through a soft intro the lead head still picks up).
-    ``lead_in_order``: a block written before the first lead line is sung before it, so its window
-    ends where that line starts rather than a second after its end."""
+    with their token indexes (input order), line sizes and spans (global frames)."""
     background = aligner_model.last_background_log_probs
     frames = background.shape[0]
     margin = round(margin_seconds / frame_shift)
@@ -807,8 +748,6 @@ def _decode_background_blocks(
             if after < len(lead_line_frames)
             else frames
         )
-        if lead_in_order and before < 0 and after < len(lead_line_frames):
-            stop = min(frames, lead_line_frames[after][0])
         groups = [all_encoded[i] for i in block["tokens"]]
         start = max(start, background_end)
         stop = max(stop, min(frames, start + 2 * sum(map(len, groups))))
@@ -833,14 +772,6 @@ def _decode_background_blocks(
 
         spans = decode(background[start:stop].to(torch.float32))
         block["fallback"] = False
-        # Only an opening block, whose window ends where the lead starts: elsewhere the lead head
-        # hears the lead itself, and frames it explains would be taken from the lead's path.
-        opening = lead_in_order and before < 0 and after < len(lead_line_frames)
-        if fallback_score > 0 and lead_emission is not None and opening:
-            letters = [s.score for g in spans for s in g]
-            if sum(letters) / max(1, len(letters)) < fallback_score:
-                spans = decode(lead_emission[start:stop].to(torch.float32))
-                block["fallback"] = True
         block["spans"] = [
             [TokenSpan(s.token, s.start + start, s.end + start, s.score) for s in g] for g in spans
         ]
@@ -1085,13 +1016,17 @@ def _merge_background_results(
 
 
 def _wav2vec_aligner(
-    model: str, use_gpu: bool, fusion: str = "off", fusion_model: str | None = None
+    model: str,
+    use_gpu: bool,
+    fusion: str = "off",
+    fusion_model: str | None = None,
+    text_head: bool = False,
 ) -> Wav2Vec2ForcedAligner:
-    key = (model, bool(use_gpu), fusion, fusion_model)
+    key = (model, bool(use_gpu), fusion, fusion_model, text_head)
     cached = _WAV2VEC_ALIGNER_CACHE.get(key)
     if cached is None:
         cached = Wav2Vec2ForcedAligner(
-            model, use_gpu=use_gpu, fusion=fusion, fusion_model=fusion_model
+            model, use_gpu=use_gpu, fusion=fusion, fusion_model=fusion_model, text_head=text_head
         )
         _WAV2VEC_ALIGNER_CACHE[key] = cached
     return cached
@@ -1123,6 +1058,8 @@ def align_audio_with_timeline(
     inline_backing_tokens=None,
     inline_backing_anchor_words=3,
     gap_onset_pull=False,
+    text_bonus=0.0,
+    in_line_gap_cost=0.0,
 ):
     """Align the complete song from the audio alone, in one global CTC pass.
 
@@ -1143,6 +1080,8 @@ def align_audio_with_timeline(
     ``background_lines`` (B0, opt-in) flags token lines sung by a background voice: they leave the
     lead path and are decoded on the checkpoint's background head, block by block, inside the span
     of their neighbouring lead lines, so they may overlap the lead. Results keep the input order.
+    ``text_bonus`` (§5j) weights the checkpoint's text head in the lead decode (0: head not
+    loaded); ``in_line_gap_cost`` charges each blank frame inside a line (gaps go between lines).
     ``optional_tokens`` (opt-in, one flag per acoustic token) marks inline backing vocals: the lead
     path may leave them out (``align_with_minimum_durations(optional_groups=...)``); the ones it
     leaves out are placed on their own, may overlap the lead, and come back with ``"stream": 2``.
@@ -1166,7 +1105,7 @@ def align_audio_with_timeline(
     acoustic_tokens = [token for line in token_lines for token in line if token]
     if not acoustic_tokens:
         raise ValueError("lyrics contain no alignable acoustic tokens")
-    aligner_model = _wav2vec_aligner(hf_model_id, use_gpu, fusion, fusion_model)
+    aligner_model = _wav2vec_aligner(hf_model_id, use_gpu, fusion, fusion_model, text_bonus > 0)
     encoded = aligner_model.tokenize(acoustic_tokens)
     if len(encoded) != len(acoustic_tokens) or any(not group for group in encoded):
         raise RuntimeError("tokenizer omitted one or more acoustic tokens")
@@ -1212,13 +1151,6 @@ def align_audio_with_timeline(
     def _decode_lead(emission):
         """Lead path (activity penalty, pace, duration floors) on ``emission``."""
         scoring_emission = emission
-        letter_floor = float(os.environ.get("FA_KARA_EMISSION_FLOOR", "0"))
-        if letter_floor > 0:
-            # Opt-in experiment (2026-11-11): no label may cost more than log(floor) per frame in the
-            # decode. A letter the model never hears (the h of a sung "ooh", ~1e-4 everywhere) then
-            # costs the same wherever it goes, instead of dragging its word to the frames where it
-            # is least improbable (the breathy onset of the *next* word). Scores keep the raw values.
-            emission = emission.clamp_min(math.log(letter_floor))
         if vocal_activity_weight > 0:
             # Decode on letters made costlier where the stem is quiet (token scores keep the
             # model's own probabilities).
@@ -1243,8 +1175,6 @@ def align_audio_with_timeline(
             else:
                 # Read loudness at each stitched frame's true time, not on the nominal 20 ms grid.
                 clock = getattr(aligner_model, "last_frame_times", None)
-                if os.environ.get("FA_KARA_ACTIVITY_NOMINAL_GRID", "0") == "1":
-                    clock = None
                 activity = vocal_activity(
                     resample(waveform, sample_rate, 16000).mean(0),
                     emission.shape[0],
@@ -1254,7 +1184,7 @@ def align_audio_with_timeline(
                 emission, activity, aligner_model.blank, vocal_activity_weight
             )
         duration_floor = None
-        gap_cost = float(os.environ.get("FA_KARA_IN_LINE_GAP_COST", "0"))
+        gap_cost = in_line_gap_cost
         has_floors = min_letter_ms > 0 or min_token_ms > 0
         use_extended = (
             has_floors
@@ -1263,48 +1193,22 @@ def align_audio_with_timeline(
             or edge_weight > 0
             or gap_cost > 0
         )
-        # Default on (FA_KARA_VOCABLE_VOWELS=0 turns it off): a syllable that is only o / u letters ("ooh" is labelled u,
-        # "oh" o) is scored on max(P(o), P(u)). Singers and transcribers swap the two freely; when
-        # the model hears the other vowel the token has no evidence anywhere and the path crams it.
+        # A syllable that is only o / u letters ("ooh" is labelled u, "oh" o) is scored on
+        # max(P(o), P(u)). Singers and transcribers swap the two freely; when the model hears the
+        # other vowel the token has no evidence anywhere and the path crams it.
         vocable_source = None
-        if os.environ.get("FA_KARA_VOCABLE_VOWELS", "1") == "1":
-            vocabulary = aligner_model.tokenizer.get_vocab()
-            pair = {vocabulary[letter] for letter in "ou" if letter in vocabulary}
-            merged_column = emission.shape[1]
-            flat = [
-                merged_column if all(letter in pair for letter in group) else letter
-                for group in encoded
-                for letter in group
-            ]
-            if len(pair) == 2 and merged_column in flat:
-                merged = emission[:, sorted(pair)].max(dim=1, keepdim=True).values
-                vocable_source = (torch.cat((emission, merged), 1), flat)
-                use_extended = True
-        sibling_penalty = float(os.environ.get("FA_KARA_VOWEL_SIBLINGS", "0"))
-        if sibling_penalty > 0:
-            # Opt-in experiment (2026-11-11): a vowel letter may also be heard as its sung sibling
-            # (i/e: "been" is labelled bin and often sung "ben"; o/u), at a cost of this many nats.
-            # Without it the path holds the previous word through the vowel it does hear and
-            # crams the word at the end ("ever ... been" in drop dead).
-            vocabulary = aligner_model.tokenizer.get_vocab()
-            siblings = {"i": "e", "e": "i", "o": "u", "u": "o"}
-            base, flat = (
-                vocable_source
-                if vocable_source is not None
-                else (emission, [letter for group in encoded for letter in group])
-            )
-            extra, column_of = [], {}
-            for name, other in siblings.items():
-                if name in vocabulary and other in vocabulary:
-                    own, sib = vocabulary[name], vocabulary[other]
-                    column_of[own] = base.shape[1] + len(extra)
-                    extra.append(torch.maximum(base[:, own], base[:, sib] - sibling_penalty))
-            if extra:
-                vocable_source = (
-                    torch.cat((base, torch.stack(extra, 1)), 1),
-                    [column_of.get(column, column) for column in flat],
-                )
-                use_extended = True
+        vocabulary = aligner_model.tokenizer.get_vocab()
+        pair = {vocabulary[letter] for letter in "ou" if letter in vocabulary}
+        merged_column = emission.shape[1]
+        flat = [
+            merged_column if all(letter in pair for letter in group) else letter
+            for group in encoded
+            for letter in group
+        ]
+        if len(pair) == 2 and merged_column in flat:
+            merged = emission[:, sorted(pair)].max(dim=1, keepdim=True).values
+            vocable_source = (torch.cat((emission, merged), 1), flat)
+            use_extended = True
         if use_extended:
             vocabulary = aligner_model.tokenizer.get_vocab()
             vowels = {vocabulary[letter] for letter in "aeiouy" if letter in vocabulary}
@@ -1389,12 +1293,10 @@ def align_audio_with_timeline(
                 line_ranges=line_acoustic_ranges,
                 in_line_gap_cost=gap_cost,
                 optional_groups=optional_groups,
-                # The most one in-line gap may cost in total (FA_KARA_IN_LINE_GAP_CAP, 0: no limit),
-                # plus a small per-frame cost past it so a word can't jump seconds ahead.
-                in_line_gap_cap=float(os.environ.get("FA_KARA_IN_LINE_GAP_CAP", "1")),
-                in_line_gap_free_cost=float(
-                    os.environ.get("FA_KARA_IN_LINE_GAP_FREE_COST", "0.02")
-                ),
+                # The most one in-line gap may cost in total, plus a small per-frame cost past it
+                # so a word can't jump seconds ahead.
+                in_line_gap_cap=1.0,
+                in_line_gap_free_cost=0.02,
             )
             try:
                 initial_spans = align_with_minimum_durations(
@@ -1460,11 +1362,7 @@ def align_audio_with_timeline(
         return emission, scoring_emission, initial_spans, duration_floor, skipped
 
     raw_emission = emission
-    text_share, optional_share, text_bonus = (
-        None,
-        None,
-        float(os.environ.get("FA_KARA_TEXT_BONUS", "0")),
-    )
+    text_share, optional_share = None, None
     if text_bonus > 0 and aligner_model.text_aligner is not None:
         # The whole song's tokens in text order (backing lines tagged by background_lines, as B0).
         source_lines = all_token_lines
@@ -1485,14 +1383,6 @@ def align_audio_with_timeline(
         )
         if inline:
             text_share, optional_share = text_share
-        if os.environ.get("FA_KARA_TEXT_SHARE_NORM", "") == "peak":
-            # Opt-in experiment (2026-11-11): the share is a softmax over the song's tokens, so a
-            # word sung 16 times peaks near log(1/4) where a unique word peaks at 0, and blanks get
-            # no term at all: repeated words are always costlier than silence. Shift each token's
-            # column so its best frame scores 0; its shape over time is unchanged.
-            text_share = text_share - text_share.max(dim=0, keepdim=True).values
-            if optional_share is not None:
-                optional_share = optional_share - optional_share.max(dim=0, keepdim=True).values
     emission, scoring_emission, initial_spans, duration_floor, skipped = _decode_lead(emission)
     background_blocks = None
     if background_plan is not None:
@@ -1509,9 +1399,6 @@ def align_audio_with_timeline(
             min_letter_ms,
             min_token_ms,
             blank_free_tokens,
-            lead_emission=raw_emission,
-            fallback_score=float(os.environ.get("FA_KARA_B0_FALLBACK_SCORE", "0")),
-            lead_in_order=os.environ.get("FA_KARA_B0_LEAD_IN_ORDER", "0") == "1",
         )
         explained = raw_emission.clone()
         for block in background_blocks:
@@ -1560,13 +1447,14 @@ def align_audio_with_timeline(
     diagnostics = {
         "source_timeline": "ignored",
         "minimum_duration": duration_floor,
-        "in_line_gap_cost": float(os.environ.get("FA_KARA_IN_LINE_GAP_COST", "0")),
-        "in_line_gap_cap": float(os.environ.get("FA_KARA_IN_LINE_GAP_CAP", "1")),
-        "emission_floor": float(os.environ.get("FA_KARA_EMISSION_FLOOR", "0")),
-        "vocable_vowels": os.environ.get("FA_KARA_VOCABLE_VOWELS", "1") == "1",
-        "vowel_siblings": float(os.environ.get("FA_KARA_VOWEL_SIBLINGS", "0")),
-        "text_share_norm": os.environ.get("FA_KARA_TEXT_SHARE_NORM", ""),
-        "line_first_offset_ms": float(os.environ.get("FA_KARA_LINE_FIRST_OFFSET_MS", "0")),
+        "in_line_gap_cost": float(in_line_gap_cost),
+        # Retired experiments, reported at their fixed values (stored documents carry the keys).
+        "in_line_gap_cap": 1.0,
+        "emission_floor": 0.0,
+        "vocable_vowels": True,
+        "vowel_siblings": 0.0,
+        "text_share_norm": "",
+        "line_first_offset_ms": 0.0,
         "text_bonus_requested": text_bonus,
         "text_bonus_status": (
             "applied"
@@ -1612,83 +1500,49 @@ def align_audio_with_timeline(
         token_offsets,
         frozenset(skipped) | frozenset(inline_moved),  # second-stream tokens: holds skip over them
     )
-    line_first_ms = float(os.environ.get("FA_KARA_LINE_FIRST_OFFSET_MS", "0"))
-    if line_first_ms:
-        # Opt-in experiment (2026-11-11): a line's first word starts later against reference timing
-        # than the words after it (+44 ms against +17 on 64 songs), so its start gets an extra shift.
-        # Only the start moves; it never passes the start of the word before it, whose end gives way.
-        second = frozenset(skipped) | frozenset(inline_moved)
-        for first, last in line_acoustic_ranges:
-            index = next((k for k in range(first, last) if k not in second), None)
-            item = results[index] if index is not None else None
-            if item is None or "original_start" not in item:
-                continue
-            start = max(0.0, item["original_start"] + line_first_ms / 1000.0)
-            before = next(
-                (
-                    results[k]
-                    for k in range(index - 1, -1, -1)
-                    if k not in second and "original_start" in results[k]
-                ),
-                None,
-            )
-            if before is not None:
-                start = max(start, before["original_start"])
-                if before["original_end"] > start:
-                    before["original_end"] = start
-                    before["end"] = _format_time(start)
-            start = min(start, item["original_end"])
-            item["original_start"] = start
-            item["start"] = _format_time(start)
-    end_extend = float(os.environ.get("FA_KARA_LINE_END_EXTEND_S", "1.2"))
-    if end_extend > 0:
-        # Default 1.2 s (FA_KARA_LINE_END_EXTEND_S=0 turns it off): a line's last word often ends
-        # before its final sound is
-        # sung ("else" sung "a…s" in Somebody Else: the path crams e-l-s into a few frames and
-        # leaves the held vowel and the late "s" to the gap). Extend its end through the frames
-        # where one of its letters still outscores blank, up to ``end_extend`` seconds and never
-        # into the next line.
-        # A letter may trail blank by this many nats and still count (a fading "s" under a rising
-        # blank); log(0.5) by default.
-        end_margin = float(os.environ.get("FA_KARA_LINE_END_MARGIN", "0"))
-        second = frozenset(skipped) | frozenset(inline_moved)
-        step = frame_shift * speed
-        shift = timing_offset_ms / 1000.0
-        frames_total = raw_emission.shape[0]
-        extended = 0
-        for line_index, (first, last) in enumerate(line_acoustic_ranges):
-            index = next((k for k in range(last - 1, first - 1, -1) if k not in second), None)
-            item = results[index] if index is not None else None
-            if item is None or "original_end" not in item:
-                continue
-            letters = [letter for letter in encoded[index] if letter != aligner_model.blank]
-            if not letters:
-                continue
-            limit = min(frames_total, round((item["original_end"] - shift + end_extend) / step))
-            # Never past the start of any later lead word (the next line's first word may be an
-            # echo moved to the second stream, so take the earliest lead start after this line).
-            later = [
-                results[k]["original_start"]
-                for k in range(last, len(results))
-                if k not in second and "original_start" in results[k]
-            ]
+    end_extend = LINE_END_EXTEND_SECONDS
+    # A line's last word often ends before its final sound is sung ("else" sung "a…s" in Somebody Else: the path crams e-l-s into a few frames and
+    # leaves the held vowel and the late "s" to the gap). Extend its end through the frames
+    # where one of its letters still outscores blank, up to ``end_extend`` seconds and never
+    # into the next line.
+    second = frozenset(skipped) | frozenset(inline_moved)
+    step = frame_shift * speed
+    shift = timing_offset_ms / 1000.0
+    frames_total = raw_emission.shape[0]
+    extended = 0
+    for line_index, (first, last) in enumerate(line_acoustic_ranges):
+        index = next((k for k in range(last - 1, first - 1, -1) if k not in second), None)
+        item = results[index] if index is not None else None
+        if item is None or "original_end" not in item:
+            continue
+        letters = [letter for letter in encoded[index] if letter != aligner_model.blank]
+        if not letters:
+            continue
+        limit = min(frames_total, round((item["original_end"] - shift + end_extend) / step))
+        # Never past the start of any later lead word (the next line's first word may be an
+        # echo moved to the second stream, so take the earliest lead start after this line).
+        later = [
+            results[k]["original_start"]
+            for k in range(last, len(results))
+            if k not in second and "original_start" in results[k]
+        ]
+        if later:
+            limit = min(limit, int((min(later) - shift) / step))
+        frame = round((item["original_end"] - shift) / step)
+        start_frame = frame
+        while frame < limit:
+            row = raw_emission[frame]
+            if float(row[letters].max()) <= float(row[aligner_model.blank]):
+                break
+            frame += 1
+        if frame > start_frame:
+            end = frame * step + shift
             if later:
-                limit = min(limit, int((min(later) - shift) / step))
-            frame = round((item["original_end"] - shift) / step)
-            start_frame = frame
-            while frame < limit:
-                row = raw_emission[frame]
-                if float(row[letters].max()) <= float(row[aligner_model.blank]) + end_margin:
-                    break
-                frame += 1
-            if frame > start_frame:
-                end = frame * step + shift
-                if later:
-                    end = min(end, min(later))
-                item["original_end"] = end
-                item["end"] = _format_time(end)
-                extended += 1
-        diagnostics["line_end_extend"] = {"seconds": end_extend, "extended_words": extended}
+                end = min(end, min(later))
+            item["original_end"] = end
+            item["end"] = _format_time(end)
+            extended += 1
+    diagnostics["line_end_extend"] = {"seconds": end_extend, "extended_words": extended}
     for index in skipped:
         results[index]["stream"] = 2
     for index in inline_moved:
@@ -1718,8 +1572,8 @@ def align_audio_with_timeline(
             "head": "background_head",
             "lines": sum(1 for _, flag, _ in background_plan if flag),
             "fallback_blocks": sum(1 for block in background_blocks if block.get("fallback")),
-            "fallback_score": float(os.environ.get("FA_KARA_B0_FALLBACK_SCORE", "0")),
-            "lead_in_order": os.environ.get("FA_KARA_B0_LEAD_IN_ORDER", "0") == "1",
+            "fallback_score": 0.0,
+            "lead_in_order": False,
         }
         token_lines = all_token_lines
     for result in results:

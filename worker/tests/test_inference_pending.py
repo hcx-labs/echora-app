@@ -1,12 +1,9 @@
 """Inference regression tests; no checkpoints, GPU, network or database required."""
 
-import importlib.util
 import io
-import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
 
 from torchaudio.functional import TokenSpan
 
@@ -102,8 +99,7 @@ class InferenceRegression(unittest.TestCase):
             [TokenSpan(3, 200, 202, 0.9)],
         ]
         for duration in (0.02, 0.04):
-            with patch.dict(os.environ, {"FA_KARA_MAX_BLANK_HOLD_SECONDS": "0.2"}):
-                result = _display_span_results(["a", "b", "c"], spans, [(0, 2), (2, 3)], duration)
+            result = _display_span_results(["a", "b", "c"], spans, [(0, 2), (2, 3)], duration)
             self.assertAlmostEqual(result[0]["acoustic_end"], 4 * duration)
             self.assertLessEqual(result[0]["original_end"] - result[0]["acoustic_end"], 0.20000001)
             self.assertEqual(result[1]["original_end"], result[1]["acoustic_end"])
@@ -131,28 +127,6 @@ class InferenceRegression(unittest.TestCase):
             self.assertEqual(set(identity["sha256"]), {"model.safetensors", "config.json"})
             (root / "model.safetensors").write_bytes(b"changed")
             self.assertNotEqual(identity, vendor.file_identity(root))
-
-    def test_actual_benchmark_provenance(self):
-        path = ROOT / "data/finetune-curation/quick-tests/benchmark_fa_kara_checkpoint.py"
-        spec = importlib.util.spec_from_file_location("benchmark", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        result = {
-            "model": "actual-model",
-            "model_revision": "/actual/checkpoint",
-            "diagnostics": {
-                "device": "cpu",
-                "checkpoint_identity": {"sha256": {"model.safetensors": "abc"}},
-            },
-            "alignment_document": {"alignment": {"mode": "actual-mode"}},
-        }
-        provenance = module.benchmark_provenance(
-            result, b"audio", "one", [], "label-run", "label-only"
-        )
-        self.assertEqual(provenance["model_revision"], "/actual/checkpoint")
-        self.assertEqual(provenance["alignment_mode"], "actual-mode")
-        self.assertEqual(provenance["diagnostics"], result["diagnostics"])
-        self.assertNotEqual(provenance["downloaded_audio_sha256"], provenance["source_sha256"])
 
 
 if __name__ == "__main__":

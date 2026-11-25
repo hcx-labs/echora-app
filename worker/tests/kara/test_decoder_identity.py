@@ -75,6 +75,7 @@ class DecoderIdentityTests(unittest.TestCase):
             text_share=None,
             optional_share=None,
             text_bonus=0,
+            in_line_gap_cost=0.0,
             line_acoustic_ranges=[(0, 1)],
             optional_groups=None,
         )
@@ -96,8 +97,6 @@ class DecoderIdentityTests(unittest.TestCase):
         self.assertEqual([s.token for s in result[2][0]], [1, 1])
 
     def test_options_without_floors_reach_decoder(self):
-        from unittest.mock import patch
-
         for option in ("text", "edge", "gap"):
             calls = []
 
@@ -110,10 +109,9 @@ class DecoderIdentityTests(unittest.TestCase):
                 overrides.update(text_share=torch.zeros(2, 1), text_bonus=1.0)
             if option == "edge":
                 overrides.update(edge_weight=1.0)
-            with patch.dict(
-                os.environ, {"FA_KARA_IN_LINE_GAP_COST": "1" if option == "gap" else "0"}
-            ):
-                self.decode_lead(**overrides)
+            if option == "gap":
+                overrides.update(in_line_gap_cost=1.0)
+            self.decode_lead(**overrides)
             self.assertEqual(calls[0]["minimum_frames"], [1, 1])
             self.assertTrue(calls[0]["blank_free_tokens"])
             if option == "text":
