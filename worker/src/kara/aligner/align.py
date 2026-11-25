@@ -260,6 +260,7 @@ def align(request: AlignRequest) -> dict:
         in_line_gap_cost=request.in_line_gap_cost,
         fusion=request.fusion,
         stem_audio=stem_audio,
+        inline_text_bonus=request.inline_text_bonus and request.inline_backing,
     )
     if len(alignment_results) != len(alignment_tokens):
         raise RuntimeError(

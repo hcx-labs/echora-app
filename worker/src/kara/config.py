@@ -89,6 +89,10 @@ class KaraConfig(EchoraConfig, env_prefix="ECHORA_KARA_"):
         legacy="FA_KARA_INLINE_BACKING",
         description="Place inline bracketed words on the backing-vocal head.",
     )
+    inline_text_bonus: bool = compute(
+        True,
+        description="The text head's evidence also places inline bracketed words (needs text_bonus).",
+    )
     stem_reading: bool = compute(
         True,
         description="Add what the model reads on the separated vocals to what it reads on the mix.",

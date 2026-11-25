@@ -5,6 +5,7 @@ from worker.kara.aligner.decoder import (  # noqa: E402
     _assign_ctc_blank_holds,
     _decode_background_blocks,
     _inference_chunk_starts,
+    _place_inline_backing,
     with_stem_reading,
 )
 
@@ -384,3 +385,41 @@ def test_a_stem_a_frame_shorter_than_the_mix_is_read_as_far_as_it_goes():
 
     assert fused.shape == mix.shape
     assert torch.allclose(fused[28:], mix[28:])
+
+
+def test_the_text_head_places_an_inline_backing_word_the_background_head_cannot_read():
+    from torchaudio.functional import TokenSpan
+
+    # "a (b) a": the lead path squeezed the bracketed word between the lead words, and the
+    # background head hears nothing; the text head's backing voice hears it at frames 60-70.
+    def spans():
+        return [
+            [TokenSpan(1, 10, 20, 1.0)],
+            [TokenSpan(2, 20, 22, 0.1)],
+            [TokenSpan(1, 80, 90, 1.0)],
+        ]
+
+    encoded, flags, silent = [[1], [2], [1]], [False, True, False], _heard(120, [])
+    share = torch.full((120, 1), -6.0)
+    share[60:70] = 0.0
+
+    plain = spans()
+    _place_inline_backing(plain, encoded, flags, [(0, 3)], silent, 0, 0.02)
+    placed = spans()
+    moved = _place_inline_backing(
+        placed,
+        encoded,
+        flags,
+        [(0, 3)],
+        silent,
+        0,
+        0.02,
+        text_share=(share, {1: 0}),
+        text_bonus=2.0,
+    )
+
+    assert moved == [1]
+    assert not 60 <= plain[1][0].start < 70
+    assert 60 <= placed[1][0].start < 70
+    assert placed[1][0].token == 2
+    assert [(g[0].start, g[-1].end) for g in (placed[0], placed[2])] == [(10, 20), (80, 90)]
