@@ -189,12 +189,10 @@ def test_rate_and_duration_guard_precede_expensive_analysis():
 
 def test_store_uses_revision_two_and_source_hop_without_committing():
     connection = Mock()
-    cursor = connection.cursor.return_value.__enter__ = Mock(return_value=Mock())
-    connection.cursor.return_value.__exit__ = Mock(return_value=False)
     with patch("worker.library.visual_features.decode_audio", return_value=np.zeros(512)) as decode:
         result = store_visual_features(connection, "track", analyze_visual_features(b"audio"))
     decode.assert_called_once_with(b"audio", SAMPLE_RATE)
-    sql, params = cursor.return_value.execute.call_args.args
+    sql, params = connection.execute.call_args.args
     assert "ON CONFLICT (track_id)" in sql
     assert params[:4] == ("track", VISUAL_FEATURE_REVISION, result["duration_seconds"], HOP_SECONDS)
     connection.commit.assert_not_called()
@@ -202,8 +200,6 @@ def test_store_uses_revision_two_and_source_hop_without_committing():
 
 def test_store_persists_terminal_unsupported_result_for_long_audio():
     connection = Mock()
-    cursor = connection.cursor.return_value.__enter__ = Mock(return_value=Mock())
-    connection.cursor.return_value.__exit__ = Mock(return_value=False)
     samples = np.zeros(MAX_DURATION_SECONDS * SAMPLE_RATE + 1, dtype=np.float32)
     with (
         patch("worker.library.visual_features.decode_audio", return_value=samples),
@@ -211,7 +207,7 @@ def test_store_persists_terminal_unsupported_result_for_long_audio():
     ):
         result = store_visual_features(connection, "track", analyze_visual_features(b"audio"))
     extract.assert_not_called()
-    sql, params = cursor.return_value.execute.call_args.args
+    sql, params = connection.execute.call_args.args
     assert "'unsupported'" in sql
     assert params == ("track", VISUAL_FEATURE_REVISION, len(samples) / SAMPLE_RATE, HOP_SECONDS)
     assert result == {

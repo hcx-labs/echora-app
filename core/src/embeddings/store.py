@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import numpy as np
 from psycopg import Connection
+from psycopg.types.json import Jsonb
 
 from core.db.connection import fetch_all, fetch_one
 
@@ -287,3 +288,86 @@ def user_corpus(db: Connection, kind: str, user_id: uuid.UUID) -> list[dict[str,
             ORDER BY e.track_id, ar.created_at DESC""",
         (user_id,),
     )
+
+
+# Audio embeddings written by library ingest.
+
+
+def audio_embedding_run(
+    db: Connection,
+    model_name: str,
+    model_revision: str,
+    config_hash: str,
+    config: dict[str, Any],
+    environment: dict[str, Any],
+    device: str,
+) -> uuid.UUID:
+    """The audio embedding run of this model configuration, started now when new."""
+    row = fetch_one(
+        db,
+        """
+        INSERT INTO analysis_runs
+          (kind, model_name, model_revision, config_hash, config, environment,
+           device, precision, status, started_at)
+        VALUES ('audio_embedding', %s, %s, %s, %s, %s, %s, 'float32', 'running', now())
+        ON CONFLICT (kind, model_name, model_revision, config_hash)
+        DO UPDATE SET id = analysis_runs.id
+        RETURNING id
+        """,
+        (model_name, model_revision, config_hash, Jsonb(config), Jsonb(environment), device),
+    )
+    return cast(dict, row)["id"]
+
+
+def has_audio_track_embedding(db: Connection, track_id: uuid.UUID, run_id: uuid.UUID) -> bool:
+    """Whether the run embedded the whole song."""
+    return (
+        fetch_one(
+            db,
+            "SELECT 1 FROM embeddings WHERE track_id=%s AND run_id=%s AND embedding_type='audio-track'",
+            (track_id, run_id),
+        )
+        is not None
+    )
+
+
+def save_audio_embeddings(
+    db: Connection,
+    track_id: uuid.UUID,
+    run_id: uuid.UUID,
+    track: dict[str, Any],
+    windows: list[tuple[Any, ...]],
+) -> None:
+    """Store the song's whole-song embedding and its window embeddings (kept when present).
+
+    ``track`` has ``dimension``, ``embedding`` (a pgvector literal), ``inference_ms`` and
+    ``peak_vram_bytes``; each window is ``(window_index, start, end, dimension, embedding)``.
+    """
+    with db.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO embeddings
+              (track_id, run_id, embedding_type, dimension, aggregation, embedding,
+               inference_ms, peak_vram_bytes)
+            VALUES (%s, %s, 'audio-track', %s, 'normalized_mean', %s::vector, %s, %s)
+            ON CONFLICT (track_id, run_id, embedding_type, window_index) DO NOTHING
+            """,
+            (
+                track_id,
+                run_id,
+                track["dimension"],
+                track["embedding"],
+                track["inference_ms"],
+                track["peak_vram_bytes"],
+            ),
+        )
+        cursor.executemany(
+            """
+            INSERT INTO embeddings
+              (track_id, run_id, embedding_type, window_index, window_start_seconds,
+               window_end_seconds, dimension, aggregation, embedding)
+            VALUES (%s, %s, 'audio-window', %s, %s, %s, %s, 'none', %s::vector)
+            ON CONFLICT (track_id, run_id, embedding_type, window_index) DO NOTHING
+            """,
+            [(track_id, run_id, *window) for window in windows],
+        )
