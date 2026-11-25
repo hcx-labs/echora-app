@@ -21,9 +21,9 @@ from collections.abc import Callable
 
 import numpy as np
 import psycopg
-from psycopg.types.json import Jsonb
 
 from core.db.connection import connect
+from core.embeddings import store
 from core.embeddings.representations import (
     configure_representations,
     model_settings,
@@ -55,22 +55,10 @@ def _paired_vectors(
     connection: psycopg.Connection,
 ) -> tuple[list[uuid.UUID], np.ndarray, np.ndarray]:
     """Track-level lyrics (bge_m3) and audio (muq_mulan) vectors for tracks with both."""
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """SELECT l.track_id, l.embedding, a.embedding
-               FROM current_embeddings l
-               JOIN current_embeddings a ON a.track_id=l.track_id
-                 AND a.embedding_type='audio-track' AND a.window_index IS NULL
-               JOIN analysis_runs la ON la.id=l.run_id
-               JOIN analysis_runs aa ON aa.id=a.run_id
-               WHERE l.embedding_type='lyrics' AND l.window_index IS NULL
-                 AND la.model_name='bge_m3' AND aa.model_name='muq_mulan'
-               ORDER BY l.track_id""",
-        )
-        rows = cursor.fetchall()
-    track_ids = [row[0] for row in rows]
-    lyrics = np.array([_vector(row[1]) for row in rows])
-    audio = np.array([_vector(row[2]) for row in rows])
+    rows = store.fusion_pairs(connection)
+    track_ids = [row["track_id"] for row in rows]
+    lyrics = np.array([_vector(row["lyrics"]) for row in rows])
+    audio = np.array([_vector(row["audio"]) for row in rows])
     return track_ids, lyrics, audio
 
 
@@ -148,64 +136,43 @@ def build_semantic_fusion(
         config_hash = hashlib.sha256(
             json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
-        with connection.cursor() as cursor:
-            cursor.execute("DELETE FROM embeddings WHERE embedding_type=%s", (EMBEDDING_TYPE,))
-            cursor.execute(
-                """DELETE FROM analysis_runs WHERE kind='semantic_fusion'
-                     AND (model_name, model_revision, config_hash) IS DISTINCT FROM (%s,%s,%s)""",
-                (MODEL_NAME, MODEL_REVISION, config_hash),
-            )
-            cursor.execute(
-                """INSERT INTO analysis_runs
-                     (kind, model_name, model_revision, config_hash, config, environment,
-                      device, precision, status, started_at, finished_at)
-                   VALUES ('semantic_fusion',%s,%s,%s,%s,%s,'cpu','float32','complete',now(),now())
-                   ON CONFLICT (kind, model_name, model_revision, config_hash)
-                   DO UPDATE SET status='complete', finished_at=now()
-                   RETURNING id""",
+        run_id = store.replace_fusion_run(
+            connection,
+            EMBEDDING_TYPE,
+            MODEL_NAME,
+            MODEL_REVISION,
+            config_hash,
+            config,
+            {"python": platform.python_version()},
+        )
+        report(
+            {
+                "phase": "writing",
+                "message": f"Storing {len(track_ids)} fused vectors",
+                "completed": 0,
+                "total": len(track_ids),
+                "unit": "vectors",
+            }
+        )
+        store.save_fusion(
+            connection,
+            [
                 (
-                    MODEL_NAME,
-                    MODEL_REVISION,
-                    config_hash,
-                    Jsonb(config),
-                    Jsonb({"python": platform.python_version()}),
-                ),
-            )
-            run_id = cursor.fetchone()[0]
-            report(
-                {
-                    "phase": "writing",
-                    "message": f"Storing {len(track_ids)} fused vectors",
-                    "completed": 0,
-                    "total": len(track_ids),
-                    "unit": "vectors",
-                }
-            )
-            cursor.executemany(
-                """INSERT INTO embeddings
-                     (track_id, run_id, embedding_type, dimension, aggregation, embedding)
-                   VALUES (%s,%s,%s,%s,%s,%s::vector)""",
-                [
-                    (
-                        track_ids[i],
-                        run_id,
-                        EMBEDDING_TYPE,
-                        fused.shape[1],
-                        AGGREGATION,
-                        _vector_literal(fused[i]),
-                    )
-                    for i in range(len(track_ids))
-                ],
-            )
-            cursor.execute(
-                """INSERT INTO active_representation_specs
-                     (kind, model_name, model_revision, config_hash, dimension, config)
-                   VALUES ('semantic_fusion',%s,%s,%s,%s,%s)
-                   ON CONFLICT (kind, model_name) DO UPDATE SET
-                     model_revision=EXCLUDED.model_revision, config_hash=EXCLUDED.config_hash,
-                     dimension=EXCLUDED.dimension, config=EXCLUDED.config""",
-                (MODEL_NAME, MODEL_REVISION, config_hash, fused.shape[1], Jsonb(config)),
-            )
+                    track_ids[i],
+                    run_id,
+                    EMBEDDING_TYPE,
+                    fused.shape[1],
+                    AGGREGATION,
+                    _vector_literal(fused[i]),
+                )
+                for i in range(len(track_ids))
+            ],
+            MODEL_NAME,
+            MODEL_REVISION,
+            config_hash,
+            fused.shape[1],
+            config,
+        )
         connection.commit()
     report(
         {

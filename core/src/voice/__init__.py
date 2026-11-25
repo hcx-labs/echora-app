@@ -1,0 +1,1 @@
+"""Voice classification queries (``store``)."""

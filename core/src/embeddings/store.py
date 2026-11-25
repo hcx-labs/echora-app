@@ -371,3 +371,86 @@ def save_audio_embeddings(
             """,
             [(track_id, run_id, *window) for window in windows],
         )
+
+
+# Semantic fusion: one fused vector per song with both lyrics and audio embeddings.
+
+
+def fusion_pairs(db: Connection) -> list[dict[str, Any]]:
+    """Every song's current BGE-M3 lyrics and MuQ-MuLan audio vectors, by song.
+
+    Rows are ``track_id``, ``lyrics`` and ``audio`` (pgvector values).
+    """
+    return fetch_all(
+        db,
+        """SELECT l.track_id, l.embedding AS lyrics, a.embedding AS audio
+           FROM current_embeddings l
+           JOIN current_embeddings a ON a.track_id=l.track_id
+             AND a.embedding_type='audio-track' AND a.window_index IS NULL
+           JOIN analysis_runs la ON la.id=l.run_id
+           JOIN analysis_runs aa ON aa.id=a.run_id
+           WHERE l.embedding_type='lyrics' AND l.window_index IS NULL
+             AND la.model_name='bge_m3' AND aa.model_name='muq_mulan'
+           ORDER BY l.track_id""",
+    )
+
+
+def replace_fusion_run(
+    db: Connection,
+    embedding_type: str,
+    model_name: str,
+    model_revision: str,
+    config_hash: str,
+    config: dict[str, Any],
+    environment: dict[str, Any],
+) -> uuid.UUID:
+    """Drop every fused vector and other fusion runs; returns this configuration's run, complete."""
+    db.execute("DELETE FROM embeddings WHERE embedding_type=%s", (embedding_type,))
+    db.execute(
+        """DELETE FROM analysis_runs WHERE kind='semantic_fusion'
+             AND (model_name, model_revision, config_hash) IS DISTINCT FROM (%s,%s,%s)""",
+        (model_name, model_revision, config_hash),
+    )
+    row = fetch_one(
+        db,
+        """INSERT INTO analysis_runs
+             (kind, model_name, model_revision, config_hash, config, environment,
+              device, precision, status, started_at, finished_at)
+           VALUES ('semantic_fusion',%s,%s,%s,%s,%s,'cpu','float32','complete',now(),now())
+           ON CONFLICT (kind, model_name, model_revision, config_hash)
+           DO UPDATE SET status='complete', finished_at=now()
+           RETURNING id""",
+        (model_name, model_revision, config_hash, Jsonb(config), Jsonb(environment)),
+    )
+    return cast(dict, row)["id"]
+
+
+def save_fusion(
+    db: Connection,
+    rows: list[tuple[Any, ...]],
+    model_name: str,
+    model_revision: str,
+    config_hash: str,
+    dimension: int,
+    config: dict[str, Any],
+) -> None:
+    """Store the fused vectors and make their configuration the active fusion representation.
+
+    Each row is ``(track_id, run_id, embedding_type, dimension, aggregation, embedding)``.
+    """
+    with db.cursor() as cursor:
+        cursor.executemany(
+            """INSERT INTO embeddings
+                 (track_id, run_id, embedding_type, dimension, aggregation, embedding)
+               VALUES (%s,%s,%s,%s,%s,%s::vector)""",
+            rows,
+        )
+    db.execute(
+        """INSERT INTO active_representation_specs
+             (kind, model_name, model_revision, config_hash, dimension, config)
+           VALUES ('semantic_fusion',%s,%s,%s,%s,%s)
+           ON CONFLICT (kind, model_name) DO UPDATE SET
+             model_revision=EXCLUDED.model_revision, config_hash=EXCLUDED.config_hash,
+             dimension=EXCLUDED.dimension, config=EXCLUDED.config""",
+        (model_name, model_revision, config_hash, dimension, Jsonb(config)),
+    )

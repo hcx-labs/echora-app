@@ -506,7 +506,10 @@ def database(rows):
 def test_modal_batch_classifies_voice_remotely(monkeypatch):
     import worker.voice.pipeline as voice_pipeline
 
-    rows = [(uuid4(), "a", "A"), (uuid4(), "b", "B")]
+    rows = [
+        {"track_id": uuid4(), "external_id": "a", "title": "A"},
+        {"track_id": uuid4(), "external_id": "b", "title": "B"},
+    ]
     connection, _ = database(rows)
     client = MagicMock()
     client.__enter__.return_value = client
@@ -515,7 +518,7 @@ def test_modal_batch_classifies_voice_remotely(monkeypatch):
         "resolve_library_id": Mock(),
         "configure_representations": Mock(),
         "_create_run": Mock(return_value=uuid4()),
-        "_store_activation": Mock(),
+        "_store_voice": Mock(),
         "NavidromeClient": Mock(return_value=client),
         "shared_voice_model": Mock(side_effect=AssertionError("local model in Modal batch")),
     }.items():
@@ -532,8 +535,8 @@ def test_modal_batch_classifies_voice_remotely(monkeypatch):
     )
     summary = run_stage(voice_pipeline.VoiceProcessor(), context).as_dict()
     assert summary == {"total": 2, "classified": 1, "failed": 1}
-    voice_pipeline._store_activation.assert_called_once()
-    assert voice_pipeline._store_activation.call_args.args[1] == rows[0][0]
+    voice_pipeline._store_voice.assert_called_once()
+    assert voice_pipeline._store_voice.call_args.args[1] == rows[0]["track_id"]
 
 
 def test_modal_batch_aligns_karaoke_remotely(monkeypatch):

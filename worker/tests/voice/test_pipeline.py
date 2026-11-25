@@ -74,7 +74,9 @@ def test_voice_scope_and_cleanup_on_cancellation(monkeypatch, ids):
     from worker.processing import ProcessingContext, run_stage
 
     cursor = MagicMock()
-    cursor.fetchall.return_value = [(uuid.uuid4(), "shared-id", "Title")]
+    cursor.fetchall.return_value = [
+        {"track_id": uuid.uuid4(), "external_id": "shared-id", "title": "Title"}
+    ]
     connection = MagicMock()
     connection.__enter__.return_value = connection
     connection.cursor.return_value.__enter__.return_value = cursor
