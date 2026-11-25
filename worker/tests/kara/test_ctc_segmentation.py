@@ -337,3 +337,24 @@ def test_the_text_head_places_a_backing_line_neither_head_can_read():
     )
 
     assert spans[0][0] == 150
+
+
+def test_a_line_the_plain_pass_did_not_hear_takes_the_full_floor():
+    from torchaudio.functional import TokenSpan
+
+    from worker.kara.aligner.ctc import paced_minimum_frames
+
+    # A hummed "Mm" the model reads as silence lands on one frame of the plain pass, and two
+    # "Ooh, ooh" on a frame each: that is not a pace.
+    plain = [[TokenSpan(1, 50, 51, 0.1)], [TokenSpan(2, 90, 91, 0.1)], [TokenSpan(2, 91, 92, 0.1)]]
+    minimums = paced_minimum_frames(
+        [[1], [2], [2]],
+        plain,
+        [(0, 1), (1, 3)],
+        ratio=0.9,
+        letter_cap=2,
+        group_cap=5,
+        pause_frames=20,
+        vowel_ids={2},
+    )
+    assert minimums == [5, 5, 5]
