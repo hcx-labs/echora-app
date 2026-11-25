@@ -122,7 +122,7 @@ def test_parent_batches_selected_work_but_reconciles_full_catalog(
     def connect():
         yield "db"
 
-    monkeypatch.setattr(analysis_jobs, "_connect", connect)
+    monkeypatch.setattr(analysis_jobs, "connect", connect)
     select = Mock(return_value=selected)
     monkeypatch.setattr(sync_plan, "select_sync_tracks", select)
     monkeypatch.setenv("ECHORA_BATCH_SIZE", "32")

@@ -127,7 +127,9 @@ def test_cancellation_propagates_before_imports():
 def test_batch_profiles_are_canonical_and_scoped(monkeypatch, library_helpers):
     main = SimpleNamespace(_user_audio_track_ids=Mock(return_value=["owned", "other"]))
     library_helpers(main)
-    with patch.object(analysis_jobs, "_profiles", return_value={"profiled": 1}) as profiles:
+    import worker.stages as stages
+
+    with patch.object(stages, "profiles", return_value={"profiled": 1}) as profiles:
         result = analysis_jobs.execute(
             {
                 "kind": "analysis_batch",
@@ -152,9 +154,9 @@ def test_hum_parent_creates_durable_corpus_from_job_id(monkeypatch, library_help
     db = MagicMock()
     cursor = db.__enter__.return_value.cursor.return_value.__enter__.return_value
     cursor.fetchone.return_value = ("user",)
-    monkeypatch.setattr(analysis_jobs, "_connect", lambda: db)
+    monkeypatch.setattr(analysis_jobs, "connect", lambda: db)
     monkeypatch.setattr(
-        analysis_jobs, "_source_rows", lambda *a: [("a", "canonical"), ("b", "other")]
+        analysis_jobs, "source_rows", lambda *a: [("a", "canonical"), ("b", "other")]
     )
     job = {
         "id": "parent",
@@ -175,3 +177,43 @@ def test_hum_parent_creates_durable_corpus_from_job_id(monkeypatch, library_help
         }
     ]
     main._load_connection.assert_called_once_with("connection", "user")
+
+
+def test_stage_order_and_summary_keys_are_stable():
+    from worker.operations import OPERATIONS
+
+    keys = {name: [stage.key for stage in op.stages] for name, op in OPERATIONS.items()}
+    sync = ["library", "lyrics", "translations", "themes", "karaoke", "voice", "motion_artwork"]
+    assert keys["navidrome_sync"] == keys["import"] == sync
+    assert keys["lyrics_backfill"] == ["lyrics", "translations", "themes", "karaoke"]
+    assert keys["karaoke_backfill"] == ["lyrics", "karaoke"]
+    assert not OPERATIONS["audio_profiles"].library
+    assert not OPERATIONS["semantic_fusion_build"].batched
+
+
+def test_failed_artwork_prompts_do_not_stop_the_batch(monkeypatch, library_helpers):
+    import worker.stages as stages
+
+    main = SimpleNamespace(_load_connection=Mock(return_value=("url", "u", "p")))
+    library_helpers(main)
+    ran = []
+    fake = [
+        stages.Stage("first", lambda batch: ran.append("first") or {"first": 1}),
+        stages.Stage(
+            "second",
+            lambda batch: {"second": batch.prepared.get("second")},
+            prepare=Mock(side_effect=RuntimeError("secret")),
+        ),
+    ]
+    from worker.operations import OPERATIONS, Operation
+
+    monkeypatch.setitem(OPERATIONS, "import", Operation(tuple(fake)))
+    result = analysis_jobs.execute(
+        {
+            "kind": "analysis_batch",
+            "user_id": "u",
+            "payload": {"operation": "import", "connection_id": "c", "track_ids": ["a"]},
+        },
+        context(),
+    )
+    assert result == {"first": 1, "second": None} and ran == ["first"]
