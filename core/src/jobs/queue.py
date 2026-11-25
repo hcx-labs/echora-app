@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 from psycopg.types.json import Jsonb
 
 from core.db.connection import connect
+from core.errors import JobCancelled
 from core.jobs.config import QueueConfig
 
 ACTIVE = ("queued", "running", "waiting")
@@ -562,10 +563,6 @@ def expand(job_id, token, batches: list[dict]):
         )
         _aggregate(db, row["id"])
         return True
-
-
-class JobCancelled(BaseException):
-    """Cooperative cancellation or loss of a fenced claim."""
 
 
 class JobContext:

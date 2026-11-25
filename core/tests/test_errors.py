@@ -19,3 +19,10 @@ def test_cancellation_is_not_an_exception():
 
 def test_remote_compute_is_an_integration_error():
     assert issubclass(RemoteComputeError, EchoraError)
+
+
+def test_the_queue_raises_the_one_job_cancelled():
+    from core import errors
+    from core.jobs import queue
+
+    assert queue.JobCancelled is errors.JobCancelled
