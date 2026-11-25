@@ -10,7 +10,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from core.db.models import (
     NavidromeConnection,
@@ -118,3 +118,83 @@ def disallow_email(session: Session, email: str) -> None:
     allowed = session.get(OidcAllowedEmail, email)
     if allowed is not None:
         session.delete(allowed)
+
+
+def identity(session: Session, subject: str, email: str) -> User | None:
+    """The account with this OpenID Connect subject or (casefolded) email address."""
+    return session.scalar(
+        select(User).where((User.oidc_subject == subject) | (func.lower(User.email) == email))
+    )
+
+
+def admin_exists(session: Session) -> bool:
+    """Whether any account is an administrator."""
+    return session.scalar(select(func.count()).select_from(User).where(User.is_admin)) > 0
+
+
+def allowed_email(session: Session, email: str) -> OidcAllowedEmail | None:
+    """The allowlist entry of the address."""
+    return session.get(OidcAllowedEmail, email)
+
+
+def add_user(session: Session, **fields: object) -> User:
+    """Store a new account with default preferences; returns it (with its id)."""
+    stored = User(**fields)
+    stored.preference = UserPreference()
+    session.add(stored)
+    session.flush()
+    return stored
+
+
+def add_session(
+    session: Session,
+    token_hash: str,
+    user_id: uuid.UUID,
+    created_at: datetime,
+    expires_at: datetime,
+    absolute_expires_at: datetime,
+) -> None:
+    """Store a signed-in session by its token hash."""
+    session.add(
+        UserSession(
+            token_hash=token_hash,
+            user_id=user_id,
+            created_at=created_at,
+            last_renewed_at=created_at,
+            expires_at=expires_at,
+            absolute_expires_at=absolute_expires_at,
+        )
+    )
+
+
+def live_session(
+    session: Session, token_hash: str, now: datetime, *, lock: bool = False
+) -> UserSession | None:
+    """The unexpired session of an unblocked account, with its user and preferences loaded.
+
+    ``lock`` holds the session row (not the user's) until the transaction ends.
+    """
+    query = (
+        select(UserSession)
+        .join(UserSession.user)
+        .options(joinedload(UserSession.user).joinedload(User.preference))
+        .where(
+            UserSession.token_hash == token_hash,
+            UserSession.expires_at > now,
+            UserSession.absolute_expires_at > now,
+            User.is_blocked.is_(False),
+        )
+    )
+    if lock:
+        query = query.with_for_update(of=UserSession)
+    return session.scalar(query)
+
+
+def drop_session(session: Session, token_hash: str) -> None:
+    """Forget one session."""
+    session.execute(delete(UserSession).where(UserSession.token_hash == token_hash))
+
+
+def drop_expired_sessions(session: Session, now: datetime) -> None:
+    """Forget every session whose idle deadline has passed."""
+    session.execute(delete(UserSession).where(UserSession.expires_at < now))
