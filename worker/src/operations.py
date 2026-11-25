@@ -253,13 +253,10 @@ def _create_corpus(job: dict, context, batch: Batch, ids: list[str]) -> list[str
         raise ValueError("track_limit must be between 1 and 500")
     batch.payload["corpus_id"] = str(job["id"])
     context.check()
-    with connect() as connection, connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO hum_corpora(id,user_id,status,track_limit)
-               VALUES (%s,%s,'building',%s) ON CONFLICT (id) DO NOTHING""",
-            (batch.payload["corpus_id"], batch.user_id, limit),
-        )
-        cursor.execute("SELECT user_id FROM hum_corpora WHERE id=%s", (batch.payload["corpus_id"],))
-        if str(cursor.fetchone()[0]) != str(batch.user_id):
+    from core.melody import store
+
+    with connect() as connection:
+        store.add_corpus(connection, batch.payload["corpus_id"], batch.user_id, limit)
+        if str(store.corpus_owner(connection, batch.payload["corpus_id"])) != str(batch.user_id):
             raise ValueError("Hum corpus ownership mismatch")
     return ids[:limit]

@@ -138,3 +138,18 @@ def add_corpus_track(db: Connection, corpus_id: uuid.UUID, track_id: uuid.UUID) 
            ON CONFLICT DO NOTHING""",
         (corpus_id, track_id),
     )
+
+
+def add_corpus(db: Connection, corpus_id: uuid.UUID, user_id: uuid.UUID, track_limit: int) -> None:
+    """Store a hum corpus being built for the user (once per id)."""
+    db.execute(
+        """INSERT INTO hum_corpora(id,user_id,status,track_limit)
+           VALUES (%s,%s,'building',%s) ON CONFLICT (id) DO NOTHING""",
+        (corpus_id, user_id, track_limit),
+    )
+
+
+def corpus_owner(db: Connection, corpus_id: uuid.UUID) -> uuid.UUID:
+    """The user whose hum corpus it is."""
+    row = fetch_one(db, "SELECT user_id FROM hum_corpora WHERE id=%s", (corpus_id,))
+    return cast(dict, row)["user_id"]

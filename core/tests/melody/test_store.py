@@ -50,10 +50,9 @@ def test_contours_are_replaced_and_listed_for_their_owner(db):
     assert store.user_contours(db, revision, uuid.uuid4()) == []
     assert [row["source_id"] for row in store.matched_songs(db, user, [track])] == ["s1"]
     corpus = uuid.uuid4()
-    db.execute(
-        "INSERT INTO hum_corpora (id, user_id, status, track_limit) VALUES (%s, %s, 'building', 5)",
-        (corpus, user),
-    )
+    store.add_corpus(db, corpus, user, 5)
+    store.add_corpus(db, corpus, uuid.uuid4(), 9)  # The first creation stands.
+    assert store.corpus_owner(db, corpus) == user
     assert store.owns_corpus(db, corpus, user) and not store.owns_corpus(db, corpus, uuid.uuid4())
     store.set_corpus_run(db, corpus, user, run)
     store.add_corpus_track(db, corpus, track)
