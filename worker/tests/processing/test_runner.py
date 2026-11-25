@@ -172,3 +172,16 @@ def test_stopping_early_leaves_the_rest_uncounted():
     summary = run_stage(processor, ProcessingContext())
     assert summary.as_dict() == {"total": 3, "doubled": 1, "failed": 0}
     assert processor.events[-1] == "close"
+
+
+def test_persist_can_add_counters():
+    class Matching(_Doubler):
+        counters = ("doubled", "large")
+
+        def persist(self, context, item, output):
+            return ("large",) if output > 4 else None
+
+    processor = Matching(_Config(), [_Song(key="a", value=2), _Song(key="b", value=4)])
+    summary = run_stage(processor, ProcessingContext()).as_dict()
+    # Every stored song counts as doubled; "large" is counted on top of it.
+    assert summary == {"total": 2, "doubled": 2, "large": 1, "failed": 0}

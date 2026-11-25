@@ -90,12 +90,14 @@ def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -
                 summary.count("failed")
             elif result.output is not None:
                 try:
-                    processor.persist(context, item, result.output)
+                    extra = processor.persist(context, item, result.output)
                 except Exception as error:  # noqa: BLE001 - one song's storage failure
                     _log_failure(processor, item, error)
                     summary.count("failed")
                 else:
                     summary.count(result.outcome)
+                    for outcome in extra or ():
+                        summary.count(outcome)
             else:
                 summary.count(result.outcome)
             context.report(

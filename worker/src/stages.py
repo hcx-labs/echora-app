@@ -13,12 +13,10 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-import psycopg
 
-from core.db.config import require_database_url
-from core.integrations.navidrome import NavidromeClient
 from core.compute import location
 from core.library.membership import attach_user_library, user_audio_track_ids
+from worker.library.sources import connect, source_rows
 from worker.processing import ProcessingContext, Processor, run_stage
 from worker.remote.session import current as remote_session
 
@@ -84,26 +82,6 @@ def processor_stage(key: str, build: Callable[[], Processor]) -> Stage:
         return {key: run_stage(build(), batch.context()).as_dict()}
 
     return Stage(key, run)
-
-
-def connect() -> psycopg.Connection:
-    """A connection to the Echora database."""
-    return psycopg.connect(require_database_url())
-
-
-def source_rows(user_id, url: str, ids: list[str] | None = None) -> list[tuple[str, uuid.UUID]]:
-    """``(external_id, track_id)`` of the user's songs in this library, optionally only ``ids``."""
-    with connect() as connection, connection.cursor() as cursor:
-        cursor.execute(
-            """SELECT DISTINCT ts.external_id, ts.track_id FROM track_sources ts
-               JOIN libraries l ON l.id=ts.library_id
-               JOIN user_track_links u ON u.library_id=ts.library_id AND u.track_id=ts.track_id
-                 AND u.external_id=ts.external_id
-               WHERE u.user_id=%s AND l.root_path=%s AND ts.source_type='subsonic'
-                 AND (%s::text[] IS NULL OR ts.external_id=ANY(%s)) ORDER BY ts.external_id""",
-            (user_id, url.rstrip("/"), ids, ids),
-        )
-        return cursor.fetchall()
 
 
 def _add_links(user_id, url: str, ids: list[str]) -> int:
@@ -235,91 +213,16 @@ def _motion_artwork(batch: Batch) -> dict[str, Any]:
     return {} if artwork is None else {"motion_artwork": artwork}
 
 
-def _recordings(batch: Batch) -> dict[str, Any]:
-    from worker.library.fingerprints import store_and_match_fingerprint
+def _fingerprint_processor() -> Processor:
+    from worker.library.recordings import FingerprintProcessor
 
-    summary = {"fingerprinted": 0, "matched": 0, "failed": 0}
-    with (
-        connect() as connection,
-        connection.cursor() as cursor,
-        NavidromeClient(*batch.library) as client,
-    ):
-        for external_id, track_id in source_rows(batch.user_id, batch.url, batch.track_ids):
-            batch.check()
-            cursor.execute(
-                """SELECT duration_seconds FROM tracks WHERE id=%s
-                   AND NOT EXISTS (SELECT 1 FROM track_fingerprints WHERE track_id=%s)""",
-                (track_id, track_id),
-            )
-            row = cursor.fetchone()
-            if not row:
-                continue
-            try:
-                result = store_and_match_fingerprint(
-                    connection, track_id, client.audio_bytes(external_id), float(row[0] or 0)
-                )
-                connection.commit()
-                summary["fingerprinted"] += 1
-                summary["matched"] += int(bool(result.get("matched")))
-            except Exception:
-                connection.rollback()
-                summary["failed"] += 1
-            batch.report({"phase": "fingerprint", "summary": dict(summary)})
-    return summary
+    return FingerprintProcessor()
 
 
-def _melody(batch: Batch) -> dict[str, Any]:
-    from worker.media.preprocessing import prepare_audio
-    from worker.melody.index import create_sync_run, store_track_contours
+def _melody_processor() -> Processor:
+    from worker.melody.corpus import MelodyCorpusProcessor
 
-    corpus_id = batch.payload["corpus_id"]
-    summary = {"tracks": 0, "contours": 0, "failed": 0}
-    with (
-        connect() as connection,
-        connection.cursor() as cursor,
-        NavidromeClient(*batch.library) as client,
-    ):
-        cursor.execute(
-            "SELECT id FROM hum_corpora WHERE id=%s AND user_id=%s", (corpus_id, batch.user_id)
-        )
-        if not cursor.fetchone():
-            raise ValueError("Unknown hum corpus")
-        run_id = create_sync_run(connection)
-        cursor.execute(
-            "UPDATE hum_corpora SET run_id=%s WHERE id=%s AND user_id=%s",
-            (run_id, corpus_id, batch.user_id),
-        )
-        connection.commit()
-        for external_id, track_id in source_rows(batch.user_id, batch.url, batch.track_ids):
-            batch.check()
-            try:
-                cursor.execute(
-                    "SELECT count(*) FROM melody_contours WHERE track_id=%s AND run_id=%s",
-                    (track_id, run_id),
-                )
-                if not cursor.fetchone()[0]:
-                    batch.report(
-                        {"phase": "preprocess", "message": "Preparing shared melody audio"}
-                    )
-                    audio = client.audio_bytes(external_id)
-                    prepare_audio(
-                        audio, mono_rates=(44100,), stereo=True, melody=True, check=batch.check
-                    )
-                    batch.report({"phase": "melody-index", "message": "Extracting melody contours"})
-                    summary["contours"] += store_track_contours(connection, track_id, run_id, audio)
-                    del audio
-                cursor.execute(
-                    """INSERT INTO hum_corpus_tracks(corpus_id,track_id) VALUES (%s,%s)
-                       ON CONFLICT DO NOTHING""",
-                    (corpus_id, track_id),
-                )
-                connection.commit()
-                summary["tracks"] += 1
-            except Exception:
-                connection.rollback()
-                summary["failed"] += 1
-            batch.report({"phase": "melody-index", "summary": dict(summary)})
-    return summary
+    return MelodyCorpusProcessor()
 
 
 def _semantic_fusion(batch: Batch) -> dict[str, Any]:
@@ -347,6 +250,10 @@ VOICE = Stage("voice", _voice)
 # Last in a sync, so earlier stages have released their models before ComfyUI needs the GPU.
 # Prompts come first, so no GPU (here or on Modal) idles while External AI writes them.
 MOTION_ARTWORK = Stage("motion_artwork", _motion_artwork, prepare=_prepare_artwork_prompts)
-RECORDINGS = Stage("recordings", _recordings)
-MELODY = Stage("melody", _melody)
+# The summary's counters sit at the top level of a recordings batch, as they always have.
+RECORDINGS = Stage(
+    "recordings", lambda batch: run_stage(_fingerprint_processor(), batch.context()).as_dict()
+)
+# Like recordings, a hum corpus batch's counters sit at the top level.
+MELODY = Stage("melody", lambda batch: run_stage(_melody_processor(), batch.context()).as_dict())
 SEMANTIC_FUSION = Stage("semantic_fusion", _semantic_fusion)

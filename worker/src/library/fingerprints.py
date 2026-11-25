@@ -96,8 +96,21 @@ def store_and_match_fingerprint(
     audio: bytes,
     metadata_duration: float,
 ) -> dict[str, object]:
+    """Fingerprint a song's audio, store it, and group it with a recording it matches."""
     fingerprint, measured_duration, version = compute_chromaprint(audio)
-    duration = measured_duration or metadata_duration
+    return store_fingerprint(
+        connection, track_id, fingerprint, measured_duration or metadata_duration, version
+    )
+
+
+def store_fingerprint(
+    connection: psycopg.Connection,
+    track_id: uuid.UUID,
+    fingerprint: bytes,
+    duration: float,
+    version: str,
+) -> dict[str, object]:
+    """Store a computed fingerprint and group the song with a recording it matches."""
     with connection.cursor() as cursor:
         cursor.execute(
             """INSERT INTO track_fingerprints

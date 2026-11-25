@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
@@ -101,10 +101,14 @@ class Processor[ConfigT: EchoraConfig | None, InputT: Item, OutputT](ABC):
     ) -> Iterator[ItemResult[InputT, OutputT]]:
         """Compute the planned items and yield one result for each."""
 
-    def persist(self, context: ProcessingContext, item: InputT, output: OutputT) -> None:  # noqa: B027
+    def persist(  # noqa: B027
+        self, context: ProcessingContext, item: InputT, output: OutputT
+    ) -> Iterable[str] | None:
         """Store one output. Called for each result that has one, as soon as it is yielded.
 
-        Any exception fails only this item; roll back what it wrote before raising.
+        Any exception fails only this item; roll back what it wrote before raising. It may return
+        counters to add on top of the item's outcome, for what only storing tells ("matched": the
+        fingerprint joined a recording group).
         """
 
     def close(self) -> None:  # noqa: B027
