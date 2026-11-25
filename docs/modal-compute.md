@@ -65,9 +65,9 @@ Every compute call also carries the worker's model settings (model IDs, revision
 
 ## The Modal app
 
-`services/analysis/src/echora_analysis/modal_app.py` defines the app (`echora-analysis`): a CPU `status` function, a CPU `prepare_models` generator, and a GPU `Analysis` class with one method per stage. The GPU container keeps one model family resident at a time, as local processing does, scales down after five idle minutes and runs at most one container. Echora deploys it through the Modal CLI with the stored token only, isolated from any Modal profile on the machine.
+`worker/src/remote/modal_app.py` defines the app (`echora-analysis`): a CPU `status` function, a CPU `prepare_models` generator, and a GPU `Analysis` class with one method per stage. The GPU container keeps one model family resident at a time, as local processing does, scales down after five idle minutes and runs at most one container. Echora deploys it through the Modal CLI with the stored token only, isolated from any Modal profile on the machine.
 
-To deploy by hand, from `services/analysis` with a Modal token configured:
+To deploy by hand, with the worker installed and a Modal token configured:
 
 ```sh
 ECHORA_MODAL_IMAGE=ghcr.io/hackslashx/echora-analysis-gpu:<version> \

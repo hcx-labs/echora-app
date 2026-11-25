@@ -42,17 +42,23 @@ class _CorpusService(SearchService[None, Corpus]):
 
     scope: uuid.UUID
 
-    def index_key(self) -> tuple[int, str]:
+    def index_key(self) -> str:
+        """A digest of every current (song, run) pair.
+
+        Any added, replaced or unlinked embedding, or a switch of the active representation,
+        changes it.
+        """
         with psycopg.connect(DatabaseConfig.load().database_url) as connection:
-            count, latest = connection.execute(
-                f"""SELECT count(DISTINCT e.track_id), coalesce(max(ar.created_at)::text, '')
+            (digest,) = connection.execute(
+                f"""SELECT coalesce(md5(string_agg(e.track_id::text || ':' || e.run_id::text, ','
+                                                ORDER BY e.track_id, e.run_id)), '')
                     FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
                     WHERE {_FILTERS[self.kind]}
                       AND EXISTS (SELECT 1 FROM user_track_links utl
                                   WHERE utl.track_id=e.track_id AND utl.user_id=%s)""",
                 (self.scope,),
             ).fetchone()
-        return int(count), str(latest)
+        return str(digest)
 
     def open(self) -> None:
         with (

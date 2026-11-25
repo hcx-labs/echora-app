@@ -50,8 +50,8 @@ redirect URI change with the release (`…/api/v1/auth/oidc/callback`).
 | `POST /settings/oidc/allowed-emails` | `POST /api/v1/settings/oidc/allowed-emails` | `settings/oidc_allow.py` |
 | `DELETE /settings/oidc/allowed-emails/{email}` | `DELETE /api/v1/settings/oidc/allowed-emails/{email}` | `settings/oidc_disallow.py` |
 | `PATCH /settings/oidc/users/{user_id}` | `PATCH /api/v1/settings/oidc/users/{user_id}` | `settings/oidc_user.py` |
-| `GET, PUT /settings/external-ai` | `GET, PUT /api/v1/settings/external-ai` | `settings/external_ai*.py` |
-| `GET, PUT /settings/external-ai/{endpoint,translation,transcription,themes}` | same under `/api/v1` | `settings/external_ai_*.py` |
+| `GET, PUT /settings/external-ai` | `GET, PUT /api/v1/settings/external-ai` | `settings/external_ai.py`, `settings/external_ai_update.py` |
+| `GET, PUT /settings/external-ai/{endpoint,translation,transcription,themes}` | same under `/api/v1` | `settings/external_ai_{section}.py`, `settings/external_ai_{section}_update.py` |
 | `DELETE /settings/external-ai/translations` | `DELETE /api/v1/settings/external-ai/translations` | `settings/external_ai_translations.py` |
 | `GET, PUT /settings/external-processing` | same under `/api/v1` | `settings/external_processing*.py` |
 | `POST /settings/external-processing/prepare` | same under `/api/v1` | `settings/external_processing_prepare.py` |

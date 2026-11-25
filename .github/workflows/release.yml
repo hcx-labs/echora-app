@@ -83,9 +83,9 @@ jobs:
           - name: web
             dockerfile: web/Dockerfile
           - name: analysis-cpu
-            dockerfile: services/analysis/docker/Dockerfile.cpu
+            dockerfile: docker/Dockerfile.cpu
           - name: analysis-gpu
-            dockerfile: services/analysis/docker/Dockerfile.gpu
+            dockerfile: docker/Dockerfile.gpu
     steps:
       - name: Check out release from main
         uses: actions/checkout@v4

@@ -34,4 +34,4 @@ Use PyTorch >=2 with scaled_dot_product_attention, weights_only loading,
 torch.autocast and the legacy torch.backends.cuda.sdp_kernel context API.
 RotaryEmbedding must support dim= and rotate_queries_or_keys; einops must
 support pack/unpack (introduced in 0.6). These are API requirements, not new
-version pins. Echora's runtime pins live in services/analysis/pyproject.toml.
+version pins. Echora's runtime pins live in worker/pyproject.toml.

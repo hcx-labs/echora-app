@@ -363,6 +363,10 @@ what it removed. Found so far:
 - `hum_search.match_contour`;
 - the karaoke vocal-stem input (`FA_KARA_AUDIO_INPUT=vocals`, superseded by the full mix);
 - the MMS aligner path (`FA_KARA_ALIGNER=mms`).
+- `main._curation_scheduler` (an empty compatibility hook);
+- the `karaoke_ass` and `karaoke_lrc` columns in the track lyrics response (no reader);
+- the per-router `require_user`/`admin` factories and the duplicate request and redacting route
+  classes of the settings routers.
 
 Kept for a decision: the `*_backfill` routes (`lyrics`, `voice`, `karaoke`, `recordings`) have no
 caller in the web app. They may be operator tools.

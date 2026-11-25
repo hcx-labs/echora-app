@@ -8,11 +8,21 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+import sqlalchemy
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
 import core.lyrics.translations as storage
 from core.integrations.external_ai import ExternalAISettings, LanguagePair
+
+# Later migrations that change external_ai_settings, which the storage code writes.
+LATER = ("0052", "0053", "0062", "0063", "0064", "0065")
+
+
+def _sqlalchemy_url(url: str) -> str:
+    return "postgresql+psycopg://" + url.split("://", 1)[1]
 
 
 @pytest.fixture
@@ -25,12 +35,9 @@ def database(monkeypatch):
         db.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
     scoped = make_conninfo(url, options=f"-c search_path={schema}")
     monkeypatch.setattr(storage, "require_database_url", lambda: scoped)
-    migration = runpy.run_path(
-        str(
-            Path(__file__).resolve().parents[2]
-            / "src/db/migrations/versions/0051_external_ai_translations.py"
-        )
-    )
+    versions = Path(__file__).resolve().parents[2] / "src/db/migrations/versions"
+    migration = runpy.run_path(str(versions / "0051_external_ai_translations.py"))
+    later = [runpy.run_path(str(next(versions.glob(f"{name}_*.py")))) for name in LATER]
     try:
         with psycopg.connect(scoped) as db:
             db.execute(
@@ -38,6 +45,19 @@ def database(monkeypatch):
             )
             with patch("alembic.op.execute", side_effect=db.execute):
                 migration["upgrade"]()
+        # Later revisions of external_ai_settings use the full alembic API.
+        engine = sqlalchemy.create_engine(
+            _sqlalchemy_url(url),
+            # public holds the pgvector types later revisions use.
+            connect_args={"options": f"-c search_path={schema},public"},
+        )
+        with (
+            engine.begin() as connection,
+            Operations.context(MigrationContext.configure(connection)),
+        ):
+            for revision in later:
+                revision["upgrade"]()
+        engine.dispose()
         yield scoped, migration
     finally:
         with psycopg.connect(url, autocommit=True) as db:

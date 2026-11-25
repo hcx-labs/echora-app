@@ -1,6 +1,3 @@
-from xml.etree import ElementTree as ET
-
-import echora_analysis.plugin_lyrics as plugin_lyrics
 import pytest
 
 from core.lyrics.backing import separate_text, separate_voices, tag_bracketed_backing
@@ -56,17 +53,3 @@ def test_text_split():
         "is he far away? Is he okay?",
     )
     assert separate_text("plain") == ("plain", "")
-
-
-def test_untimed_export_puts_backing_in_an_x_bg_span_without_brackets():
-    row = {
-        "text": "Hello (hey) I am (hey)",
-        "provenance": {"lines": [{"text": "Hello (hey) I am (hey)", "start_ms": 1000}]},
-        "karaoke_lines": [],
-        "language": "en",
-    }
-    root = ET.fromstring(plugin_lyrics.ttml(row, []))
-    (paragraph,) = root.iter(f"{{{plugin_lyrics.TT}}}p")
-    assert paragraph.text == "Hello I am "
-    (span,) = list(paragraph)
-    assert span.get(f"{{{plugin_lyrics.TTM}}}role") == "x-bg" and span.text == "hey, hey"

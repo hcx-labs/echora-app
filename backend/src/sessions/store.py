@@ -8,7 +8,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, Response
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import joinedload
 
 from backend.config import SessionConfig
@@ -127,3 +127,9 @@ def set_session_cookie(response: Response, token: str, expires_at: datetime):
         secure=SessionConfig.load().cookie_secure,
         path="/",
     )
+
+
+def delete_session(token: str) -> None:
+    """Forget a session (sign-out)."""
+    with session_scope() as session:
+        session.execute(delete(UserSession).where(UserSession.token_hash == token_hash(token)))
