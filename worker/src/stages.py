@@ -181,12 +181,10 @@ def _translation_processor() -> Processor:
 # Audio analysis.
 
 
-def _voice(batch: Batch) -> dict[str, Any]:
-    from worker.voice.pipeline import backfill_voice
+def _voice_processor() -> Processor:
+    from worker.voice.pipeline import VoiceProcessor
 
-    return {
-        "voice": backfill_voice(*batch.library, progress=batch.report, external_ids=batch.track_ids)
-    }
+    return VoiceProcessor()
 
 
 def _prepare_artwork_prompts(batch: Batch) -> Any:
@@ -242,7 +240,7 @@ LYRICS = Stage("lyrics", _lyrics)
 TRANSLATIONS = processor_stage("translations", _translation_processor)
 THEMES = processor_stage("themes", _theme_processor)
 KARAOKE = Stage("karaoke", _karaoke)
-VOICE = Stage("voice", _voice)
+VOICE = processor_stage("voice", _voice_processor)
 # Last in a sync, so earlier stages have released their models before ComfyUI needs the GPU.
 # Prompts come first, so no GPU (here or on Modal) idles while External AI writes them.
 MOTION_ARTWORK = Stage("motion_artwork", _motion_artwork, prepare=_prepare_artwork_prompts)

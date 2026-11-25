@@ -7,7 +7,6 @@ import os
 import platform
 import threading
 import uuid
-from collections.abc import Callable
 
 import essentia.standard as es
 import numpy as np
@@ -17,12 +16,13 @@ import torch
 from psycopg.types.json import Jsonb
 
 from core.db.config import DatabaseConfig
+from core.errors import InputUnavailableError, ProcessingError
 from core.embeddings.representations import configure_representations, voice_config
 from core.integrations.navidrome import NavidromeClient
 from worker.media.audio import decode_audio
 from worker.models.config import ModelsConfig
 from worker.planning.audio import _id_filter, resolve_library_id
-from worker.remote.session import current as current_remote
+from worker.processing import Item, ItemResult, ProcessingContext, Processor
 
 logger = logging.getLogger(__name__)
 
@@ -219,71 +219,84 @@ def _fetch_stream(client: NavidromeClient, source_id: str) -> np.ndarray:
     return decode_audio(client.audio_bytes(source_id), sample_rate=16_000)
 
 
-def backfill_voice(
-    url: str,
-    username: str,
-    password: str,
-    progress: Callable[[dict[str, object]], None] | None = None,
-    limit: int | None = None,
-    external_ids: list[str] | None = None,
-) -> dict[str, int]:
-    """Classify lead-vocal gender for every track that lacks voice evidence.
+class VoiceItem(Item):
+    """A song without voice evidence in the current run."""
 
-    Stores one 3-dimensional vector per track in the embeddings table
-    (embedding_type='voice-gender'): [instrumental, female, male] mean
-    activations, normalized to sum to one.
+    track_id: uuid.UUID
+    external_id: str
+
+
+Evidence = tuple[dict[str, float], dict[str, object]]
+"""Mean activations by label, and the song's vocal activity."""
+
+
+class VoiceProcessor(Processor[None, VoiceItem, Evidence]):
+    """Classifies lead-vocal gender for the batch's songs that lack voice evidence.
+
+    Stores one 3-dimensional vector per song in the embeddings table
+    (embedding_type='voice-gender'): [instrumental, female, male] mean activations, normalized to
+    sum to one, and the song's vocal activity. On Modal every song is classified in one call.
     """
-    report = progress or (lambda _: None)
-    summary = {"total": 0, "classified": 0, "failed": 0}
-    with (
-        psycopg.connect(DatabaseConfig.load().database_url) as connection,
-        NavidromeClient(url, username, password) as client,
-    ):
-        library_id = resolve_library_id(connection, url)
-        restriction, parameters = _id_filter(external_ids)
-        configure_representations(connection)
-        run_id = _create_run(connection)
-        with connection.cursor() as cursor:
-            cursor.execute(
-                f"""SELECT DISTINCT ON (ts.track_id) ts.track_id, ts.external_id, t.title
-                   FROM track_sources ts JOIN tracks t ON t.id=ts.track_id
-                   WHERE ts.source_type='subsonic'
-                     AND ts.library_id=%s{restriction}
-                     AND NOT EXISTS (
-                       SELECT 1 FROM embeddings e
-                       JOIN track_vocal_activity activity ON activity.track_id=e.track_id AND activity.run_id=e.run_id
-                       WHERE e.track_id=ts.track_id AND e.embedding_type=%s AND e.run_id=%s
-                     )
-                   ORDER BY ts.track_id, ts.id
-                   LIMIT %s""",
-                (library_id, *parameters, VOICE_EMBEDDING_TYPE, run_id, limit),
+
+    name = "voice"
+    summary_key = "voice"
+    counters = ("classified",)
+    activity = "Classifying vocals for"
+    current_message = "Voice classification already current"
+
+    def __init__(self, limit: int | None = None) -> None:
+        super().__init__()
+        self.limit = limit
+
+    def plan(self, context: ProcessingContext) -> list[VoiceItem]:
+        with psycopg.connect(DatabaseConfig.load().database_url) as connection:
+            library_id = resolve_library_id(connection, context.library_url)
+            restriction, parameters = _id_filter(list(context.track_ids))
+            configure_representations(connection)
+            # Get or create: the run of the current classifier settings.
+            self.run_id = _create_run(connection)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"""SELECT DISTINCT ON (ts.track_id) ts.track_id, ts.external_id, t.title
+                       FROM track_sources ts JOIN tracks t ON t.id=ts.track_id
+                       WHERE ts.source_type='subsonic'
+                         AND ts.library_id=%s{restriction}
+                         AND NOT EXISTS (
+                           SELECT 1 FROM embeddings e
+                           JOIN track_vocal_activity activity ON activity.track_id=e.track_id AND activity.run_id=e.run_id
+                           WHERE e.track_id=ts.track_id AND e.embedding_type=%s AND e.run_id=%s
+                         )
+                       ORDER BY ts.track_id, ts.id
+                       LIMIT %s""",
+                    (library_id, *parameters, VOICE_EMBEDDING_TYPE, self.run_id, self.limit),
+                )
+                rows = cursor.fetchall()
+        return [
+            VoiceItem(
+                key=str(track_id), label=title or "", track_id=track_id, external_id=external_id
             )
-            tracks = cursor.fetchall()
-        if not tracks:
-            report(
-                {
-                    "phase": "planning",
-                    "message": "Voice classification already current",
-                    "completed": 0,
-                    "total": 0,
-                    "unit": "tracks",
-                }
-            )
-            return summary
-        summary["total"] = len(tracks)
-        remote = current_remote()
-        classified = None
-        unavailable: dict[object, BaseException] = {}
-        if remote is not None:
-            # Upload once, classify every track in one Modal call; results stream back in order.
+            for track_id, external_id, title in rows
+        ]
+
+    def open(self, context: ProcessingContext, items) -> None:
+        self.connection = psycopg.connect(DatabaseConfig.load().database_url)
+        self.client = NavidromeClient(*context.library)
+        self.client.__enter__()
+        self.model = None
+        self.classified = None
+        self.unavailable: dict[str, BaseException] = {}
+        if context.remote is not None:
+            # Upload once, classify every song in one Modal call; results stream back in order.
             digests = []
-            for track_id, external_id, _ in tracks:
+            for item in items:
                 try:
-                    digests.append(remote.upload_audio(client.audio_bytes(str(external_id))))
-                except Exception as error:
-                    unavailable[track_id] = error
-            classified = iter(remote.voice(digests))
-        report(
+                    digests.append(
+                        context.remote.upload_audio(self.client.audio_bytes(item.external_id))
+                    )
+                except Exception as error:  # noqa: BLE001 - one song's audio
+                    self.unavailable[item.key] = error
+            self.classified = iter(context.remote.voice(digests))
+        context.publish(
             {
                 "phase": "models",
                 "message": "Loading voice classifier",
@@ -292,63 +305,61 @@ def backfill_voice(
                 "unit": "models",
             }
         )
-        model = shared_voice_model() if remote is None else None
+        if context.remote is None:
+            self.model = shared_voice_model()
+
+    def process(self, context, items):
+        for item in items:
+            context.check()
+            if item.key in self.unavailable:
+                yield ItemResult.failed(item, InputUnavailableError("Audio unavailable"))
+                continue
+            try:
+                if self.classified is None:
+                    evidence = self.model.classify_with_activity(
+                        _fetch_stream(self.client, item.external_id)
+                    )
+                else:
+                    evidence = next(self.classified)
+                    if isinstance(evidence, BaseException):
+                        raise evidence
+            except Exception as error:  # noqa: BLE001 - one song's audio or classification
+                failure = ProcessingError("Voice classification failed", stage=type(error).__name__)
+                yield ItemResult.failed(item, failure)
+                continue
+            yield ItemResult(item=item, outcome="classified", output=evidence)
+        # Every planned song has a result: the run is complete.
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE analysis_runs SET status='complete', finished_at=now() WHERE id=%s",
+                (self.run_id,),
+            )
+        self.connection.commit()
+
+    def persist(self, context, item: VoiceItem, output: Evidence) -> None:
+        values, activity = output
         try:
-            connection.commit()
-            for index, (track_id, external_id, title) in enumerate(tracks):
-                report(
-                    {
-                        "phase": "voice",
-                        "message": f"Classifying vocals for {title}",
-                        "completed": index,
-                        "total": len(tracks),
-                        "unit": "tracks",
-                        "track": {"id": str(external_id), "title": title},
-                    }
-                )
-                try:
-                    if classified is None:
-                        waveform = _fetch_stream(client, str(external_id))
-                        values, activity = model.classify_with_activity(waveform)
-                    else:
-                        outcome = unavailable.get(track_id) or next(classified)
-                        if isinstance(outcome, BaseException):
-                            raise outcome
-                        values, activity = outcome
-                    _store_activation(connection, track_id, run_id, values)
-                    with connection.cursor() as cursor:
-                        cursor.execute(
-                            """INSERT INTO track_vocal_activity (track_id, run_id, activity)
-                               VALUES (%s,%s,%s) ON CONFLICT (track_id, run_id)
-                               DO UPDATE SET activity=EXCLUDED.activity, created_at=now()""",
-                            (track_id, run_id, Jsonb(activity)),
-                        )
-                    summary["classified"] += 1
-                    connection.commit()
-                except Exception:
-                    connection.rollback()
-                    summary["failed"] += 1
-                    logger.exception("Voice classification failed for track %s", track_id)
-                report(
-                    {
-                        "phase": "voice",
-                        "message": f"Classifying vocals for {title}",
-                        "completed": index + 1,
-                        "total": len(tracks),
-                        "unit": "tracks",
-                        "summary": summary,
-                    }
-                )
-            with connection.cursor() as cursor:
+            _store_activation(self.connection, item.track_id, self.run_id, values)
+            with self.connection.cursor() as cursor:
                 cursor.execute(
-                    "UPDATE analysis_runs SET status='complete', finished_at=now() WHERE id=%s",
-                    (run_id,),
+                    """INSERT INTO track_vocal_activity (track_id, run_id, activity)
+                       VALUES (%s,%s,%s) ON CONFLICT (track_id, run_id)
+                       DO UPDATE SET activity=EXCLUDED.activity, created_at=now()""",
+                    (item.track_id, self.run_id, Jsonb(activity)),
                 )
-            connection.commit()
-        finally:
-            global _model
-            with _model_lock:
-                if _model is not None and _model[0] is model:
-                    _model = None
-            del model
-    return summary
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+
+    def close(self) -> None:
+        global _model
+        model = getattr(self, "model", None)
+        with _model_lock:
+            if model is not None and _model is not None and _model[0] is model:
+                _model = None
+        self.model = None
+        if hasattr(self, "client"):
+            self.client.__exit__(None, None, None)
+        if hasattr(self, "connection"):
+            self.connection.close()

@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+import worker.voice.pipeline as pipeline
 from worker.voice.pipeline import _aggregate_outputs
 
 
@@ -58,3 +59,65 @@ def test_vocal_activity_keeps_patch_timestamps_and_reports_uncovered_tail():
     assert activity["windows"][1]["vocal_activation"] == pytest.approx(0.9)
     assert activity["unanalyzed_tail_seconds"] == pytest.approx(0.888)
     assert activity["confidence_calibrated"] is False
+
+
+class _Cancelled(BaseException):
+    pass
+
+
+@pytest.mark.parametrize("ids", [(), ("shared-id",)])
+def test_voice_scope_and_cleanup_on_cancellation(monkeypatch, ids):
+    import uuid
+    from unittest.mock import MagicMock
+
+    from worker.processing import ProcessingContext, run_stage
+
+    cursor = MagicMock()
+    cursor.fetchall.return_value = [(uuid.uuid4(), "shared-id", "Title")]
+    connection = MagicMock()
+    connection.__enter__.return_value = connection
+    connection.cursor.return_value.__enter__.return_value = cursor
+    monkeypatch.setattr(pipeline.psycopg, "connect", lambda *a: connection)
+    monkeypatch.setattr(pipeline, "resolve_library_id", lambda *a: "library")
+    monkeypatch.setattr(pipeline, "configure_representations", MagicMock())
+    monkeypatch.setattr(pipeline, "_create_run", lambda *a: "run")
+    monkeypatch.setattr(pipeline, "NavidromeClient", MagicMock())
+    model = MagicMock()
+    monkeypatch.setattr(pipeline, "_model", (model,))
+    monkeypatch.setattr(pipeline, "shared_voice_model", lambda: model)
+
+    def cancelled(*a):
+        raise _Cancelled()
+
+    monkeypatch.setattr(pipeline, "_fetch_stream", cancelled)
+    context = ProcessingContext(user_id="user", library=("https://music", "u", "p"), track_ids=ids)
+    with pytest.raises(_Cancelled):
+        run_stage(pipeline.VoiceProcessor(), context)
+    sql, params = cursor.execute.call_args_list[0].args
+    assert "ts.library_id=%s" in sql and "ts.external_id=ANY(%s)" in sql
+    assert params[:2] == ("library", list(ids))
+    # The shared model is released, and nothing was half-written.
+    assert pipeline._model is None
+    connection.rollback.assert_not_called()
+
+
+def test_unknown_library_selects_nothing(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from worker.processing import ProcessingContext, run_stage
+
+    connection = MagicMock()
+    connection.__enter__.return_value = connection
+    monkeypatch.setattr(pipeline.psycopg, "connect", lambda *a: connection)
+
+    def unknown(*a):
+        raise ValueError("unknown library")
+
+    monkeypatch.setattr(pipeline, "resolve_library_id", unknown)
+    configure = MagicMock()
+    monkeypatch.setattr(pipeline, "configure_representations", configure)
+    context = ProcessingContext(user_id="u", library=("https://unknown", "u", "p"))
+    with pytest.raises(ValueError, match="unknown library"):
+        run_stage(pipeline.VoiceProcessor(), context)
+    configure.assert_not_called()
+    connection.cursor.assert_not_called()

@@ -162,7 +162,7 @@ class LibraryScopingTests(unittest.TestCase):
         ns["release_model"].assert_called_once_with(model)
 
     def test_pipelines_never_select_sources_when_library_resolution_fails(self):
-        for kind in ("lyrics", "karaoke", "voice"):
+        for kind in ("lyrics", "karaoke"):
             with self.subTest(kind=kind):
                 ns, client = self.pipeline_namespace(kind)
                 ns["resolve_library_id"].side_effect = ValueError("unknown library")
@@ -195,31 +195,6 @@ class LibraryScopingTests(unittest.TestCase):
         self.assertIn("ts.library_id=%s", sql)
         self.assertEqual(params, (["shared-id"], self.library_id))
         self.assertEqual(ns["_stop_fa_kara_worker"].call_count, 2)  # Before prep and finally.
-
-    def test_voice_scope_ids_and_cleanup_on_cancellation(self):
-        for ids in (None, [], ["shared-id"]):
-            with self.subTest(ids=ids):
-                ns, client = self.pipeline_namespace("voice")
-                model = MagicMock()
-                ns.update(
-                    _id_filter=self.plan_namespace()["_id_filter"],
-                    VOICE_EMBEDDING_TYPE="voice-gender",
-                    _model=(model,),
-                    _model_lock=MagicMock(),
-                )
-                ns["shared_voice_model"] = MagicMock(return_value=model)
-                ns["_fetch_stream"] = MagicMock(side_effect=Cancelled())
-                self.cursor.fetchall.return_value = [(uuid.uuid4(), "shared-id", "Title")]
-                with self.assertRaises(Cancelled):
-                    ns["backfill_voice"]("https://music", "user", "password", external_ids=ids)
-                sql, params = self.cursor.execute.call_args.args
-                self.assertIn("ts.library_id=%s", sql)
-                self.assertEqual(params[0], self.library_id)
-                self.assertEqual("ts.external_id=ANY(%s)" in sql, ids is not None)
-                if ids is not None:
-                    self.assertEqual(params[1], ids)
-                self.assertIsNone(ns["_model"])
-                self.connection.rollback.assert_not_called()
 
 
 if __name__ == "__main__":

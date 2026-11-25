@@ -13,6 +13,8 @@ import httpx
 import numpy as np
 import pytest
 
+from worker.processing import ProcessingContext, run_stage
+
 import core.features as features
 import worker.remote.session as remote_compute
 import worker.remote.settings as external_processing
@@ -529,8 +531,10 @@ def test_modal_batch_classifies_voice_remotely(monkeypatch):
         ({"female": 1.0}, {"windows": []}),
         RuntimeError("failed"),
     ]
-    with remote_compute.session("modal", factory=lambda: remote):
-        summary = voice_pipeline.backfill_voice("url", "user", "password")
+    context = ProcessingContext(
+        remote=remote, user_id="user", library=("url", "user", "password"), track_ids=("a", "b")
+    )
+    summary = run_stage(voice_pipeline.VoiceProcessor(), context).as_dict()
     assert summary == {"total": 2, "classified": 1, "failed": 1}
     voice_pipeline._store_activation.assert_called_once()
     assert voice_pipeline._store_activation.call_args.args[1] == rows[0][0]
