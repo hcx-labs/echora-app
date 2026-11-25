@@ -2,6 +2,7 @@ from core.config import reset_config_cache
 
 import io
 import os
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -11,6 +12,7 @@ import pytest
 import soundfile as sf
 
 import worker.kara.pipeline as pipeline
+from worker.processing import ProcessingContext, run_stage
 from worker.kara.aligner.request import AlignRequest
 
 from worker.kara.pipeline import (
@@ -19,6 +21,18 @@ from worker.kara.pipeline import (
     build_lines_from_alignment_document,
     _validate_alignment_document,
 )
+
+
+def align_batch(progress=None, ids=("0", "1", "2")):
+    """The karaoke stage's summary for a batch of these Navidrome ids."""
+    context = ProcessingContext(
+        publish=progress or (lambda update: None),
+        user_id="user",
+        library=("url", "user", "pass"),
+        track_ids=tuple(ids),
+    )
+    return run_stage(pipeline.KaraokeProcessor(), context).as_dict()
+
 
 REQUEST = AlignRequest(audio_path="i.audio", text="Hello", model_path="model")
 
@@ -249,7 +263,7 @@ def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch,
     connection = MagicMock()
     monkeypatch.setattr(pipeline.psycopg, "connect", lambda _: connection)
     connection.__enter__.return_value = connection
-    tracks = [(i, str(i), str(i), "Hello", "en", []) for i in range(3)]
+    tracks = [(uuid.UUID(int=i), str(i), str(i), "Hello", "en", []) for i in range(3)]
     connection.cursor.return_value.__enter__.return_value.fetchall.return_value = tracks
     client = MagicMock()
     client.__enter__.return_value = client
@@ -296,15 +310,16 @@ def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch,
     reports = []
     if cancel:
         with pytest.raises(KeyboardInterrupt):
-            pipeline._backfill_karaoke("url", "user", "pass", reports.append)
-        assert events == ["stop", b"0", b"1"]
+            align_batch(reports.append)
+        # The aligner process is stopped again when the stage ends.
+        assert events == ["stop", b"0", b"1", "stop"]
     else:
-        assert pipeline._backfill_karaoke("url", "user", "pass", reports.append) == {
+        assert align_batch(reports.append) == {
             "total": 3,
             "aligned": 2,
             "failed": 1,
         }
-        assert events[4:] == [("align", b"0"), ("align", b"2")]
+        assert events[4:] == [("align", b"0"), ("align", b"2"), "stop"]
         assert [r["phase"] for r in reports][:7] == ["preprocess"] * 6 + ["models"]
         # Later phases reread the batch's source cache rather than copy raw audio
         # into a second unbounded per-karaoke directory.
@@ -318,7 +333,7 @@ def test_backfill_aligns_the_original_mix_without_separating(monkeypatch):
     connection = MagicMock()
     monkeypatch.setattr(pipeline.psycopg, "connect", lambda _: connection)
     connection.__enter__.return_value = connection
-    tracks = [(i, str(i), str(i), "Hello", "en", []) for i in range(3)]
+    tracks = [(uuid.UUID(int=i), str(i), str(i), "Hello", "en", []) for i in range(3)]
     connection.cursor.return_value.__enter__.return_value.fetchall.return_value = tracks
     client = MagicMock()
     client.__enter__.return_value = client
@@ -337,7 +352,6 @@ def test_backfill_aligns_the_original_mix_without_separating(monkeypatch):
         lambda *args, **kwargs: SimpleNamespace(karaoke_external_ids=["0", "1", "2"]),
     )
     monkeypatch.setattr(pipeline, "_stop_fa_kara_worker", lambda: None)
-    monkeypatch.setattr(pipeline, "current_remote", lambda: None)
 
     def prepare(*args, **kwargs):
         raise AssertionError("the original mix needs no separation")
@@ -356,7 +370,7 @@ def test_backfill_aligns_the_original_mix_without_separating(monkeypatch):
         }
 
     monkeypatch.setattr(pipeline, "_run_fa_kara", align)
-    assert pipeline._backfill_karaoke("url", "user", "pass") == {
+    assert align_batch() == {
         "total": 3,
         "aligned": 2,
         "failed": 1,
@@ -419,10 +433,11 @@ def test_karaoke_lock_wait_checks_cancellation(monkeypatch):
     def check():
         raise Cancelled()
 
-    monkeypatch.setattr(pipeline, "get_check", lambda: check)
+    processor = pipeline.KaraokeProcessor()
     with pytest.raises(Cancelled):
-        pipeline.backfill_karaoke("url", "user", "pass")
+        processor.open(ProcessingContext(check_cancelled=check), [])
     lock.acquire.assert_called_once_with(timeout=0.25)
+    processor.close()
     lock.release.assert_not_called()
 
 
@@ -696,3 +711,73 @@ def test_lyrics_without_a_language_ask_the_aligner_to_identify_them(
         assert request.language == "auto"
         assert {"en", "ja", "ko"} <= set(request.detect_language)
     reset_config_cache()
+
+
+class _Cancelled(BaseException):
+    pass
+
+
+def test_karaoke_scope_and_cleanup_on_cancellation(monkeypatch):
+    connection = MagicMock()
+    connection.__enter__.return_value = connection
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchall.return_value = [(uuid.uuid4(), "shared-id", "Title", "words", "en", [])]
+    monkeypatch.setattr(pipeline.psycopg, "connect", lambda *a: connection)
+    monkeypatch.setattr(pipeline, "resolve_library_id", lambda *a: "library")
+    planner = MagicMock(return_value=SimpleNamespace(karaoke_external_ids=("shared-id",)))
+    monkeypatch.setattr(pipeline, "plan_karaoke", planner)
+    monkeypatch.setattr(pipeline, "_KARAOKE_LOCK", MagicMock())
+    stops = MagicMock()
+    monkeypatch.setattr(pipeline, "_stop_fa_kara_worker", stops)
+    client = MagicMock()
+    client.audio_bytes.side_effect = _Cancelled()
+    monkeypatch.setattr(pipeline, "NavidromeClient", lambda *a: client)
+    with pytest.raises(_Cancelled):
+        align_batch(ids=("shared-id",))
+    assert planner.call_args.args[2] == ["shared-id"]
+    assert planner.call_args.kwargs == {"library_id": "library"}
+    sql, params = cursor.execute.call_args.args
+    assert "ts.library_id=%s" in sql and params == (["shared-id"], "library")
+    assert stops.call_count == 2  # Before preparing, and when the stage ends.
+    pipeline._KARAOKE_LOCK.release.assert_called_once()
+
+
+def test_unknown_library_selects_nothing(monkeypatch):
+    connection = MagicMock()
+    connection.__enter__.return_value = connection
+    monkeypatch.setattr(pipeline.psycopg, "connect", lambda *a: connection)
+
+    def unknown(*a):
+        raise ValueError("unknown library")
+
+    monkeypatch.setattr(pipeline, "resolve_library_id", unknown)
+    client = MagicMock()
+    monkeypatch.setattr(pipeline, "NavidromeClient", lambda *a: client)
+    with pytest.raises(ValueError, match="unknown library"):
+        align_batch()
+    client.audio_bytes.assert_not_called()
+    connection.cursor.assert_not_called()
+
+
+def test_supplied_word_timing_is_stored_without_aligning(monkeypatch):
+    connection = MagicMock()
+    connection.__enter__.return_value = connection
+    track = uuid.uuid4()
+    timing = [{"text": "Hello", "start_ms": 0}]
+    connection.cursor.return_value.__enter__.return_value.fetchall.return_value = [
+        (track, "0", "Title", "Hello", "en", [], timing, "digest")
+    ]
+    monkeypatch.setattr(pipeline.psycopg, "connect", lambda *a: connection)
+    monkeypatch.setattr(pipeline, "resolve_library_id", lambda *a: "library")
+    monkeypatch.setattr(
+        pipeline, "plan_karaoke", lambda *a, **kw: SimpleNamespace(karaoke_external_ids=["0"])
+    )
+    monkeypatch.setattr(pipeline, "NavidromeClient", lambda *a: MagicMock())
+    monkeypatch.setattr(pipeline, "_stop_fa_kara_worker", MagicMock())
+    stored = []
+    monkeypatch.setattr(
+        pipeline, "_store_supplied_karaoke", lambda conn, *args: stored.append(args)
+    )
+    monkeypatch.setattr(pipeline, "_run_fa_kara", MagicMock(side_effect=AssertionError("aligned")))
+    assert align_batch(ids=("0",)) == {"total": 1, "aligned": 0, "supplied": 1, "failed": 0}
+    assert stored == [(track, timing, "digest")]

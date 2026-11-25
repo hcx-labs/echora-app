@@ -582,8 +582,10 @@ def test_modal_batch_aligns_karaoke_remotely(monkeypatch, audio_input):
         aligned,
         RuntimeError("failed"),
     ]
-    with remote_compute.session("modal", factory=lambda: remote):
-        summary = karaoke_pipeline.backfill_karaoke("url", "user", "password")
+    context = ProcessingContext(
+        remote=remote, user_id="user", library=("url", "user", "password"), track_ids=("a", "b")
+    )
+    summary = run_stage(karaoke_pipeline.KaraokeProcessor(), context).as_dict()
     assert summary == {"total": 2, "aligned": 1, "failed": 1}
     digests, texts, languages, lines = remote.karaoke.call_args.args
     assert (

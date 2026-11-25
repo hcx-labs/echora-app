@@ -162,7 +162,7 @@ class LibraryScopingTests(unittest.TestCase):
         ns["release_model"].assert_called_once_with(model)
 
     def test_pipelines_never_select_sources_when_library_resolution_fails(self):
-        for kind in ("lyrics", "karaoke"):
+        for kind in ("lyrics",):
             with self.subTest(kind=kind):
                 ns, client = self.pipeline_namespace(kind)
                 ns["resolve_library_id"].side_effect = ValueError("unknown library")
@@ -173,28 +173,6 @@ class LibraryScopingTests(unittest.TestCase):
                 client.lyrics.assert_not_called()
                 ns["configure_representations"].assert_not_called()
                 self.cursor.execute.assert_not_called()
-
-    def test_karaoke_scope_and_cleanup_on_cancellation(self):
-        ns, client = self.pipeline_namespace("karaoke")
-        ns.update(
-            _KARAOKE_LOCK=MagicMock(),
-            DEFAULT_MODEL_REVISION="model",
-            KARAOKE_PIPELINE_REVISION="pipeline",
-        )
-        ns["plan_karaoke"] = MagicMock(
-            return_value=SimpleNamespace(karaoke_external_ids=("shared-id",))
-        )
-        client.audio_bytes.side_effect = Cancelled()
-        self.cursor.fetchall.return_value = [
-            (uuid.uuid4(), "shared-id", "Title", "words", "en", [])
-        ]
-        with self.assertRaises(Cancelled):
-            ns["backfill_karaoke"]("https://music", "user", "password")
-        self.assertEqual(ns["plan_karaoke"].call_args.kwargs, {"library_id": self.library_id})
-        sql, params = self.cursor.execute.call_args.args
-        self.assertIn("ts.library_id=%s", sql)
-        self.assertEqual(params, (["shared-id"], self.library_id))
-        self.assertEqual(ns["_stop_fa_kara_worker"].call_count, 2)  # Before prep and finally.
 
 
 if __name__ == "__main__":

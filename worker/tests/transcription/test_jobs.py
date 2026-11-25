@@ -3,7 +3,6 @@ from core.config import reset_config_cache
 
 from types import SimpleNamespace
 from unittest.mock import Mock
-import sys
 
 import worker.operations as analysis_jobs
 
@@ -41,12 +40,20 @@ def test_lyrics_stage_precedes_karaoke_even_for_karaoke_backfill(monkeypatch, li
         order.append("lyrics")
         return {}
 
-    def karaoke(*args, **kwargs):
-        order.append("karaoke")
-        return {}
+    from worker.processing import Processor
+
+    class Karaoke(Processor):
+        name = summary_key = "karaoke"
+
+        def plan(self, context):
+            order.append("karaoke")
+            return []
+
+        def process(self, context, items):
+            yield from ()
 
     stub_module(monkeypatch, "worker.lyrics.pipeline", SimpleNamespace(backfill_lyrics=lyrics))
-    stub_module(monkeypatch, "worker.kara.pipeline", SimpleNamespace(backfill_karaoke=karaoke))
+    stub_module(monkeypatch, "worker.kara.pipeline", SimpleNamespace(KaraokeProcessor=Karaoke))
     analysis_jobs.execute(
         {
             "kind": "analysis_batch",

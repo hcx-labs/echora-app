@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from core.db.config import DatabaseConfig
+from core.errors import InputUnavailableError, ProcessingError
 from worker.kara.aligner import label_rules
 from worker.kara.aligner.request import AlignRequest
 from worker.kara.config import KaraConfig
 
-from collections.abc import Callable
 import functools
 import hashlib
 import json
@@ -20,12 +20,13 @@ import tempfile
 import threading
 import time
 import unicodedata
+import uuid
 
 import psycopg
 from psycopg.types.json import Jsonb
 
 from worker.media.preprocessing import get_check, prepare_audio, vocal_audio_bytes
-from worker.remote.session import current as current_remote
+from worker.processing import Item, ItemResult, ProcessingContext, Processor
 from worker.media.roformer import separation_phase
 from worker.media.roformer import SEPARATION_REVISION
 from core.integrations.navidrome import NavidromeClient
@@ -599,26 +600,6 @@ def _run_fa_kara(
     }
 
 
-def backfill_karaoke(
-    url: str,
-    username: str,
-    password: str,
-    progress: Callable[[dict[str, object]], None] | None = None,
-    external_ids: list[str] | None = None,
-) -> dict[str, int]:
-    """Serialize alignment and release its resident model after the phase."""
-    while not _KARAOKE_LOCK.acquire(timeout=KaraConfig.load().lock_poll_seconds):
-        get_check()()
-    try:
-        get_check()()
-        return _backfill_karaoke(url, username, password, progress, external_ids)
-    finally:
-        try:
-            _stop_fa_kara_worker()
-        finally:
-            _KARAOKE_LOCK.release()
-
-
 def _store_supplied_karaoke(connection, track_id, lines, digest) -> None:
     """Word timing that came with the lyrics (TTML or enhanced LRC from Navidrome), stored as the
     karaoke without alignment. Not AI-generated, so players show no AI disclosure for it."""
@@ -652,131 +633,98 @@ def _store_supplied_karaoke(connection, track_id, lines, digest) -> None:
     connection.commit()
 
 
-def _backfill_karaoke(
-    url: str,
-    username: str,
-    password: str,
-    progress: Callable[[dict[str, object]], None] | None = None,
-    external_ids: list[str] | None = None,
-) -> dict[str, int]:
-    """Align every planned song's lyrics from its audio."""
-    report = progress or (lambda _: None)
-    summary = {"total": 0, "aligned": 0, "failed": 0}
-    with (
-        psycopg.connect(DatabaseConfig.load().database_url) as connection,
-        NavidromeClient(url, username, password) as client,
-    ):
-        library_id = resolve_library_id(connection, url)
-        model_revision = _stored_model_revision(current_model_revision())
-        planned = plan_karaoke(
-            connection,
-            KARAOKE_PIPELINE_REVISION,
-            external_ids,
-            model_revision,
-            library_id=library_id,
-        ).karaoke_external_ids
-        if not planned:
-            report(
-                {
-                    "phase": "planning",
-                    "message": "Karaoke alignment already current",
-                    "completed": 0,
-                    "total": 0,
-                    "unit": "tracks",
-                }
-            )
-            return summary
-        with connection.cursor() as cursor:
-            cursor.execute(
-                f"""SELECT DISTINCT ON (ts.track_id) ts.track_id, ts.external_id, t.title, l.text, l.language, l.provenance->'lines',
-                           l.provenance->'word_timing', l.provenance->>'word_timing_digest'
-                    FROM track_sources ts JOIN tracks t ON t.id=ts.track_id JOIN lyrics l ON l.track_id=ts.track_id
-                    WHERE ts.source_type='subsonic' AND ts.external_id=ANY(%s) AND ts.library_id=%s
-                    ORDER BY ts.track_id, ts.id""",
-                (list(planned), library_id),
-            )
-            rows = cursor.fetchall()
-        summary["total"] = len(rows)
-        tracks = []
+class KaraokeItem(Item):
+    """A song whose karaoke timing is missing or stale."""
+
+    track_id: uuid.UUID
+    external_id: str
+    text: str
+    language: str | None = None
+    source_lines: list[dict[str, object]] | None = None
+    supplied: list[dict[str, object]] | None = None
+    """Word timing the lyrics came with; stored as it is instead of aligning."""
+    supplied_digest: str | None = None
+
+
+class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
+    """Aligns the batch's lyrics to their audio with the Echora Kara aligner.
+
+    Songs whose lyrics came with word timing keep it (``supplied``). The others are prepared
+    first, every one of them, so vocal separation never alternates with the aligner on the GPU;
+    then the aligner loads once and aligns them all (on Modal in one call). One batch aligns at a
+    time in this worker; the aligner process stops after the stage.
+    """
+
+    name = "karaoke"
+    summary_key = "karaoke"
+    counters = ("aligned",)
+    activity = "Aligning karaoke lyrics for"
+    current_message = "Karaoke alignment already current"
+
+    def plan(self, context: ProcessingContext) -> list[KaraokeItem]:
+        with psycopg.connect(DatabaseConfig.load().database_url) as connection:
+            self.library_id = resolve_library_id(connection, context.library_url)
+            model_revision = _stored_model_revision(current_model_revision())
+            planned = plan_karaoke(
+                connection,
+                KARAOKE_PIPELINE_REVISION,
+                list(context.track_ids),
+                model_revision,
+                library_id=self.library_id,
+            ).karaoke_external_ids
+            if not planned:
+                return []
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """SELECT DISTINCT ON (ts.track_id) ts.track_id, ts.external_id, t.title, l.text, l.language, l.provenance->'lines',
+                               l.provenance->'word_timing', l.provenance->>'word_timing_digest'
+                        FROM track_sources ts JOIN tracks t ON t.id=ts.track_id JOIN lyrics l ON l.track_id=ts.track_id
+                        WHERE ts.source_type='subsonic' AND ts.external_id=ANY(%s) AND ts.library_id=%s
+                        ORDER BY ts.track_id, ts.id""",
+                    (list(planned), self.library_id),
+                )
+                rows = cursor.fetchall()
+        items = []
         for row in rows:
             track_id, external_id, title, text, language, lines = row[:6]
             supplied, digest = (row[6], row[7]) if len(row) > 7 else (None, None)
-            if supplied and digest:
-                try:
-                    _store_supplied_karaoke(connection, track_id, supplied, digest)
-                    summary["supplied"] = summary.get("supplied", 0) + 1
-                except Exception:
-                    connection.rollback()
-                    summary["failed"] += 1
-                    logger.exception("Storing supplied word timing failed for %s", track_id)
-            else:
-                tracks.append((track_id, external_id, title, text, language, lines))
-        if not tracks:
-            return summary
+            items.append(
+                KaraokeItem(
+                    key=str(track_id),
+                    label=title or "",
+                    track_id=track_id,
+                    external_id=str(external_id),
+                    text=text or "",
+                    language=language,
+                    source_lines=lines,
+                    supplied=supplied if supplied and digest else None,
+                    supplied_digest=digest if supplied and digest else None,
+                )
+            )
+        return items
+
+    def open(self, context: ProcessingContext, items) -> None:
+        # One batch aligns at a time: the aligner and vocal separation share the GPU.
+        while not _KARAOKE_LOCK.acquire(timeout=KaraConfig.load().lock_poll_seconds):
+            context.check()
+        self.locked = True
+        context.check()
+        self.connection = psycopg.connect(DatabaseConfig.load().database_url)
+        self.client = NavidromeClient(*context.library)
+        self.client.__enter__()
+
+    def process(self, context, items):
+        for item in items:
+            if item.supplied is not None:
+                yield ItemResult(item=item, outcome="supplied", output={"supplied": True})
+        aligning = [item for item in items if item.supplied is None]
+        if not aligning:
+            return
         _stop_fa_kara_worker()
-        remote = current_remote()
-        prepared_sources = set()
-        digests: dict[object, str] = {}
-        separate = _separates_vocals()
-        # Separation phase: one Roformer for every selected song, before the aligner loads.
-        # On the original mix this only fetches each song into the batch's source cache.
-        with separation_phase():
-            for index, (track_id, external_id, title, *_) in enumerate(tracks):
-                report(
-                    {
-                        "phase": "preprocess",
-                        "message": f"Preparing karaoke audio for {title}",
-                        "completed": index,
-                        "total": len(tracks),
-                        "unit": "tracks",
-                    }
-                )
-                get_check()()
-                try:
-                    source = client.audio_bytes(external_id)
-                    if remote is not None:
-                        # Vocals are separated on Modal; only the source audio goes up.
-                        digests[track_id] = remote.upload_audio(source)
-                    elif separate:
-                        prepare_audio(source, vocals=True, check=get_check())
-                    prepared_sources.add(track_id)
-                    del source
-                except Exception:
-                    summary["failed"] += 1
-                    logger.exception("Karaoke preprocessing failed for %s", track_id)
-                report(
-                    {
-                        "phase": "preprocess",
-                        "message": f"Preparing karaoke audio for {title}",
-                        "completed": index + 1,
-                        "total": len(tracks),
-                        "unit": "tracks",
-                        "summary": summary,
-                    }
-                )
-        if remote is not None and separate and prepared_sources:
-            # Like local preparation: separate the vocals of exactly the songs selected for
-            # alignment first, so the aligner then stays loaded on Modal instead of being
-            # stopped and reloaded around each song's separation.
-            separating = [row for row in tracks if row[0] in prepared_sources]
-            outcomes = remote.prepare_vocals([digests[row[0]] for row in separating], vocals=True)
-            for index, (row, outcome) in enumerate(zip(separating, outcomes)):
-                if isinstance(outcome, BaseException):
-                    summary["failed"] += 1
-                    prepared_sources.discard(row[0])
-                    logger.error("Vocal separation on Modal failed for %s", row[0])
-                report(
-                    {
-                        "phase": "preprocess",
-                        "message": f"Separating vocals for {row[2]}",
-                        "completed": index + 1,
-                        "total": len(separating),
-                        "unit": "tracks",
-                        "summary": summary,
-                    }
-                )
-        if prepared_sources:
-            report(
+        prepared, failed = self._prepare(context, aligning)
+        ready = [item for item in aligning if item.key in prepared]
+        if ready:
+            context.publish(
                 {
                     "phase": "models",
                     "message": "Loading Echora alignment model",
@@ -785,94 +733,170 @@ def _backfill_karaoke(
                     "unit": "models",
                 }
             )
+        for item in failed:
+            yield ItemResult.failed(item, InputUnavailableError("Karaoke audio unavailable"))
+        if not ready:
+            return
         aligned = None
-        if remote is not None:
-            # Every prepared track aligns in one Modal call; results stream back in order.
-            batch = [row for row in tracks if row[0] in prepared_sources]
+        if context.remote is not None:
+            # Every prepared song aligns in one Modal call; results stream back in order.
             aligned = iter(
-                remote.karaoke(
-                    [digests[row[0]] for row in batch],
-                    [row[3] for row in batch],
-                    [row[4] for row in batch],
-                    [row[5] or [] for row in batch],
+                context.remote.karaoke(
+                    [prepared[item.key] for item in ready],
+                    [item.text for item in ready],
+                    [item.language for item in ready],
+                    [item.source_lines or [] for item in ready],
                 )
             )
-        for index, (track_id, external_id, title, text, language, source_lines) in enumerate(
-            tracks
-        ):
-            if track_id not in prepared_sources:
-                continue
+        for item in ready:
+            context.check()
             try:
                 if aligned is None:
                     result = _run_fa_kara(
-                        client.audio_bytes(external_id), text, language, source_lines or []
+                        self.client.audio_bytes(item.external_id),
+                        item.text,
+                        item.language,
+                        item.source_lines or [],
                     )
                 else:
                     result = next(aligned)
                     if isinstance(result, BaseException):
                         raise result
-                # Aligned from the audio alone; the stored path is never bound to source lines.
-                karaoke_provenance = {
-                    "alignment_mode": "global_ctc_audio_only",
-                    "audio_input": result["diagnostics"]["audio_source"],
-                    "separator_revision": result["diagnostics"]["separator_revision"],
-                    "model": result["model"],
-                    "pipeline_revision": KARAOKE_PIPELINE_REVISION,
-                    "inference_passes": result["diagnostics"].get("inference_passes"),
-                    "korean_labels": "pronunciation_v1",
-                    "syllable_duration_source": "predicted_token_end",
-                    "bound_to_synced_lines": False,
-                }
-                result["lines"] = mark_backing_voice(result["lines"])
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        """INSERT INTO karaoke_lyrics_variants
-                             (track_id, bounded, lines, ass, lrc, model, model_revision, provenance,
-                              alignment_document, diagnostics, created_at)
-                           VALUES (%s,%s,%s,NULL,NULL,'fa_kara',%s,%s,%s,%s,now())
-                           ON CONFLICT (track_id, bounded) DO UPDATE SET lines=EXCLUDED.lines,
-                             ass=EXCLUDED.ass, lrc=EXCLUDED.lrc, model=EXCLUDED.model,
-                             model_revision=EXCLUDED.model_revision, provenance=EXCLUDED.provenance,
-                             alignment_document=EXCLUDED.alignment_document,
-                             diagnostics=EXCLUDED.diagnostics, created_at=now()""",
-                        (
-                            track_id,
-                            False,
-                            Jsonb(result["lines"]),
-                            _stored_model_revision(str(result["model_revision"])),
-                            Jsonb(karaoke_provenance),
-                            Jsonb(result["alignment_document"]),
-                            Jsonb(result["diagnostics"]),
-                        ),
-                    )
-                    cursor.execute(
-                        """UPDATE lyrics SET karaoke_lines=%s, karaoke_ass=NULL, karaoke_lrc=NULL,
-                                  karaoke_model='fa_kara', karaoke_model_revision=%s, karaoke_bounded=%s,
-                                  karaoke_created_at=now(),
-                                  provenance=provenance || %s
-                           WHERE track_id=%s""",
-                        (
-                            Jsonb(result["lines"]),
-                            _stored_model_revision(str(result["model_revision"])),
-                            False,
-                            Jsonb({"karaoke": karaoke_provenance}),
-                            track_id,
-                        ),
-                    )
-                connection.commit()
-                summary["aligned"] += 1
-            except Exception:
-                connection.rollback()
-                summary["failed"] += 1
-                logger.exception("FA-Kara alignment failed for %s", track_id)
-            report(
-                {
-                    "phase": "karaoke",
-                    "message": f"Aligning karaoke lyrics for {title}",
-                    "completed": index + 1,
-                    "total": len(tracks),
+            except Exception as error:  # noqa: BLE001 - one song's alignment
+                logger.exception("FA-Kara alignment failed for %s", item.key)
+                failure = ProcessingError("Alignment failed", stage=type(error).__name__)
+                yield ItemResult.failed(item, failure)
+                continue
+            yield ItemResult(item=item, outcome="aligned", output=result)
+
+    def _prepare(self, context, items):
+        """Fetch (and, for vocals input, separate) every song before the aligner loads.
+
+        Returns the prepared songs' keys (with their Modal upload digest) and the failed songs.
+        """
+        prepared: dict[str, str | None] = {}
+        failed = []
+        separate = _separates_vocals()
+        # One Roformer for every selected song, before the aligner loads. On the original mix
+        # this only fetches each song into the batch's source cache.
+        with separation_phase():
+            for index, item in enumerate(items):
+                update = {
+                    "phase": "preprocess",
+                    "message": f"Preparing karaoke audio for {item.label}",
+                    "total": len(items),
                     "unit": "tracks",
-                    "summary": summary,
                 }
+                context.publish({**update, "completed": index})
+                context.check()
+                try:
+                    source = self.client.audio_bytes(item.external_id)
+                    digest = None
+                    if context.remote is not None:
+                        # Vocals are separated on Modal; only the source audio goes up.
+                        digest = context.remote.upload_audio(source)
+                    elif separate:
+                        prepare_audio(source, vocals=True, check=context.check)
+                    prepared[item.key] = digest
+                    del source
+                except Exception as error:  # noqa: BLE001 - one song's audio
+                    logger.error(
+                        "Karaoke preprocessing failed for %s: %s", item.key, type(error).__name__
+                    )
+                    failed.append(item)
+                context.publish({**update, "completed": index + 1})
+        if context.remote is not None and separate and prepared:
+            # Like local preparation: separate the vocals of exactly the songs selected for
+            # alignment first, so the aligner then stays loaded on Modal instead of being
+            # stopped and reloaded around each song's separation.
+            separating = [item for item in items if item.key in prepared]
+            outcomes = context.remote.prepare_vocals(
+                [prepared[item.key] for item in separating], vocals=True
             )
-    return summary
+            for index, (item, outcome) in enumerate(zip(separating, outcomes)):
+                if isinstance(outcome, BaseException):
+                    logger.error("Vocal separation on Modal failed for %s", item.key)
+                    del prepared[item.key]
+                    failed.append(item)
+                context.publish(
+                    {
+                        "phase": "preprocess",
+                        "message": f"Separating vocals for {item.label}",
+                        "completed": index + 1,
+                        "total": len(separating),
+                        "unit": "tracks",
+                    }
+                )
+        return prepared, failed
+
+    def persist(self, context, item: KaraokeItem, output: dict[str, object]) -> None:
+        try:
+            if item.supplied is not None:
+                _store_supplied_karaoke(
+                    self.connection, item.track_id, item.supplied, item.supplied_digest
+                )
+            else:
+                _store_alignment(self.connection, item.track_id, output)
+                self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+
+    def close(self) -> None:
+        try:
+            if hasattr(self, "client"):
+                self.client.__exit__(None, None, None)
+            if hasattr(self, "connection"):
+                self.connection.close()
+            _stop_fa_kara_worker()
+        finally:
+            if getattr(self, "locked", False):
+                self.locked = False
+                _KARAOKE_LOCK.release()
+
+
+def _store_alignment(connection, track_id, result: dict[str, object]) -> None:
+    """Store an aligned song as its current karaoke variant."""
+    # Aligned from the audio alone; the stored path is never bound to source lines.
+    karaoke_provenance = {
+        "alignment_mode": "global_ctc_audio_only",
+        "audio_input": result["diagnostics"]["audio_source"],
+        "separator_revision": result["diagnostics"]["separator_revision"],
+        "model": result["model"],
+        "pipeline_revision": KARAOKE_PIPELINE_REVISION,
+        "inference_passes": result["diagnostics"].get("inference_passes"),
+        "korean_labels": "pronunciation_v1",
+        "syllable_duration_source": "predicted_token_end",
+        "bound_to_synced_lines": False,
+    }
+    lines = mark_backing_voice(result["lines"])
+    revision = _stored_model_revision(str(result["model_revision"]))
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """INSERT INTO karaoke_lyrics_variants
+                 (track_id, bounded, lines, ass, lrc, model, model_revision, provenance,
+                  alignment_document, diagnostics, created_at)
+               VALUES (%s,%s,%s,NULL,NULL,'fa_kara',%s,%s,%s,%s,now())
+               ON CONFLICT (track_id, bounded) DO UPDATE SET lines=EXCLUDED.lines,
+                 ass=EXCLUDED.ass, lrc=EXCLUDED.lrc, model=EXCLUDED.model,
+                 model_revision=EXCLUDED.model_revision, provenance=EXCLUDED.provenance,
+                 alignment_document=EXCLUDED.alignment_document,
+                 diagnostics=EXCLUDED.diagnostics, created_at=now()""",
+            (
+                track_id,
+                False,
+                Jsonb(lines),
+                revision,
+                Jsonb(karaoke_provenance),
+                Jsonb(result["alignment_document"]),
+                Jsonb(result["diagnostics"]),
+            ),
+        )
+        cursor.execute(
+            """UPDATE lyrics SET karaoke_lines=%s, karaoke_ass=NULL, karaoke_lrc=NULL,
+                      karaoke_model='fa_kara', karaoke_model_revision=%s, karaoke_bounded=%s,
+                      karaoke_created_at=now(),
+                      provenance=provenance || %s
+               WHERE track_id=%s""",
+            (Jsonb(lines), revision, False, Jsonb({"karaoke": karaoke_provenance}), track_id),
+        )

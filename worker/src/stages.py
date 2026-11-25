@@ -162,14 +162,10 @@ def _theme_processor() -> Processor:
     return ThemeProcessor()
 
 
-def _karaoke(batch: Batch) -> dict[str, Any]:
-    from worker.kara.pipeline import backfill_karaoke
+def _karaoke_processor() -> Processor:
+    from worker.kara.pipeline import KaraokeProcessor
 
-    return {
-        "karaoke": backfill_karaoke(
-            *batch.library, progress=batch.report, external_ids=batch.track_ids
-        )
-    }
+    return KaraokeProcessor()
 
 
 def _translation_processor() -> Processor:
@@ -239,7 +235,7 @@ AUDIO_PROFILES = Stage("audio_profiles", _audio_profiles)
 LYRICS = Stage("lyrics", _lyrics)
 TRANSLATIONS = processor_stage("translations", _translation_processor)
 THEMES = processor_stage("themes", _theme_processor)
-KARAOKE = Stage("karaoke", _karaoke)
+KARAOKE = processor_stage("karaoke", _karaoke_processor)
 VOICE = processor_stage("voice", _voice_processor)
 # Last in a sync, so earlier stages have released their models before ComfyUI needs the GPU.
 # Prompts come first, so no GPU (here or on Modal) idles while External AI writes them.
