@@ -1,9 +1,14 @@
 import json
+import uuid
 
 import httpx
 import httpx2
 import numpy as np
 import pytest
+
+from worker.processing import ProcessingContext, run_stage
+
+T = {n: uuid.UUID(f"00000000-0000-4000-8000-00000000000{n}") for n in (1, 2, 3)}
 
 import worker.themes.pipeline as lyric_themes
 import core.lyrics.translations as translation_storage
@@ -11,7 +16,7 @@ from core.integrations.external_ai import ExternalAISettings
 from worker.themes.pipeline import (
     PROMPT_REVISION,
     ThemeError,
-    backfill_themes,
+    ThemeProcessor,
     describe,
     lyrics_checksum,
     parse,
@@ -152,6 +157,15 @@ class Embedded:
         self.aggregate = np.full(1024, value, np.float32)
 
 
+def describe_batch(ids, *, progress, describe_fn=None, embed=None):
+    """The themes stage's summary for a batch of these Navidrome ids."""
+    context = ProcessingContext(
+        publish=progress, user_id="user", library=("http://n", "u", "p"), track_ids=tuple(ids)
+    )
+    processor = ThemeProcessor(describe_fn=describe_fn, embed=embed)
+    return run_stage(processor, context).as_dict()
+
+
 @pytest.fixture
 def backfill(monkeypatch):
     state = {"settings": claude(), "saved": [], "rows": []}
@@ -163,24 +177,18 @@ def backfill(monkeypatch):
 
 def test_backfill_disabled_does_nothing(backfill):
     backfill["settings"] = claude(lyric_themes=False)
-    backfill["rows"] = [{"track_id": 1, "text": "x", "title": "t"}]
-    calls = []
-    result = backfill_themes(
-        None,
-        "http://n",
-        [],
-        check=lambda: None,
-        progress=calls.append,
-        describe_fn=lambda *a: calls.append(a),
-    )
+    backfill["rows"] = [{"track_id": T[1], "text": "x", "title": "t"}]
+    calls, progress = [], []
+    result = describe_batch([], progress=progress.append, describe_fn=lambda *a: calls.append(a))
     assert result == {"described": 0, "failed": 0} and calls == [] and backfill["saved"] == []
+    assert [update["message"] for update in progress] == ["Already current"]
 
 
 def test_backfill_records_ready_and_failed(backfill):
     backfill["rows"] = [
-        {"track_id": 1, "text": "good", "title": "a"},
-        {"track_id": 2, "text": "refused", "title": "b"},
-        {"track_id": 3, "text": "unembeddable", "title": "c"},
+        {"track_id": T[1], "text": "good", "title": "a"},
+        {"track_id": T[2], "text": "refused", "title": "b"},
+        {"track_id": T[3], "text": "unembeddable", "title": "c"},
     ]
 
     def fake_describe(settings, key, text):
@@ -193,20 +201,14 @@ def test_backfill_records_ready_and_failed(backfill):
         return [Embedded(0.5), RuntimeError("boom")]
 
     progress = []
-    result = backfill_themes(
-        None,
-        "http://n",
-        ["a"],
-        check=lambda: None,
-        progress=progress.append,
-        describe_fn=fake_describe,
-        embed=fake_embed,
+    result = describe_batch(
+        ["a"], progress=progress.append, describe_fn=fake_describe, embed=fake_embed
     )
     assert result == {"described": 1, "failed": 2}
     by_track = {args[0]: kw for args, kw in backfill["saved"]}
-    assert by_track[1]["description"] == "about good" and by_track[1]["vector"][0] == 0.5
-    assert by_track[2] == {"code": "refusal"}
-    assert by_track[3] == {"code": "embedding_failed"}
+    assert by_track[T[1]]["description"] == "about good" and by_track[T[1]]["vector"][0] == 0.5
+    assert by_track[T[2]] == {"code": "refusal"}
+    assert by_track[T[3]] == {"code": "embedding_failed"}
     assert backfill["saved"][0][0][1] == lyrics_checksum("refused")
     assert progress[-1]["completed"] == 3 and progress[-1]["phase"] == "themes"
 

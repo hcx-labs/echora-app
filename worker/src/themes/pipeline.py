@@ -22,6 +22,8 @@ import json
 import logging
 import time
 import uuid
+from dataclasses import dataclass
+from typing import Any
 
 import httpx
 import psycopg
@@ -33,6 +35,7 @@ from core.integrations.claude import ClaudeError, complete_json
 from core.integrations.external_ai import ExternalAISettings
 from core.revisions import LYRIC_THEMES_REVISION
 from core.db.config import require_database_url
+from worker.processing import Item, ItemResult, ProcessingContext, Processor
 
 logger = logging.getLogger(__name__)
 
@@ -251,70 +254,111 @@ class _Embedder:
             self.model = None
 
 
-def backfill_themes(
-    user_id, url, external_ids, *, check, progress, describe_fn=describe, embed=None
-):
-    summary = {"described": 0, "failed": 0}
-    from core.lyrics.translations import load_settings
+class ThemeItem(Item):
+    """A song whose lyrics have no current description."""
 
-    settings, encrypted = load_settings()
-    if not enabled(settings):
-        return summary
+    track_id: uuid.UUID
+    text: str
 
-    key = credential_cipher().decrypt(bytes(encrypted)).decode() if encrypted else None
-    tracks = _pending(user_id, url, external_ids)
-    if not tracks:
-        return summary
-    embedder = embed or _Embedder()
-    try:
+
+@dataclass(frozen=True)
+class ThemeRecord:
+    """What is stored for one song: its description, or the code of why there is none."""
+
+    checksum: str
+    description: str | None = None
+    themes: tuple[str, ...] = ()
+    vector: Any = None
+    code: str | None = None
+
+
+class ThemeProcessor(Processor[None, ThemeItem, ThemeRecord]):
+    """Describes the batch's songs with External AI and embeds the descriptions with BGE-M3.
+
+    Runs while External AI and its ``lyric_themes`` switch are on, and stops between chunks when
+    either is switched off. A song the model would not describe, or whose description could not
+    be embedded, is stored as failed with a safe code and retried after a week.
+    """
+
+    name = "themes"
+    summary_key = "themes"
+    counters = ("described",)
+    total_key = None
+    activity = "Describing song themes"
+
+    def __init__(self, describe_fn=None, embed=None):
+        super().__init__()
+        self.describe = describe_fn or describe
+        self.embed = embed
+
+    def plan(self, context: ProcessingContext) -> list[ThemeItem]:
+        from core.lyrics.translations import load_settings
+
+        self.settings, encrypted = load_settings()
+        if not enabled(self.settings):
+            return []
+        self.key = credential_cipher().decrypt(bytes(encrypted)).decode() if encrypted else None
+        rows = _pending(context.user_id, context.library_url, list(context.track_ids))
+        return [
+            ThemeItem(
+                key=str(row["track_id"]),
+                label=row.get("title") or "",
+                track_id=row["track_id"],
+                text=row["text"],
+            )
+            for row in rows
+        ]
+
+    def open(self, context: ProcessingContext, items) -> None:
+        self.embedder = self.embed or _Embedder()
+
+    def process(self, context, items):
+        from core.lyrics.translations import load_settings
+
         with concurrent.futures.ThreadPoolExecutor(CONCURRENCY) as pool:
-            for start in range(0, len(tracks), CHUNK):
-                check()
-                current, _ = load_settings()
-                if not enabled(current):
-                    return summary
-                chunk = tracks[start : start + CHUNK]
-                futures = [pool.submit(describe_fn, settings, key, row["text"]) for row in chunk]
+            for start in range(0, len(items), CHUNK):
+                context.check()
+                if not enabled(load_settings()[0]):
+                    return
+                chunk = items[start : start + CHUNK]
+                futures = [
+                    pool.submit(self.describe, self.settings, self.key, item.text) for item in chunk
+                ]
                 written = []
-                for row, future in zip(chunk, futures):
-                    checksum = lyrics_checksum(row["text"])
+                for item, future in zip(chunk, futures):
+                    checksum = lyrics_checksum(item.text)
                     try:
-                        written.append((row, checksum, *future.result()))
+                        written.append((item, checksum, *future.result()))
                     except ThemeError as error:
                         # Safe code only: no lyrics, replies or keys in logs.
-                        logger.warning(
-                            "Theme description failed for %s: %s", row["track_id"], error
-                        )
-                        _save(row["track_id"], checksum, settings.model, code=str(error))
-                        summary["failed"] += 1
-                check()
-                vectors = embedder([search_text(d, t) for _, _, d, t in written]) if written else []
-                for (row, checksum, description, themes), vector in zip(written, vectors):
+                        logger.warning("Theme description failed for %s: %s", item.key, error)
+                        record = ThemeRecord(checksum, code=str(error))
+                        yield ItemResult(item=item, outcome="failed", output=record)
+                context.check()
+                texts = [search_text(d, t) for _, _, d, t in written]
+                vectors = self.embedder(texts) if written else []
+                for (item, checksum, description, themes), vector in zip(written, vectors):
                     if isinstance(vector, BaseException):
-                        logger.warning("Theme embedding failed for %s", row["track_id"])
-                        _save(row["track_id"], checksum, settings.model, code="embedding_failed")
-                        summary["failed"] += 1
+                        logger.warning("Theme embedding failed for %s", item.key)
+                        record = ThemeRecord(checksum, code="embedding_failed")
+                        yield ItemResult(item=item, outcome="failed", output=record)
                         continue
-                    _save(
-                        row["track_id"],
-                        checksum,
-                        settings.model,
-                        description=description,
-                        themes=themes,
-                        vector=vector.aggregate,
-                    )
-                    summary["described"] += 1
-                progress(
-                    {
-                        "phase": "themes",
-                        "message": "Describing song themes",
-                        "completed": min(start + CHUNK, len(tracks)),
-                        "total": len(tracks),
-                        "unit": "tracks",
-                        "summary": summary,
-                    }
-                )
-    finally:
-        if embed is None:
-            embedder.close()
-    return summary
+                    record = ThemeRecord(checksum, description, tuple(themes), vector.aggregate)
+                    yield ItemResult(item=item, outcome="described", output=record)
+
+    def persist(self, context, item: ThemeItem, output: ThemeRecord) -> None:
+        if output.code:
+            _save(item.track_id, output.checksum, self.settings.model, code=output.code)
+        else:
+            _save(
+                item.track_id,
+                output.checksum,
+                self.settings.model,
+                description=output.description,
+                themes=list(output.themes),
+                vector=output.vector,
+            )
+
+    def close(self) -> None:
+        if self.embed is None and hasattr(self, "embedder"):
+            self.embedder.close()

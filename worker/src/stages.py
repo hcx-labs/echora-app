@@ -156,14 +156,10 @@ def _lyrics(batch: Batch) -> dict[str, Any]:
     }
 
 
-def _themes(batch: Batch) -> dict[str, Any]:
-    from worker.themes.pipeline import backfill_themes
+def _theme_processor() -> Processor:
+    from worker.themes.pipeline import ThemeProcessor
 
-    return {
-        "themes": backfill_themes(
-            batch.user_id, batch.url, batch.track_ids, check=batch.check, progress=batch.report
-        )
-    }
+    return ThemeProcessor()
 
 
 def _karaoke(batch: Batch) -> dict[str, Any]:
@@ -244,7 +240,7 @@ LIBRARY = Stage("library", _library)
 AUDIO_PROFILES = Stage("audio_profiles", _audio_profiles)
 LYRICS = Stage("lyrics", _lyrics)
 TRANSLATIONS = processor_stage("translations", _translation_processor)
-THEMES = Stage("themes", _themes)
+THEMES = processor_stage("themes", _theme_processor)
 KARAOKE = Stage("karaoke", _karaoke)
 VOICE = Stage("voice", _voice)
 # Last in a sync, so earlier stages have released their models before ComfyUI needs the GPU.
