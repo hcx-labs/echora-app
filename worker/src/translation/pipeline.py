@@ -9,6 +9,7 @@ import uuid
 from core.db.connection import connect
 from core.integrations.external_ai import LanguagePair
 from core.library.connections import credential_cipher
+from core.lyrics import store
 from core.lyrics.translations import (
     TranslationError,
     load_settings,
@@ -115,15 +116,8 @@ class TranslationProcessor(Processor[None, TranslationItem, list[dict]]):
             return []
         self.key = credential_cipher().decrypt(bytes(encrypted)).decode() if encrypted else None
         namespace = uuid.uuid5(uuid.NAMESPACE_URL, context.library_url.rstrip("/"))
-        with connect(dict_rows=True) as db:
-            tracks = db.execute(
-                """SELECT DISTINCT l.track_id, l.text, l.language, l.provenance
-                FROM lyrics l JOIN user_track_links u ON u.track_id=l.track_id
-                JOIN libraries lib ON lib.id=u.library_id
-                WHERE u.user_id=%s AND lib.namespace=%s AND u.external_id=ANY(%s)
-                  AND NULLIF(btrim(l.text),'') IS NOT NULL""",
-                (context.user_id, namespace, list(context.track_ids)),
-            ).fetchall()
+        with connect() as db:
+            tracks = store.batch_lyrics(db, context.user_id, namespace, list(context.track_ids))
         items = []
         for row in tracks:
             context.check()
@@ -218,10 +212,8 @@ class TranslationProcessor(Processor[None, TranslationItem, list[dict]]):
 
     @staticmethod
     def _lyrics_changed(item: TranslationItem) -> bool:
-        with connect(dict_rows=True) as db:
-            latest = db.execute(
-                "SELECT text, provenance FROM lyrics WHERE track_id=%s", (item.track_id,)
-            ).fetchone()
+        with connect() as db:
+            latest = store.lyrics_source(db, item.track_id)
         return latest is None or source_checksum(source_lines(latest)) != source_checksum(
             list(item.lines)
         )

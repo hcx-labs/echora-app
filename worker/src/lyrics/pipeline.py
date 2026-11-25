@@ -12,8 +12,8 @@ from dataclasses import dataclass
 
 import psycopg
 import torch
-from psycopg.types.json import Jsonb
 
+from core.analysis import store as runs
 from core.db.connection import connect
 from core.embeddings.audio_models import release_model
 from core.embeddings.config import EmbeddingConfig
@@ -22,6 +22,7 @@ from core.embeddings.text import LyricsEmbeddingModel
 from core.errors import ProcessingError
 from core.integrations.navidrome import NavidromeClient
 from core.library.connections import credential_cipher
+from core.lyrics import store
 from core.lyrics.language import detect_distribution
 from core.lyrics.sources import store_original
 from worker.library.attempts import finish_attempt, record_track, start_attempt
@@ -50,23 +51,15 @@ def _create_run(connection: psycopg.Connection, model: LyricsEmbeddingModel) -> 
         "torch": torch.__version__,
         "cuda": torch.version.cuda,
     }
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO analysis_runs
-                 (kind, model_name, model_revision, config_hash, config, environment, device, precision, status, started_at)
-               VALUES ('lyrics_embedding',%s,%s,%s,%s,%s,%s,'float32','running',now())
-               ON CONFLICT (kind, model_name, model_revision, config_hash)
-               DO UPDATE SET id=analysis_runs.id RETURNING id""",
-            (
-                model.name,
-                model.revision,
-                config_hash,
-                Jsonb(config),
-                Jsonb(environment),
-                str(model.device),
-            ),
-        )
-        return cursor.fetchone()[0]
+    return store.lyrics_embedding_run(
+        connection,
+        model.name,
+        model.revision,
+        config_hash,
+        config,
+        environment,
+        str(model.device),
+    )
 
 
 def word_timing_digest(lines) -> str:
@@ -104,16 +97,16 @@ def _provenance(result: dict[str, object], language_distribution: dict) -> dict[
 def _instrumental_evidence(connection, track_id) -> dict | None:
     from worker.transcription.evidence import instrumental_song
 
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """SELECT a.activity FROM track_vocal_activity a
-               JOIN current_embeddings e ON e.track_id=a.track_id AND e.run_id=a.run_id
-               WHERE a.track_id=%s AND e.embedding_type='voice-gender'
-               ORDER BY a.created_at DESC LIMIT 1""",
-            (track_id,),
-        )
-        row = cursor.fetchone()
-    return instrumental_song(row[0]) if row else None
+    activity = store.voice_activity(connection, track_id)
+    return instrumental_song(activity) if activity is not None else None
+
+
+def _stored_result(stored: dict) -> dict[str, object]:
+    return {
+        "text": stored["text"],
+        "status": stored["availability_status"],
+        **(stored["provenance"] or {}),
+    }
 
 
 def _language(language_distribution: dict, result: dict[str, object]) -> str | None:
@@ -129,64 +122,40 @@ def _store_lyrics(
     source = "transcribed" if result.get("ai_generated") else "embedded" if text else "none"
     language_distribution = detect_distribution(str(text) if text else None)
     language = _language(language_distribution, result)
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO lyrics (track_id, source, text, language, provenance, availability_status)
-               VALUES (%s,%s,%s,%s,%s,%s)
-               ON CONFLICT (track_id) DO UPDATE SET source=EXCLUDED.source, text=EXCLUDED.text,
-                 language=EXCLUDED.language, provenance=EXCLUDED.provenance,
-                 availability_status=EXCLUDED.availability_status, created_at=now()
-               WHERE (EXCLUDED.source != 'transcribed' AND EXCLUDED.text IS NOT NULL)
-                  OR NULLIF(btrim(lyrics.text), '') IS NULL
-               RETURNING id""",
-            (
-                track_id,
-                source,
-                text,
-                language,
-                Jsonb(_provenance(result, language_distribution)),
-                status,
-            ),
-        )
-        row = cursor.fetchone()
-        return row[0] if row else None
+    return store.save_lyrics(
+        connection,
+        track_id,
+        source,
+        text,
+        language,
+        _provenance(result, language_distribution),
+        status,
+    )
 
 
 def _store_embeddings(
     connection: psycopg.Connection, track_id: uuid.UUID, run_id: uuid.UUID, result
 ) -> None:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "DELETE FROM embeddings WHERE track_id=%s AND run_id=%s AND embedding_type='lyrics'",
-            (track_id, run_id),
-        )
-        cursor.execute(
-            """INSERT INTO embeddings
-                 (track_id, run_id, embedding_type, dimension, aggregation, embedding, inference_ms, peak_vram_bytes)
-               VALUES (%s,%s,'lyrics',%s,'normalized_mean',%s::vector,%s,%s)""",
+    store.replace_lyrics_embeddings(
+        connection,
+        track_id,
+        run_id,
+        {
+            "dimension": len(result.aggregate),
+            "embedding": _vector_literal(result.aggregate),
+            "inference_ms": result.inference_ms,
+            "peak_vram_bytes": result.peak_vram_bytes,
+        },
+        [
             (
-                track_id,
-                run_id,
-                len(result.aggregate),
-                _vector_literal(result.aggregate),
-                result.inference_ms,
-                result.peak_vram_bytes,
-            ),
-        )
-        for index, (vector, token_range) in enumerate(zip(result.windows, result.token_ranges)):
-            cursor.execute(
-                """INSERT INTO embeddings
-                     (track_id, run_id, embedding_type, window_index, dimension, aggregation, embedding)
-                   VALUES (%s,%s,'lyrics',%s,%s,%s,%s::vector)""",
-                (
-                    track_id,
-                    run_id,
-                    index,
-                    len(vector),
-                    f"tokens:{token_range[0]}-{token_range[1]}",
-                    _vector_literal(vector),
-                ),
+                index,
+                len(vector),
+                f"tokens:{token_range[0]}-{token_range[1]}",
+                _vector_literal(vector),
             )
+            for index, (vector, token_range) in enumerate(zip(result.windows, result.token_ranges))
+        ],
+    )
 
 
 class LyricsItem(Item):
@@ -247,20 +216,15 @@ class LyricsProcessor(Processor[None, LyricsItem, LyricsResult]):
                 planned = frozenset(ids)
             if not planned:
                 return []
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """SELECT DISTINCT ON (ts.track_id) ts.track_id, ts.external_id, t.title
-                       FROM track_sources ts JOIN tracks t ON t.id=ts.track_id
-                       WHERE ts.source_type='subsonic' AND ts.external_id=ANY(%s) AND ts.library_id=%s
-                       ORDER BY ts.track_id, ts.id""",
-                    (list(planned), self.library_id),
-                )
-                rows = cursor.fetchall()
+            rows = store.source_titles(connection, list(planned), self.library_id)
         return [
             LyricsItem(
-                key=str(track_id), label=title or "", track_id=track_id, external_id=external_id
+                key=str(row["track_id"]),
+                label=row["title"] or "",
+                track_id=row["track_id"],
+                external_id=row["external_id"],
             )
-            for track_id, external_id, title in rows
+            for row in rows
         ]
 
     def open(self, context, items) -> None:
@@ -311,26 +275,19 @@ class LyricsProcessor(Processor[None, LyricsItem, LyricsResult]):
         )
         connection.commit()
         # Manual edits remain authoritative when their embedding needs to be rebuilt.
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT text, provenance, availability_status, source FROM lyrics WHERE track_id=%s",
-                (item.track_id,),
-            )
-            stored = cursor.fetchone()
-        if stored and (stored[1] or {}).get("manual_status"):
+        stored = store.stored_lyrics(connection, item.track_id)
+        if stored and (stored["provenance"] or {}).get("manual_status"):
             # A user-set status is final, even though these rows use source='none'.
             lyrics = {
-                "text": stored[0],
-                "status": (stored[1] or {})["manual_status"],
-                **(stored[1] or {}),
+                "text": stored["text"],
+                "status": (stored["provenance"] or {})["manual_status"],
+                **(stored["provenance"] or {}),
             }
             return LyricsResult(lyrics, store=False)
-        if stored and stored[3] == "manual":
-            return LyricsResult(
-                {"text": stored[0], "status": stored[2], **(stored[1] or {})}, store=False
-            )
-        if stored and (stored[1] or {}).get("forced_transcription"):
-            forced_language = str((stored[1] or {}).get("transcription_language") or "")
+        if stored and stored["source"] == "manual":
+            return LyricsResult(_stored_result(stored), store=False)
+        if stored and (stored["provenance"] or {}).get("forced_transcription"):
+            forced_language = str((stored["provenance"] or {}).get("transcription_language") or "")
             config = transcription_model() if transcription_enabled(connection) else None
             if not config:
                 raise RuntimeError("AI lyric generation is disabled")
@@ -342,16 +299,9 @@ class LyricsProcessor(Processor[None, LyricsItem, LyricsResult]):
             return LyricsResult(lyrics)
         # A retrieval miss must not erase a previous AI transcript or lyrics that merely need
         # embedding with a newer embedding model.
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT text, provenance, availability_status FROM lyrics WHERE track_id=%s AND (NULLIF(btrim(text),'') IS NOT NULL OR availability_status='instrumental')",
-                (item.track_id,),
-            )
-            stored = cursor.fetchone()
+        stored = store.kept_lyrics(connection, item.track_id)
         if stored:
-            return LyricsResult(
-                {"text": stored[0], "status": stored[2], **(stored[1] or {})}, store=False
-            )
+            return LyricsResult(_stored_result(stored), store=False)
         if lyrics.get("status") == "instrumental":
             return LyricsResult(lyrics)
         if evidence := _instrumental_evidence(connection, item.track_id):
@@ -444,15 +394,7 @@ class LyricsProcessor(Processor[None, LyricsItem, LyricsResult]):
                             "unit": "tracks",
                         }
                     )
-                    with connection.cursor() as cursor:
-                        cursor.execute(
-                            """SELECT a.activity FROM track_vocal_activity a
-                            JOIN current_embeddings e ON e.track_id=a.track_id AND e.run_id=a.run_id
-                            WHERE a.track_id=%s AND e.embedding_type='voice-gender'
-                            ORDER BY a.created_at DESC LIMIT 1""",
-                            (item.track_id,),
-                        )
-                        activity_row = cursor.fetchone()
+                    activity = store.voice_activity(connection, item.track_id)
                     arguments = {
                         "language": str(candidate.missing.get("transcription_language") or "")
                         or None,
@@ -461,7 +403,7 @@ class LyricsProcessor(Processor[None, LyricsItem, LyricsResult]):
                             {"phase": "transcription", "message": f"{title}: {detail}"}
                         ),
                         "diagnostic_sink": diagnostic_writer(item.track_id),
-                        "vocal_activity": activity_row[0] if activity_row else None,
+                        "vocal_activity": activity,
                     }
                     audio = client.audio_bytes(item.external_id)
                     if remote is None:
@@ -600,16 +542,14 @@ class TranscriptRefinementProcessor(Processor[None, RefinementItem, dict[str, ob
                     "unit": "tracks",
                 }
             )
-            artist = self.connection.execute(
-                "SELECT artist FROM tracks WHERE id=%s", (item.track_id,)
-            ).fetchone()
+            artist = store.track_artist(self.connection, item.track_id)
             try:
                 refined = refine(
                     self.settings,
                     self.key,
                     item.lyrics,
                     title=item.label,
-                    artist=(artist[0] if artist else "") or "",
+                    artist=artist or "",
                     languages=(
                         detect_distribution(str(item.lyrics["text"])).get("languages") or {}
                     ),
@@ -623,17 +563,14 @@ class TranscriptRefinementProcessor(Processor[None, RefinementItem, dict[str, ob
     def persist(self, context, item: RefinementItem, output: dict[str, object]) -> tuple[str, ...]:
         distribution = detect_distribution(str(output["text"]))
         try:
-            updated = self.connection.execute(
-                """UPDATE lyrics SET text=%s, language=%s, provenance=%s
-                   WHERE track_id=%s AND source='transcribed' AND text=%s""",
-                (
-                    output["text"],
-                    _language(distribution, output),
-                    Jsonb(_provenance(output, distribution)),
-                    item.track_id,
-                    item.lyrics["text"],
-                ),
-            ).rowcount
+            updated = store.refine_transcript(
+                self.connection,
+                item.track_id,
+                item.lyrics["text"],
+                output["text"],
+                _language(distribution, output),
+                _provenance(output, distribution),
+            )
             self.connection.commit()
         except Exception:
             self.connection.rollback()
@@ -718,11 +655,7 @@ class LyricsEmbeddingProcessor(Processor[None, EmbeddingItem, object]):
                 continue
             yield ItemResult(item=item, outcome="embedded", output=embedded)
         finish_attempt(self.connection, self.attempt_id)
-        with self.connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE analysis_runs SET status='complete', finished_at=now() WHERE id=%s",
-                (self.run_id,),
-            )
+        runs.complete_run(self.connection, self.run_id)
         self.connection.commit()
 
     def _record_failure(self, item: EmbeddingItem) -> None:

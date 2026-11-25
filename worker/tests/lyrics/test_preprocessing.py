@@ -29,12 +29,14 @@ def setup(monkeypatch, provider, stored=None):
         last.update(sql=sql, params=params)
 
     cursor.execute.side_effect = execute
-    cursor.fetchall.return_value = [(ids[key], key, key) for key in provider]
+    cursor.fetchall.return_value = [
+        {"track_id": ids[key], "external_id": key, "title": key} for key in provider
+    ]
     cursor.fetchone.side_effect = lambda: (
         stored.get(last["params"][0]) if "SELECT text," in last["sql"] else None
     )
     connection = Mock()
-    connection.cursor.side_effect = lambda: nullcontext(cursor)
+    connection.cursor.side_effect = lambda **_: nullcontext(cursor)
     monkeypatch.setenv("DATABASE_URL", "unused")
     reset_config_cache()
     monkeypatch.setattr(lp, "connect", lambda **_: nullcontext(connection))
@@ -141,7 +143,11 @@ def test_existing_text_and_disabled_transcription_do_not_prepare(monkeypatch):
             "disabled": {"text": None, "status": "missing"},
         },
     )
-    state.stored[state.ids["existing"]] = ("previous text", {}, "available")
+    state.stored[state.ids["existing"]] = {
+        "text": "previous text",
+        "provenance": {},
+        "availability_status": "available",
+    }
     monkeypatch.setattr(transcription_config, "transcription_enabled", Mock(return_value=False))
     run_lyrics()
     lp.prepare_audio.assert_not_called()
@@ -260,9 +266,7 @@ def test_new_transcripts_are_refined_before_embedding(monkeypatch):
         "refine",
         lambda settings, key, lyrics, **song: {**lyrics, "text": "corrected words"},
     )
-    state.connection.execute.return_value = SimpleNamespace(
-        fetchone=lambda: ("Artist",), rowcount=1
-    )
+    state.cursor.rowcount = 1
     embedded = []
     model = Mock()
     model.embed.side_effect = lambda text: embedded.append(text)
@@ -279,7 +283,12 @@ def test_manual_lyrics_stay_authoritative_after_archiving_the_provider_original(
         "source": "getLyricsBySongId",
     }
     state = setup(monkeypatch, {"song": original})
-    state.stored[state.ids["song"]] = ("Manual authoritative text", {}, "available", "manual")
+    state.stored[state.ids["song"]] = {
+        "text": "Manual authoritative text",
+        "provenance": {},
+        "availability_status": "available",
+        "source": "manual",
+    }
     archived = Mock(side_effect=lambda *args: state.events.append(("archive", None)))
     monkeypatch.setattr(lp, "store_original", archived)
     lp._store_embeddings.side_effect = lambda *args: state.events.append(("embed", None))
