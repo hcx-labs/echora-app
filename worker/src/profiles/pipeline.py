@@ -13,9 +13,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import psycopg
-from psycopg.types.json import Jsonb
 from sklearn.metrics import adjusted_rand_score
 
+from core.analysis import store as runs
 from core.db.connection import connect
 from core.embeddings.representations import (
     DEFAULT_PARAMETERS,
@@ -23,6 +23,7 @@ from core.embeddings.representations import (
     profile_config,
 )
 from core.errors import ProcessingError
+from core.profiles import store
 from core.revisions import AUDIO_PROFILE_REVISION, SUPPORTED_PROFILE_MODELS
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
 
@@ -412,24 +413,9 @@ def _create_profile_run(
     config_hash = hashlib.sha256(
         json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO analysis_runs
-                 (kind, model_name, model_revision, config_hash, config, environment,
-                  device, precision, status, started_at)
-               VALUES ('audio_profile',%s,%s,%s,%s,%s,'cpu','float32','running',now())
-               ON CONFLICT (kind, model_name, model_revision, config_hash)
-               DO UPDATE SET id=analysis_runs.id
-               RETURNING id""",
-            (
-                model_name,
-                AUDIO_PROFILE_REVISION,
-                config_hash,
-                Jsonb(config),
-                Jsonb(environment),
-            ),
-        )
-        return cursor.fetchone()["id"]
+    return store.profile_run(
+        connection, model_name, AUDIO_PROFILE_REVISION, config_hash, config, environment
+    )
 
 
 def _store_profile(
@@ -440,82 +426,39 @@ def _store_profile(
     model_name: str,
     profile: TrackAudioProfile,
 ) -> None:
-    dimension = len(profile.global_overlap)
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO track_audio_profiles
-                 (track_id, profile_run_id, source_run_id, model_name, dimension,
-                  global_overlap_embedding, global_decorrelated_embedding,
-                  resultant_length, mean_global_similarity, p05_global_similarity,
-                  adjacent_change_mean, adjacent_change_p95, timestamps_exact, mode_count)
-               VALUES (%s,%s,%s,%s,%s,%s::vector,%s::vector,%s,%s,%s,%s,%s,%s,%s)
-               ON CONFLICT (track_id, profile_run_id, source_run_id) DO UPDATE SET
-                 dimension=EXCLUDED.dimension,
-                 model_name=EXCLUDED.model_name,
-                 global_overlap_embedding=EXCLUDED.global_overlap_embedding,
-                 global_decorrelated_embedding=EXCLUDED.global_decorrelated_embedding,
-                 resultant_length=EXCLUDED.resultant_length,
-                 mean_global_similarity=EXCLUDED.mean_global_similarity,
-                 p05_global_similarity=EXCLUDED.p05_global_similarity,
-                 adjacent_change_mean=EXCLUDED.adjacent_change_mean,
-                 adjacent_change_p95=EXCLUDED.adjacent_change_p95,
-                 timestamps_exact=EXCLUDED.timestamps_exact,
-                 mode_count=EXCLUDED.mode_count,
-                 created_at=now()
-               RETURNING id""",
+    store.save_profile(
+        connection,
+        (
+            track_id,
+            profile_run_id,
+            source_run_id,
+            model_name,
+            len(profile.global_overlap),
+            _vector_literal(profile.global_overlap),
+            _vector_literal(profile.global_decorrelated),
+            profile.resultant_length,
+            profile.mean_global_similarity,
+            profile.p05_global_similarity,
+            profile.adjacent_change_mean,
+            profile.adjacent_change_p95,
+            profile.timestamps_exact,
+            len(profile.modes),
+        ),
+        [
             (
-                track_id,
-                profile_run_id,
-                source_run_id,
-                model_name,
-                dimension,
-                _vector_literal(profile.global_overlap),
-                _vector_literal(profile.global_decorrelated),
-                profile.resultant_length,
-                profile.mean_global_similarity,
-                profile.p05_global_similarity,
-                profile.adjacent_change_mean,
-                profile.adjacent_change_p95,
-                profile.timestamps_exact,
-                len(profile.modes),
-            ),
-        )
-        profile_id = cursor.fetchone()["id"]
-        cursor.execute(
-            "DELETE FROM audio_temporal_segments WHERE profile_id=%s",
-            (profile_id,),
-        )
-        cursor.execute(
-            "DELETE FROM audio_modes WHERE profile_id=%s",
-            (profile_id,),
-        )
-        cursor.executemany(
-            """INSERT INTO audio_temporal_segments
-                 (profile_id, segment_index, start_seconds, end_seconds,
-                  dimension, embedding, cohesion, representative_window_index)
-               VALUES (%s,%s,%s,%s,%s,%s::vector,%s,%s)""",
-            [
+                item.index,
+                item.start_seconds,
+                item.end_seconds,
+                len(item.vector),
+                _vector_literal(item.vector),
+                item.cohesion,
+                item.representative_window_index,
+            )
+            for item in profile.segments
+        ],
+        [
+            (
                 (
-                    profile_id,
-                    item.index,
-                    item.start_seconds,
-                    item.end_seconds,
-                    len(item.vector),
-                    _vector_literal(item.vector),
-                    item.cohesion,
-                    item.representative_window_index,
-                )
-                for item in profile.segments
-            ],
-        )
-        for item in profile.modes:
-            cursor.execute(
-                """INSERT INTO audio_modes
-                     (profile_id, mode_index, dimension, embedding,
-                      duration_weight, cohesion, representative_window_index)
-                   VALUES (%s,%s,%s,%s::vector,%s,%s,%s) RETURNING id""",
-                (
-                    profile_id,
                     item.index,
                     len(item.vector),
                     _vector_literal(item.vector),
@@ -523,16 +466,11 @@ def _store_profile(
                     item.cohesion,
                     item.representative_window_index,
                 ),
+                [(interval.start_seconds, interval.end_seconds) for interval in item.intervals],
             )
-            mode_id = cursor.fetchone()["id"]
-            cursor.executemany(
-                """INSERT INTO audio_mode_intervals (mode_id, interval_index, start_seconds, end_seconds)
-                   VALUES (%s,%s,%s,%s)""",
-                [
-                    (mode_id, index, interval.start_seconds, interval.end_seconds)
-                    for index, interval in enumerate(item.intervals)
-                ],
-            )
+            for item in profile.modes
+        ],
+    )
 
 
 class ProfileItem(Item):
@@ -573,35 +511,14 @@ class AudioProfileProcessor(Processor[None, ProfileItem, TrackAudioProfile]):
     def plan(self, context: ProcessingContext) -> list[ProfileItem]:
         from core.embeddings.representations import configure_representations
 
-        with connect(dict_rows=True) as connection:
+        with connect() as connection:
             configure_representations(connection)
             # Get or create: the run of the current profile parameters.
             self.run_id = _create_profile_run(connection, self.model_name, self.parameters)
             connection.commit()
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """SELECT DISTINCT ON (e.track_id)
-                              e.track_id, e.run_id AS source_run_id, t.duration_seconds,
-                              ar.config->>'window_seconds' AS window_seconds,
-                              ar.config->>'stride_seconds' AS stride_seconds
-                        FROM current_embeddings e
-                        JOIN analysis_runs ar ON ar.id=e.run_id
-                        JOIN tracks t ON t.id=e.track_id
-                        WHERE e.embedding_type='audio-track' AND e.window_index IS NULL
-                          AND ar.model_name=%s
-                          AND NOT EXISTS (
-                            SELECT 1 FROM track_audio_profiles tap
-                            JOIN analysis_runs profile_run ON profile_run.id=tap.profile_run_id
-                            WHERE tap.track_id=e.track_id
-                              AND tap.source_run_id=e.run_id
-                              AND tap.model_name=%s
-                              AND profile_run.kind='audio_profile'
-                              AND profile_run.id=%s
-                          ) AND e.track_id=ANY(%s)
-                        ORDER BY e.track_id, ar.created_at DESC""",
-                    [self.model_name, self.model_name, self.run_id, self.track_ids],
-                )
-                rows = cursor.fetchall()
+            rows = store.songs_without_profile(
+                connection, self.model_name, self.run_id, self.track_ids
+            )
         return [
             ProfileItem(
                 key=str(row["track_id"]),
@@ -615,7 +532,7 @@ class AudioProfileProcessor(Processor[None, ProfileItem, TrackAudioProfile]):
         ]
 
     def open(self, context, items) -> None:
-        self.connection = connect(dict_rows=True)
+        self.connection = connect()
 
     def process(self, context, items):
         for item in items:
@@ -629,24 +546,11 @@ class AudioProfileProcessor(Processor[None, ProfileItem, TrackAudioProfile]):
                 continue
             yield ItemResult(item=item, outcome="profiled", output=profile)
         # Every planned song has a result: the run is complete.
-        with self.connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE analysis_runs SET status='complete', finished_at=now() WHERE id=%s",
-                (self.run_id,),
-            )
+        runs.complete_run(self.connection, self.run_id)
         self.connection.commit()
 
     def _derive(self, item: ProfileItem) -> TrackAudioProfile:
-        with self.connection.cursor() as cursor:
-            cursor.execute(
-                """SELECT window_index, window_start_seconds, window_end_seconds,
-                          embedding::text AS embedding
-                   FROM embeddings
-                   WHERE track_id=%s AND run_id=%s AND embedding_type='audio-window'
-                   ORDER BY window_index""",
-                (item.track_id, item.source_run_id),
-            )
-            rows = cursor.fetchall()
+        rows = store.window_embeddings(self.connection, item.track_id, item.source_run_id)
         if not rows:
             raise ValueError(f"{self.model_name} run has no stored window embeddings")
         duration = item.duration

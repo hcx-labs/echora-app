@@ -135,5 +135,5 @@ def test_profile_processor_summary_and_run(monkeypatch):
         "profile_run_id": str(run),
     }
     assert stored == [(good, source, run, "mert", "profile")]
-    completed = [c for c in windows.execute.call_args_list if "status='complete'" in c.args[0]]
+    completed = [c for c in working.execute.call_args_list if "status='complete'" in c.args[0]]
     assert completed and completed[0].args[1] == (run,)
