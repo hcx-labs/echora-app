@@ -9,9 +9,10 @@ from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
 from backend.api.v1.settings._deps import admin_required
 from backend.api.v1.settings._motion_artwork import MotionArtworkView
+from core.db.connection import connect
 from worker.artwork.config import ComfyUIConfig
 from worker.artwork.render import DEFAULT_INSTRUCTIONS
-from worker.artwork.settings import _connect, load_settings
+from worker.artwork.settings import load_settings
 
 
 class MotionArtworkDefaults(ResponseModel):
@@ -35,8 +36,8 @@ class MotionArtworkSettingsRead(Endpoint):
     response = MotionArtworkWithDefaults
 
     def handle(self, user: SessionUser = Depends(admin_required)) -> dict[str, object]:
-        with _connect() as connection, connection.cursor() as cursor:
-            settings = load_settings(cursor)
+        with connect() as connection:
+            settings = load_settings(connection)
         return {
             **settings.model_dump(),
             "defaults": {

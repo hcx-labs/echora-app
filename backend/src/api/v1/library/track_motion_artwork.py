@@ -36,9 +36,9 @@ class TrackMotionArtwork(Endpoint):
     response = MotionArtwork
 
     def handle(self, track_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> dict:
-        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
+        with connect() as connection:
             store.require_visible(connection, user["id"], track_id, "Track not found")
-            artwork = track_artwork(cursor, user["id"], track_id)
+            artwork = track_artwork(connection, user["id"], track_id)
         if artwork is None:
             return {"track_id": str(track_id), "available": False}
         return {

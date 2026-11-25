@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from psycopg.rows import dict_row
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from core.artwork import store
 from core.db.connection import connect
 from core.media.config import MotionArtworkConfig
 from worker.artwork.config import ComfyUIConfig
@@ -23,22 +23,6 @@ from worker.artwork.render import (
     CAMERA_LORA_STRENGTH,
     DEFAULT_INSTRUCTIONS,
     Recipe,
-)
-
-FIELDS = (
-    "enabled",
-    "comfyui_url",
-    "resolution",
-    "frames",
-    "upscale",
-    "camera_lock",
-    "prompt_mode",
-    "instructions",
-    "fixed_prompt",
-    "seed",
-    "generate_during_sync",
-    "generate_on_modal",
-    "regenerate_outdated",
 )
 
 
@@ -116,87 +100,51 @@ class MotionArtworkSettings(BaseModel):
         return self.comfyui_url or ComfyUIConfig.load().url
 
 
-def _connect():
-    return connect(dict_rows=True)
+def load_settings(db) -> MotionArtworkSettings:
+    """The stored settings, or the defaults before they are first saved."""
+    row = store.settings(db)
+    return MotionArtworkSettings.model_validate(row) if row else MotionArtworkSettings()
 
 
-def load_settings(cursor) -> MotionArtworkSettings:
-    cursor.execute(f"SELECT {', '.join(FIELDS)} FROM motion_artwork_settings WHERE singleton=true")
-    row = cursor.fetchone()
-    if row is None:
-        return MotionArtworkSettings()
-    if not isinstance(row, dict):
-        row = dict(zip(FIELDS, row))
-    return MotionArtworkSettings.model_validate(dict(row))
-
-
-def save_settings(cursor, settings: MotionArtworkSettings) -> None:
-    values = settings.model_dump()
-    columns = ", ".join(FIELDS)
-    placeholders = ", ".join(f"%({name})s" for name in FIELDS)
-    updates = ", ".join(f"{name}=EXCLUDED.{name}" for name in FIELDS)
-    cursor.execute(
-        f"""INSERT INTO motion_artwork_settings (singleton, {columns}, updated_at)
-            VALUES (true, {placeholders}, now())
-            ON CONFLICT (singleton) DO UPDATE SET {updates}, updated_at=now()""",
-        values,
-    )
+def save_settings(db, settings: MotionArtworkSettings) -> None:
+    store.save_settings(db, settings.model_dump())
 
 
 def missing_external_ids(
-    cursor, library_id, external_ids: list[str], recipe: Recipe, regenerate_outdated: bool = False
+    db, library_id, external_ids: list[str], recipe: Recipe, regenerate_outdated: bool = False
 ) -> set[str]:
     """Sources whose cover has no complete loop, including covers not yet seen.
 
     With regenerate_outdated, a loop made with another recipe counts as missing too.
     """
-    cursor.execute(
-        """SELECT DISTINCT ts.external_id FROM track_sources ts
-           LEFT JOIN track_motion_artwork tma ON tma.track_id = ts.track_id
-           WHERE ts.library_id = %s AND ts.source_type = 'subsonic' AND ts.external_id = ANY(%s)
-             AND ts.source_data->>'coverArt' IS NOT NULL
-             AND NOT EXISTS (SELECT 1 FROM motion_artworks ma WHERE ma.cover_sha256 = tma.cover_sha256
-                             AND (%s OR ma.recipe_hash = %s) AND ma.status = 'complete')""",
-        (library_id, list(external_ids), not regenerate_outdated, recipe.hash()),
+    return store.sources_missing_loops(
+        db, library_id, external_ids, recipe.hash(), regenerate_outdated
     )
-    return {row["external_id"] if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
 
 
 def sync_selection(connection, library_id, external_ids: list[str]) -> set[str]:
     """Songs an entire-library sync should visit so their album gets a loop."""
-    with connection.cursor(row_factory=dict_row) as cursor:
-        settings = load_settings(cursor)
-        from core.compute import location
+    settings = load_settings(connection)
+    from core.compute import location
 
-        # The sync's location decides: syncs on this server or syncs on Modal.
-        on_modal = location() == "modal"
-        if not (
-            settings.enabled
-            and (settings.generate_on_modal if on_modal else settings.generate_during_sync)
-        ):
-            return set()
-        return missing_external_ids(
-            cursor, library_id, external_ids, settings.recipe(), settings.regenerate_outdated
-        )
+    # The sync's location decides: syncs on this server or syncs on Modal.
+    on_modal = location() == "modal"
+    if not (
+        settings.enabled
+        and (settings.generate_on_modal if on_modal else settings.generate_during_sync)
+    ):
+        return set()
+    return missing_external_ids(
+        connection, library_id, external_ids, settings.recipe(), settings.regenerate_outdated
+    )
 
 
 def clear_loops() -> dict[str, int]:
     """Delete every loop and its track mapping, then the video files. Refused while a sync runs."""
-    with _connect() as db:
-        # Block new sync jobs until the check and the deletion commit together.
-        db.execute("LOCK TABLE jobs IN SHARE ROW EXCLUSIVE MODE")
-        active = db.execute("""SELECT 1 FROM jobs WHERE status IN ('queued','running','waiting')
-            AND (kind IN ('navidrome_sync','import')
-                 OR (kind='analysis_batch' AND payload->>'operation' IN ('navidrome_sync','import')))
-            LIMIT 1""").fetchone()
-        if active:
+    with connect() as db:
+        if store.lock_out_syncs(db):
             raise RuntimeError("sync_active")
-        paths = [
-            row["path"]
-            for row in db.execute("DELETE FROM motion_artworks RETURNING path").fetchall()
-            if row["path"]
-        ]
-        db.execute("DELETE FROM track_motion_artwork")
+        paths = store.delete_all_loops(db)
     # Files go after the commit, so a failure never leaves rows pointing at missing videos.
     removed = 0
     for relative in paths:
@@ -220,16 +168,6 @@ def artwork_path(relative: str) -> Path:
     return path
 
 
-def track_artwork(cursor, user_id, track_id) -> dict | None:
+def track_artwork(db, user_id, track_id) -> dict | None:
     """The newest complete loop for a track's cover, preferring the current recipe."""
-    settings = load_settings(cursor)
-    cursor.execute(
-        """SELECT ma.id, ma.width, ma.height, ma.frames, ma.fps, ma.prompt, ma.created_at
-           FROM user_track_links utl
-           JOIN track_motion_artwork tma ON tma.track_id = utl.track_id
-           JOIN motion_artworks ma ON ma.cover_sha256 = tma.cover_sha256 AND ma.status = 'complete'
-           WHERE utl.user_id = %s AND utl.track_id = %s
-           ORDER BY (ma.recipe_hash = %s) DESC, ma.created_at DESC LIMIT 1""",
-        (user_id, track_id, settings.recipe().hash()),
-    )
-    return cursor.fetchone()
+    return store.track_loop(db, user_id, track_id, load_settings(db).recipe().hash())

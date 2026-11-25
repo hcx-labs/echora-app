@@ -13,15 +13,13 @@ import secrets
 import shutil
 import tempfile
 import time
-import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from psycopg.types.json import Jsonb
-
+from core.artwork import store
 from core.db.connection import connect
 from core.errors import InputUnavailableError
 from core.library.connections import credential_cipher
@@ -49,42 +47,15 @@ logger = logging.getLogger(__name__)
 COVER_FETCH_SIZE = 1536
 
 
-def _connect():
-    return connect(dict_rows=True)
-
-
-def plan_tracks(cursor, user_id, url: str, external_ids: list[str]) -> list[dict]:
+def plan_tracks(db, user_id, url: str, external_ids: list[str]) -> list[dict]:
     """One entry per selected track, including the best available lyrics."""
-    cursor.execute(
-        """SELECT t.id AS track_id, ts.external_id, t.title, t.album,
-                  coalesce(ts.source_data->>'displayAlbumArtist', t.artist) AS artist,
-                  ts.source_data->>'coverArt' AS cover_art_id, lyric.text AS lyrics
-           FROM track_sources ts
-           JOIN libraries lib ON lib.id = ts.library_id
-           JOIN user_track_links u ON u.library_id = ts.library_id AND u.track_id = ts.track_id
-             AND u.external_id = ts.external_id
-           JOIN tracks t ON t.id = ts.track_id
-           LEFT JOIN LATERAL (
-             SELECT text FROM lyrics WHERE track_id=t.id AND nullif(btrim(text), '') IS NOT NULL
-             ORDER BY created_at DESC LIMIT 1
-           ) lyric ON true
-           WHERE u.user_id = %s AND lib.root_path = %s AND ts.source_type = 'subsonic'
-             AND ts.external_id = ANY(%s) AND ts.source_data->>'coverArt' IS NOT NULL
-           ORDER BY t.album, t.title, t.id""",
-        (user_id, url.rstrip("/"), list(external_ids)),
-    )
-    return cursor.fetchall()
+    return store.batch_songs(db, user_id, url.rstrip("/"), external_ids)
 
 
 def _complete(cover_sha256: str, recipe: Recipe, regenerate_outdated: bool) -> bool:
     """Whether a cover has its loop: any loop, or with regenerate_outdated one for this recipe."""
-    with _connect() as connection, connection.cursor() as cursor:
-        cursor.execute(
-            """SELECT 1 FROM motion_artworks WHERE cover_sha256=%s AND status='complete'
-                 AND (%s OR recipe_hash=%s)""",
-            (cover_sha256, not regenerate_outdated, recipe.hash()),
-        )
-        return cursor.fetchone() is not None
+    with connect() as connection:
+        return store.has_complete_loop(connection, cover_sha256, recipe.hash(), regenerate_outdated)
 
 
 @contextmanager
@@ -138,7 +109,7 @@ def _video_items(outputs: dict) -> list[dict]:
 
 
 def _record(
-    cursor,
+    db,
     *,
     cover_sha256,
     recipe: Recipe,
@@ -150,29 +121,20 @@ def _record(
     frames=None,
     file_bytes=None,
 ) -> None:
-    cursor.execute(
-        """INSERT INTO motion_artworks
-             (id, cover_sha256, recipe_hash, status, prompt, error, path, width, height, frames, fps, bytes, recipe)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-           ON CONFLICT (cover_sha256, recipe_hash) DO UPDATE SET
-             id=EXCLUDED.id, status=EXCLUDED.status, prompt=EXCLUDED.prompt, error=EXCLUDED.error,
-             path=EXCLUDED.path, width=EXCLUDED.width, height=EXCLUDED.height, frames=EXCLUDED.frames,
-             fps=EXCLUDED.fps, bytes=EXCLUDED.bytes, recipe=EXCLUDED.recipe, created_at=now()""",
-        (
-            uuid.uuid4(),
-            cover_sha256,
-            recipe.hash(),
-            status,
-            prompt,
-            error,
-            path,
-            size and size[0],
-            size and size[1],
-            frames,
-            FPS if status == "complete" else None,
-            file_bytes,
-            Jsonb(recipe.as_dict()),
-        ),
+    store.record_loop(
+        db,
+        cover_sha256=cover_sha256,
+        recipe_hash=recipe.hash(),
+        recipe=recipe.as_dict(),
+        status=status,
+        prompt=prompt,
+        error=error,
+        path=path,
+        width=size and size[0],
+        height=size and size[1],
+        frames=frames,
+        fps=FPS if status == "complete" else None,
+        file_bytes=file_bytes,
     )
 
 
@@ -238,22 +200,16 @@ def _cover_locks(cover_sha256s: list[str]):
 
     One connection holds every lock, so a batch of any size uses one database connection.
     """
-    with _connect() as connection:
-        connection.autocommit = True
+    with connect(autocommit=True) as connection:
         owned = []
         try:
             for sha in cover_sha256s:
-                key = f"motion-artwork:{sha}"
-                if connection.execute(
-                    "SELECT pg_try_advisory_lock(hashtextextended(%s, 0)) AS owned", (key,)
-                ).fetchone()["owned"]:
+                if store.try_lock_cover(connection, sha):
                     owned.append(sha)
             yield set(owned)
         finally:
             for sha in owned:
-                connection.execute(
-                    "SELECT pg_advisory_unlock(hashtextextended(%s, 0))", (f"motion-artwork:{sha}",)
-                )
+                store.unlock_cover(connection, sha)
 
 
 class ArtworkItem(Item):
@@ -293,8 +249,8 @@ class MotionArtworkProcessor(Processor[None, ArtworkItem, dict]):
         self.unavailable: str | None = None
 
     def plan(self, context: ProcessingContext) -> list[ArtworkItem]:
-        with _connect() as connection, connection.cursor() as cursor:
-            self.settings = load_settings(cursor)
+        with connect() as connection:
+            self.settings = load_settings(connection)
             self.on_modal = context.location == "modal"
             self.enabled = self.settings.enabled and (
                 self.settings.generate_on_modal
@@ -304,7 +260,7 @@ class MotionArtworkProcessor(Processor[None, ArtworkItem, dict]):
             if not self.enabled:
                 return []
             tracks = plan_tracks(
-                cursor, context.user_id, context.library_url, list(context.track_ids)
+                connection, context.user_id, context.library_url, list(context.track_ids)
             )
         self.recipe = self.settings.recipe()
         return [
@@ -342,12 +298,9 @@ class MotionArtworkProcessor(Processor[None, ArtworkItem, dict]):
                     continue
                 cover_sha = hashlib.sha256(data).hexdigest()
                 asset_key = hashlib.sha256(f"{cover_sha}:{track['track_id']}".encode()).hexdigest()
-                with _connect() as connection, connection.cursor() as cursor:
-                    cursor.execute(
-                        """INSERT INTO track_motion_artwork (track_id, cover_sha256, cover_art_id, checked_at)
-                           VALUES (%s,%s,%s,now()) ON CONFLICT (track_id) DO UPDATE SET
-                             cover_sha256=EXCLUDED.cover_sha256, cover_art_id=EXCLUDED.cover_art_id, checked_at=now()""",
-                        (track["track_id"], asset_key, track["cover_art_id"]),
+                with connect() as connection:
+                    store.set_track_cover(
+                        connection, track["track_id"], asset_key, track["cover_art_id"]
                     )
                 if self.mode == "missing" and _complete(
                     asset_key, recipe, settings.regenerate_outdated
@@ -449,9 +402,9 @@ class MotionArtworkProcessor(Processor[None, ArtworkItem, dict]):
     def persist(self, context, item: ArtworkItem, output: dict) -> None:
         cover = self.covers[self.cover_keys[item.key]]
         if "error" in output:
-            with _connect() as connection, connection.cursor() as cursor:
+            with connect() as connection:
                 _record(
-                    cursor,
+                    connection,
                     cover_sha256=cover["sha256"],
                     recipe=self.recipe,
                     status="failed",
@@ -490,8 +443,8 @@ def prepare_prompts(
     from core.compute import location
     from core.integrations.navidrome import NavidromeClient
 
-    with _connect() as connection, connection.cursor() as cursor:
-        settings = load_settings(cursor)
+    with connect() as connection:
+        settings = load_settings(connection)
         on_modal = location() == "modal"
         if not (
             settings.enabled
@@ -501,15 +454,10 @@ def prepare_prompts(
         recipe = settings.recipe()
         if recipe.prompt_mode != "external":
             return None
-        cursor.execute(
-            """SELECT ts.external_id, ts.track_id,
-                      (SELECT text FROM lyrics WHERE track_id=ts.track_id
-                         AND nullif(btrim(text), '') IS NOT NULL ORDER BY created_at DESC LIMIT 1) AS lyrics
-               FROM track_sources ts JOIN libraries lib ON lib.id = ts.library_id
-               WHERE lib.root_path = %s AND ts.source_type = 'subsonic' AND ts.external_id = ANY(%s)""",
-            (credentials[0].rstrip("/"), list(external_ids)),
-        )
-        known = {row["external_id"]: row for row in cursor.fetchall()}
+        known = {
+            row["external_id"]: row
+            for row in store.source_lyrics(connection, credentials[0].rstrip("/"), external_ids)
+        }
     covers: list[dict] = []
     cover_cache: dict[str, tuple[bytes, str]] = {}
     with NavidromeClient(*credentials) as navidrome:
@@ -581,9 +529,9 @@ def _store(cover: dict, recipe: Recipe, event: dict) -> None:
     partial = target.with_suffix(".part.mp4")
     shutil.move(event["file"], partial)
     partial.replace(target)
-    with _connect() as connection, connection.cursor() as cursor:
+    with connect() as connection:
         _record(
-            cursor,
+            connection,
             cover_sha256=sha,
             recipe=recipe,
             status="complete",
@@ -594,12 +542,7 @@ def _store(cover: dict, recipe: Recipe, event: dict) -> None:
             file_bytes=target.stat().st_size,
         )
         # The new loop replaces this track's loops from other settings.
-        cursor.execute(
-            """DELETE FROM motion_artworks WHERE cover_sha256=%s AND recipe_hash<>%s
-               RETURNING path""",
-            (sha, recipe.hash()),
-        )
-        superseded = [row["path"] for row in cursor.fetchall() if row["path"]]
+        superseded = store.delete_other_recipes(connection, sha, recipe.hash())
     for old in superseded:
         with suppress(OSError, ValueError):
             artwork_path(old).unlink(missing_ok=True)

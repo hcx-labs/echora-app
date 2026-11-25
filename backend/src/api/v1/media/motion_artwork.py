@@ -9,8 +9,10 @@ from fastapi.responses import FileResponse
 
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
+from core.artwork import store
+from core.db.connection import connect
 from core.errors import NotFoundError
-from worker.artwork.settings import _connect, artwork_path
+from worker.artwork.settings import artwork_path
 
 
 class MotionArtworkVideo(Endpoint):
@@ -22,20 +24,12 @@ class MotionArtworkVideo(Endpoint):
     def handle(
         self, artwork_id: uuid.UUID, user: SessionUser = Depends(current_user)
     ) -> FileResponse:
-        with _connect() as connection, connection.cursor() as cursor:
-            cursor.execute(
-                """SELECT ma.path FROM motion_artworks ma
-                   WHERE ma.id = %s AND ma.status = 'complete' AND EXISTS (
-                     SELECT 1 FROM track_motion_artwork tma
-                     JOIN user_track_links utl ON utl.track_id = tma.track_id
-                     WHERE tma.cover_sha256 = ma.cover_sha256 AND utl.user_id = %s)""",
-                (artwork_id, user["id"]),
-            )
-            row = cursor.fetchone()
-        if row is None:
+        with connect() as connection:
+            stored = store.visible_loop_path(connection, artwork_id, user["id"])
+        if stored is None:
             raise NotFoundError("Motion artwork not found")
         try:
-            path = artwork_path(row["path"])
+            path = artwork_path(stored)
         except ValueError:
             raise NotFoundError("Motion artwork not found") from None
         if not path.is_file():

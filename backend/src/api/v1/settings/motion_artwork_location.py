@@ -8,7 +8,8 @@ from backend.api.deps import SessionUser
 from backend.api.endpoint import Endpoint
 from backend.api.v1.settings._deps import admin_required
 from backend.api.v1.settings._models import ModelSwitch, SwitchState
-from worker.artwork.settings import _connect, load_settings, save_settings
+from core.db.connection import connect
+from worker.artwork.settings import load_settings, save_settings
 
 
 class LocationState(SwitchState):
@@ -29,9 +30,9 @@ class MotionArtworkLocation(Endpoint):
         self, update: ModelSwitch, user: SessionUser = Depends(admin_required)
     ) -> dict[str, object]:
         column = "generate_on_modal" if update.location == "modal" else "generate_during_sync"
-        with _connect() as connection, connection.cursor() as cursor:
-            settings = load_settings(cursor).model_copy(update={column: update.enabled})
-            save_settings(cursor, settings)
+        with connect() as connection:
+            settings = load_settings(connection).model_copy(update={column: update.enabled})
+            save_settings(connection, settings)
         return {
             "enabled": update.enabled,
             "location": update.location,

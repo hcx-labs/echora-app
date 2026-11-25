@@ -8,7 +8,8 @@ from backend.api.deps import SessionUser
 from backend.api.endpoint import Endpoint
 from backend.api.v1.settings._deps import admin_required
 from backend.api.v1.settings._motion_artwork import MotionArtworkUpdate, MotionArtworkView
-from worker.artwork.settings import MotionArtworkSettings, _connect, save_settings
+from core.db.connection import connect
+from worker.artwork.settings import MotionArtworkSettings, save_settings
 
 
 class MotionArtworkSettingsUpdate(Endpoint):
@@ -23,6 +24,6 @@ class MotionArtworkSettingsUpdate(Endpoint):
         self, update: MotionArtworkUpdate, user: SessionUser = Depends(admin_required)
     ) -> dict[str, object]:
         settings = MotionArtworkSettings.model_validate(update.model_dump())
-        with _connect() as connection, connection.cursor() as cursor:
-            save_settings(cursor, settings)
+        with connect() as connection:
+            save_settings(connection, settings)
         return settings.model_dump()
