@@ -19,7 +19,8 @@ class KaraConfig(EchoraConfig, env_prefix="ECHORA_KARA_"):
 
     model_id: str = compute("hcxlabs/echora-kara-700m-muq", legacy="FA_KARA_MODEL_ID")
     revision: str = compute("7c0cda150c8be886ed5ff2f903460f112cf4c7a2", legacy="FA_KARA_REVISION")
-    model_path: str | None = compute(
+    # Not a compute field: the path exists on this machine only, so Modal keeps its snapshot.
+    model_path: str | None = setting(
         None,
         legacy="FA_KARA_MODEL_PATH",
         description="A local checkpoint directory; overrides the model ID snapshot.",
