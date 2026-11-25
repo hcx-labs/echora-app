@@ -39,7 +39,9 @@ class StageSummary:
     def as_dict(self) -> dict[str, Any]:
         """The summary as the batch stores it: total first, then counters, then failures."""
         processor = self.processor
-        rendered: dict[str, Any] = {processor.total_key: self.total}
+        rendered: dict[str, Any] = {}
+        if processor.total_key is not None:
+            rendered[processor.total_key] = self.total
         for name in processor.counters:
             rendered[name] = self.counts[name]
         for name, value in self.counts.items():
@@ -64,7 +66,9 @@ def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -
     """Run one stage over the context's batch and return its summary.
 
     Items that fail are counted, logged by key and skipped. ``JobCancelled`` and programming
-    errors propagate after ``close()``.
+    errors propagate after ``close()``. When an ``EchoraError`` stops ``process``, the items
+    without a result count as failed; when ``process`` stops early on its own (the feature was
+    switched off mid-batch), they are left uncounted.
     """
     summary = StageSummary(type(processor))
     context.check()
@@ -97,7 +101,7 @@ def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -
             context.report(
                 Progress(
                     processor.name,
-                    f"{processor.activity} {item.label or item.key}",
+                    f"{processor.activity} {item.label}" if item.label else processor.activity,
                     index,
                     len(items),
                     processor.unit,
@@ -111,8 +115,7 @@ def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -
             type(error).__name__,
             len(pending),
         )
+        summary.count("failed", len(pending))
     finally:
         processor.close()
-    if pending:
-        summary.count("failed", len(pending))
     return summary

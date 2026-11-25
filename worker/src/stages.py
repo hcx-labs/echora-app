@@ -17,7 +17,10 @@ import psycopg
 
 from core.db.config import require_database_url
 from core.integrations.navidrome import NavidromeClient
+from core.compute import location
 from core.library.membership import attach_user_library, user_audio_track_ids
+from worker.processing import ProcessingContext, Processor, run_stage
+from worker.remote.session import current as remote_session
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,20 @@ class Batch:
     credentials: Credentials | None = None
     prepared: dict[str, Any] = field(default_factory=dict)
     """What prepare hooks produced for later stages, by stage key."""
+
+    def context(self) -> ProcessingContext:
+        """The processing context of this batch, for processors."""
+        return ProcessingContext(
+            check_cancelled=self.check,
+            publish=self.report,
+            location=location(),  # type: ignore[arg-type]
+            remote=remote_session(),
+            user_id=self.user_id,
+            library=self.credentials,
+            track_ids=tuple(self.track_ids),
+            options=self.payload,
+            resources=self.prepared,
+        )
 
     @property
     def library(self) -> Credentials:
@@ -58,6 +75,15 @@ class Stage:
     run: Callable[[Batch], dict[str, Any]]
     prepare: Callable[[Batch], Any] | None = None
     """Runs before the batch opens remote computation (no GPU waits for it); best effort."""
+
+
+def processor_stage(key: str, build: Callable[[], Processor]) -> Stage:
+    """A stage that runs one processor; its summary is stored under ``key``."""
+
+    def run(batch: Batch) -> dict[str, Any]:
+        return {key: run_stage(build(), batch.context()).as_dict()}
+
+    return Stage(key, run)
 
 
 def connect() -> psycopg.Connection:
@@ -152,16 +178,6 @@ def _lyrics(batch: Batch) -> dict[str, Any]:
     }
 
 
-def _translations(batch: Batch) -> dict[str, Any]:
-    from worker.translation.pipeline import backfill_translations
-
-    return {
-        "translations": backfill_translations(
-            batch.user_id, batch.url, batch.track_ids, check=batch.check, progress=batch.report
-        )
-    }
-
-
 def _themes(batch: Batch) -> dict[str, Any]:
     from worker.themes.pipeline import backfill_themes
 
@@ -180,6 +196,12 @@ def _karaoke(batch: Batch) -> dict[str, Any]:
             *batch.library, progress=batch.report, external_ids=batch.track_ids
         )
     }
+
+
+def _translation_processor() -> Processor:
+    from worker.translation.pipeline import TranslationProcessor
+
+    return TranslationProcessor()
 
 
 # Audio analysis.
@@ -318,7 +340,7 @@ def _semantic_fusion(batch: Batch) -> dict[str, Any]:
 LIBRARY = Stage("library", _library)
 AUDIO_PROFILES = Stage("audio_profiles", _audio_profiles)
 LYRICS = Stage("lyrics", _lyrics)
-TRANSLATIONS = Stage("translations", _translations)
+TRANSLATIONS = processor_stage("translations", _translation_processor)
 THEMES = Stage("themes", _themes)
 KARAOKE = Stage("karaoke", _karaoke)
 VOICE = Stage("voice", _voice)

@@ -1,3 +1,4 @@
+import uuid
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -5,6 +6,20 @@ import pytest
 
 import worker.translation.pipeline as pipeline
 from core.integrations.external_ai import ExternalAISettings
+from worker.processing import ProcessingContext, run_stage
+
+TRACK = uuid.UUID("00000000-0000-4000-8000-000000000001")
+
+
+def translate_batch(ids, *, check=lambda: None):
+    """The translation stage's summary for a batch of these Navidrome ids."""
+    context = ProcessingContext(
+        check_cancelled=check,
+        user_id="user",
+        library=("url", "user", "password"),
+        track_ids=tuple(ids),
+    )
+    return run_stage(pipeline.TranslationProcessor(), context).as_dict()
 
 
 def test_line_selection():
@@ -18,10 +33,9 @@ def test_disabled_never_calls_endpoint(monkeypatch):
     monkeypatch.setattr(pipeline, "load_settings", lambda: (ExternalAISettings(), None))
     translate = MagicMock()
     monkeypatch.setattr(pipeline, "translate", translate)
-    result = pipeline.backfill_translations(
-        "user", "url", [], check=lambda: None, progress=lambda _: None
-    )
-    assert result["translated"] == 0
+    result = translate_batch([], check=lambda: None)
+    # The summary keys are those the batch summary always had.
+    assert result == {"translated": 0, "reused": 0, "failed": 0, "declined": 0, "stale": 0}
     translate.assert_not_called()
 
 
@@ -36,7 +50,7 @@ def test_cancellation_and_reuse(monkeypatch, library_helpers):
     )
     monkeypatch.setattr(pipeline, "load_settings", lambda: (settings, None))
     library_helpers(SimpleNamespace(_cipher=lambda: None))
-    row = {"track_id": "track", "text": "source", "language": "ja", "provenance": {}}
+    row = {"track_id": TRACK, "text": "source", "language": "ja", "provenance": {}}
     db = MagicMock()
     db.execute.return_value.fetchall.return_value = [row]
 
@@ -53,9 +67,7 @@ def test_cancellation_and_reuse(monkeypatch, library_helpers):
     )
     translate = MagicMock()
     monkeypatch.setattr(pipeline, "translate", translate)
-    result = pipeline.backfill_translations(
-        "user", "url", ["id"], check=lambda: None, progress=lambda _: None
-    )
+    result = translate_batch(["id"], check=lambda: None)
     assert result["reused"] == 1
     translate.assert_not_called()
 
@@ -66,7 +78,7 @@ def test_cancellation_and_reuse(monkeypatch, library_helpers):
         raise Cancelled()
 
     with pytest.raises(Cancelled):
-        pipeline.backfill_translations("user", "url", ["id"], check=cancel, progress=lambda _: None)
+        translate_batch(["id"], check=cancel)
 
 
 def test_declined_counted_apart_from_failed(monkeypatch, library_helpers):
@@ -82,7 +94,7 @@ def test_declined_counted_apart_from_failed(monkeypatch, library_helpers):
     )
     monkeypatch.setattr(pipeline, "load_settings", lambda: (settings, None))
     library_helpers(SimpleNamespace(_cipher=lambda: None))
-    row = {"track_id": "track", "text": "source", "language": "ja", "provenance": {}}
+    row = {"track_id": TRACK, "text": "source", "language": "ja", "provenance": {}}
     db = MagicMock()
     db.execute.return_value.fetchall.return_value = [row]
 
@@ -99,9 +111,7 @@ def test_declined_counted_apart_from_failed(monkeypatch, library_helpers):
         raise next(errors)
 
     monkeypatch.setattr(pipeline, "translate", translate)
-    result = pipeline.backfill_translations(
-        "user", "url", ["id"], check=lambda: None, progress=lambda _: None
-    )
+    result = translate_batch(["id"], check=lambda: None)
     assert (result["declined"], result["failed"]) == (1, 1)
 
 
@@ -117,7 +127,7 @@ def test_mixed_song_translates_only_its_foreign_lines(monkeypatch, library_helpe
     monkeypatch.setattr(pipeline, "load_settings", lambda: (settings, None))
     library_helpers(SimpleNamespace(_cipher=lambda: None))
     lines = ["When I'm with you", "Mera bhi usse batana", "Eenie, meenie", "Tere bina"]
-    row = {"track_id": "track", "text": "\n".join(lines), "language": "en", "provenance": {}}
+    row = {"track_id": TRACK, "text": "\n".join(lines), "language": "en", "provenance": {}}
     db = MagicMock()
     db.execute.return_value.fetchall.return_value = [row]
     db.execute.return_value.fetchone.return_value = {"text": row["text"], "provenance": {}}
@@ -146,9 +156,7 @@ def test_mixed_song_translates_only_its_foreign_lines(monkeypatch, library_helpe
     saved = []
     monkeypatch.setattr(pipeline, "translate", translate)
     monkeypatch.setattr(pipeline, "save_translation", lambda *a, **kw: saved.append(a))
-    result = pipeline.backfill_translations(
-        "user", "url", ["id"], check=lambda: None, progress=lambda _: None
-    )
+    result = translate_batch(["id"], check=lambda: None)
     assert result["translated"] == 1
     assert [(p.source, p.target, mixed) for p, mixed in calls] == [("mul", "en", True)]
     assert [line["text"] for line in saved[0][3]] == [
@@ -170,7 +178,7 @@ def test_mixed_needs_two_foreign_lines(monkeypatch, library_helpers):
     )
     monkeypatch.setattr(pipeline, "load_settings", lambda: (settings, None))
     library_helpers(SimpleNamespace(_cipher=lambda: None))
-    row = {"track_id": "track", "text": "a\nb", "language": "en", "provenance": {}}
+    row = {"track_id": TRACK, "text": "a\nb", "language": "en", "provenance": {}}
     db = MagicMock()
     db.execute.return_value.fetchall.return_value = [row]
 
@@ -183,9 +191,7 @@ def test_mixed_needs_two_foreign_lines(monkeypatch, library_helpers):
     monkeypatch.setattr(pipeline, "foreign_lines", lambda *a: [1])
     translate = MagicMock()
     monkeypatch.setattr(pipeline, "translate", translate)
-    pipeline.backfill_translations(
-        "user", "url", ["id"], check=lambda: None, progress=lambda _: None
-    )
+    translate_batch(["id"], check=lambda: None)
     translate.assert_not_called()
 
 

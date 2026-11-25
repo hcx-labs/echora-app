@@ -1,5 +1,7 @@
 """Fill missing translations during sync; source lyrics remain authoritative."""
 
+from __future__ import annotations
+
 import functools
 import importlib.util
 import logging
@@ -20,6 +22,8 @@ from core.lyrics.translations import (
     save_translation,
     source_checksum,
 )
+from core.errors import ProcessingError
+from worker.processing import Item, ItemResult, ProcessingContext, Processor
 from worker.translation.client import translate
 
 logger = logging.getLogger(__name__)
@@ -91,112 +95,157 @@ def keep_foreign(lines: list[str], translated: list[dict], foreign: list[int]) -
     ]
 
 
-def backfill_translations(user_id, url, external_ids, *, check, progress):
-    # `declined`: the model answered but would not translate (see lyric_translation._checked).
-    summary = {"translated": 0, "reused": 0, "failed": 0, "declined": 0, "stale": 0}
-    settings, encrypted = load_settings()
-    if not settings.enabled or not settings.model or not settings.language_pairs:
-        return summary
+class TranslationItem(Item):
+    """One song and one language pair to translate it for."""
 
-    key = credential_cipher().decrypt(bytes(encrypted)).decode() if encrypted else None
-    namespace = uuid.uuid5(uuid.NAMESPACE_URL, url.rstrip("/"))
-    with psycopg.connect(require_database_url(), row_factory=dict_row) as db:
-        tracks = db.execute(
-            """SELECT DISTINCT l.track_id, l.text, l.language, l.provenance
-            FROM lyrics l JOIN user_track_links u ON u.track_id=l.track_id
-            JOIN libraries lib ON lib.id=u.library_id
-            WHERE u.user_id=%s AND lib.namespace=%s AND u.external_id=ANY(%s)
-              AND NULLIF(btrim(l.text),'') IS NOT NULL""",
-            (user_id, namespace, external_ids),
-        ).fetchall()
-    for index, row in enumerate(tracks):
-        check()
-        lines = source_lines(row)
+    track_id: uuid.UUID
+    lines: tuple[str, ...]
+    pair: LanguagePair
+    foreign: tuple[int, ...] | None = None
+    """For a song already in the target language: the lines in other languages, else None."""
+
+
+class TranslationFailedError(ProcessingError):
+    """The endpoint gave no usable translation. ``stage`` is the safe error code."""
+
+
+class TranslationProcessor(Processor[None, TranslationItem, list[dict]]):
+    """Fills missing translations of the batch's lyrics for the configured language pairs.
+
+    Source lyrics stay authoritative: a translation whose lyrics changed while it was being
+    written is dropped (``stale``). ``declined`` counts songs the model would not translate.
+    """
+
+    name = "translation"
+    summary_key = "translations"
+    counters = ("translated", "reused", "failed", "declined", "stale")
+    total_key = None
+    activity = "Translating missing lyrics"
+
+    def plan(self, context: ProcessingContext) -> list[TranslationItem]:
+        self.settings, encrypted = load_settings()
+        settings = self.settings
+        if not settings.enabled or not settings.model or not settings.language_pairs:
+            return []
+        self.key = credential_cipher().decrypt(bytes(encrypted)).decode() if encrypted else None
+        namespace = uuid.uuid5(uuid.NAMESPACE_URL, context.library_url.rstrip("/"))
+        with psycopg.connect(require_database_url(), row_factory=dict_row) as db:
+            tracks = db.execute(
+                """SELECT DISTINCT l.track_id, l.text, l.language, l.provenance
+                FROM lyrics l JOIN user_track_links u ON u.track_id=l.track_id
+                JOIN libraries lib ON lib.id=u.library_id
+                WHERE u.user_id=%s AND lib.namespace=%s AND u.external_id=ANY(%s)
+                  AND NULLIF(btrim(l.text),'') IS NOT NULL""",
+                (context.user_id, namespace, list(context.track_ids)),
+            ).fetchall()
+        items = []
+        for row in tracks:
+            context.check()
+            lines = tuple(source_lines(row))
+            items += [
+                TranslationItem(
+                    key=str(row["track_id"]),
+                    track_id=row["track_id"],
+                    lines=lines,
+                    pair=pair,
+                    foreign=foreign,
+                )
+                for pair, foreign in self._work(row, lines)
+            ]
+        return items
+
+    def _work(self, row, lines) -> list[tuple[LanguagePair, tuple[int, ...] | None]]:
+        pairs = self.settings.language_pairs
         language = (row["language"] or "").lower().replace("_", "-")
         work = [
             (pair, None)
-            for pair in settings.language_pairs
+            for pair in pairs
             if language == pair.source
             or ("-" not in pair.source and language.split("-")[0] == pair.source)
         ]
-        # A song already in a target language may still have lines in others (an Urdu verse in an
-        # English song): translate those, with the whole song as context.
-        if not work:
-            base = language.split("-")[0]
-            targets = sorted({p.target for p in settings.language_pairs if p.target == base})
-            if targets:
-                sources = {p.source.split("-")[0] for p in settings.language_pairs}
-                try:
-                    foreign = foreign_lines(lines, base, sources)
-                except Exception:
-                    logger.exception("Finding foreign lines failed for track %s", row["track_id"])
-                    foreign = []
-                if len(foreign) >= MIXED_MIN_LINES:
-                    work = [
-                        (LanguagePair(source=MIXED_SOURCE, target=target), foreign)
-                        for target in targets
-                    ]
-        for pair, foreign in work:
-            check()
+        if work:
+            return work
+        # A song already in a target language may still have lines in others (an Urdu verse in
+        # an English song): translate those, with the whole song as context.
+        base = language.split("-")[0]
+        targets = sorted({p.target for p in pairs if p.target == base})
+        if not targets:
+            return []
+        sources = {p.source.split("-")[0] for p in pairs}
+        try:
+            foreign = foreign_lines(list(lines), base, sources)
+        except Exception as error:  # noqa: BLE001 - optional; the song keeps its lyrics
+            logger.error(
+                "Finding foreign lines failed for track %s: %s",
+                row["track_id"],
+                type(error).__name__,
+            )
+            return []
+        if len(foreign) < MIXED_MIN_LINES:
+            return []
+        return [
+            (LanguagePair(source=MIXED_SOURCE, target=target), tuple(foreign)) for target in targets
+        ]
+
+    def process(self, context, items):
+        for item in items:
+            context.check()
             # Honor a disable action between requests, not just between batches.
-            current, _ = load_settings()
-            if not current.enabled:
-                return summary
-            cached = load_translations(row["track_id"], lines)
+            if not load_settings()[0].enabled:
+                return
+            pair, lines = item.pair, list(item.lines)
             if any(
                 t["source_language"] == pair.source
                 and t["target_language"] == pair.target
                 and t["status"] == "ready"
-                for t in cached
+                for t in load_translations(item.track_id, lines)
             ):
-                summary["reused"] += 1
+                yield ItemResult(item=item, outcome="reused")
                 continue
             try:
-                if foreign is None:
-                    translated = translate(settings, key, pair, lines)
+                if item.foreign is None:
+                    translated = translate(self.settings, self.key, pair, lines)
                 else:
                     translated = keep_foreign(
-                        lines, translate(settings, key, pair, lines, mixed=True), foreign
+                        lines,
+                        translate(self.settings, self.key, pair, lines, mixed=True),
+                        list(item.foreign),
                     )
-                check()
-                with psycopg.connect(require_database_url(), row_factory=dict_row) as db:
-                    latest = db.execute(
-                        "SELECT text, provenance FROM lyrics WHERE track_id=%s", (row["track_id"],)
-                    ).fetchone()
-                if latest is None or source_checksum(source_lines(latest)) != source_checksum(
-                    lines
-                ):
-                    summary["stale"] += 1
-                    continue
-                save_translation(
-                    row["track_id"],
-                    pair,
-                    lines,
-                    translated,
-                    model=settings.model,
-                    prompt=settings.prompt,
-                )
-                summary["translated"] += 1
             except TranslationError as error:
-                # No remote response bodies, keys, or lyrics in logs. A later sync retries.
+                # Only the error code: no response bodies, keys or lyrics. A later sync retries.
                 if str(error) in {"declined", "refusal"}:
                     logger.warning(
                         "Translation declined by the model for track %s (%s)",
-                        row["track_id"],
+                        item.track_id,
                         error,
                     )
-                    summary["declined"] += 1
-                    continue
-                logger.warning("Translation failed for track %s: %s", row["track_id"], error)
-                summary["failed"] += 1
-        progress(
-            {
-                "phase": "translation",
-                "message": "Translating missing lyrics",
-                "completed": index + 1,
-                "total": len(tracks),
-                "unit": "tracks",
-                "summary": summary,
-            }
+                    yield ItemResult(item=item, outcome="declined")
+                else:
+                    failure = TranslationFailedError("Translation failed", stage=str(error))
+                    yield ItemResult.failed(item, failure)
+                continue
+            context.check()
+            if self._lyrics_changed(item):
+                yield ItemResult(item=item, outcome="stale")
+                continue
+            yield ItemResult(item=item, outcome="translated", output=translated)
+
+    @staticmethod
+    def _lyrics_changed(item: TranslationItem) -> bool:
+        with psycopg.connect(require_database_url(), row_factory=dict_row) as db:
+            latest = db.execute(
+                "SELECT text, provenance FROM lyrics WHERE track_id=%s", (item.track_id,)
+            ).fetchone()
+        return latest is None or source_checksum(source_lines(latest)) != source_checksum(
+            list(item.lines)
         )
-    return summary
+
+    def persist(self, context, item, output):
+        save_translation(
+            item.track_id,
+            item.pair,
+            list(item.lines),
+            output,
+            model=self.settings.model,
+            prompt=self.settings.prompt,
+        )

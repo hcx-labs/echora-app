@@ -50,7 +50,7 @@ class ItemResult[InputT: Item, OutputT]:
         return cls(item=item, outcome="failed", error=error)
 
 
-class Processor[ConfigT: EchoraConfig, InputT: Item, OutputT](ABC):
+class Processor[ConfigT: EchoraConfig | None, InputT: Item, OutputT](ABC):
     """One processing stage.
 
     The runner calls, in order:
@@ -75,16 +75,17 @@ class Processor[ConfigT: EchoraConfig, InputT: Item, OutputT](ABC):
     counters: ClassVar[tuple[str, ...]] = ()
     """Counters that always appear in the summary, even at zero. Others appear once counted."""
 
-    total_key: ClassVar[str] = "total"
+    total_key: ClassVar[str | None] = "total"
+    """Key of the planned item count (``None``: the summary has no total)."""
     failure_key: ClassVar[str] = "failed"
     unit: ClassVar[str] = "tracks"
     activity: ClassVar[str] = "Processing"
-    """Progress message prefix: "<activity> <item label>"."""
+    """Progress message: "<activity> <item label>", or the activity alone for unlabeled items."""
 
     current_message: ClassVar[str] = "Already current"
     """Progress message when nothing needs this stage."""
 
-    def __init__(self, config: ConfigT) -> None:
+    def __init__(self, config: ConfigT = None) -> None:
         self.config = config
 
     @abstractmethod

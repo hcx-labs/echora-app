@@ -44,12 +44,8 @@ def _discard(_: dict[str, Any]) -> None:
 
 @dataclass
 class ProcessingContext:
-    """The batch a stage runs in: cancellation, progress, where computation runs, and resources.
-
-    ``resources`` holds what the batch opened for its stages (the database connection, the
-    Navidrome client and library, the prepared-audio cache). Each stage reads what it needs
-    through the typed accessors of the package that defines the resource.
-    """
+    """The batch a stage runs in: its songs and library, cancellation, progress, where
+    computation runs, and what earlier work prepared for it (``resources``)."""
 
     check_cancelled: Callable[[], None] = _never_cancelled
     publish: Callable[[dict[str, Any]], None] = _discard
@@ -58,6 +54,15 @@ class ProcessingContext:
     """The batch's Modal session when computation runs remotely, else ``None``."""
 
     user_id: str | None = None
+    library: tuple[str, str, str] | None = None
+    """The batch's Navidrome connection: URL, user and password."""
+
+    track_ids: tuple[str, ...] = ()
+    """The batch's songs, as Navidrome ids."""
+
+    options: Mapping[str, Any] = field(default_factory=dict)
+    """Options of the job (``refresh_lyrics``, ``verify_audio_hashes``)."""
+
     resources: dict[str, Any] = field(default_factory=dict)
 
     def check(self) -> None:
@@ -67,6 +72,13 @@ class ProcessingContext:
     def report(self, progress: Progress) -> None:
         """Publish a progress update."""
         self.publish(progress.as_dict())
+
+    @property
+    def library_url(self) -> str:
+        """The library's Navidrome URL; ``ValueError`` when the batch has no library."""
+        if self.library is None:
+            raise ValueError("This batch has no library connection")
+        return self.library[0]
 
     def resource(self, name: str) -> Any:
         """A resource the batch opened. ``KeyError`` names a resource the batch lacks."""

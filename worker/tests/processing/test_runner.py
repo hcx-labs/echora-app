@@ -152,3 +152,23 @@ def test_custom_summary_keys():
 def test_missing_resource_is_named():
     with pytest.raises(KeyError, match="navidrome"):
         ProcessingContext().resource("navidrome")
+
+
+def test_a_stage_without_a_total():
+    class _Untotalled(_Doubler):
+        total_key = None
+
+    summary = run_stage(_Untotalled(_Config(), _songs(2)), ProcessingContext())
+    assert summary.as_dict() == {"doubled": 1, "failed": 0}
+
+
+def test_stopping_early_leaves_the_rest_uncounted():
+    class _Switched(_Doubler):
+        def process(self, context, items):
+            yield ItemResult(item=items[0], outcome="doubled", output=items[0].value * 2)
+            # The feature was switched off: the rest is not attempted, and not a failure.
+
+    processor = _Switched(_Config(), _songs(2, 4, 6))
+    summary = run_stage(processor, ProcessingContext())
+    assert summary.as_dict() == {"total": 3, "doubled": 1, "failed": 0}
+    assert processor.events[-1] == "close"
