@@ -4,8 +4,9 @@
 
 This release replaces the single analysis service with a backend (the API) and workers, and moves
 every API route under `/api/v1`. There are no compatibility routes, so an existing deployment
-needs these changes at the same time as the new images. No data is reprocessed and the database
-schema does not change.
+needs these changes at the same time as the new images. The database schema does not change.
+Karaoke is realigned for the whole library after the upgrade (step 9); nothing else is
+reprocessed.
 
 1. **OIDC redirect URI.** Set `OIDC_REDIRECT_URI` to `<site>/api/v1/auth/oidc/callback` and
    register the same URI with the identity provider. With the old path nobody can sign in.
@@ -24,7 +25,15 @@ schema does not change.
    need the new names. Modal runs `echora-worker`; the Modal app keeps the name
    `echora-analysis`.
 7. **Retired settings.** `FA_KARA_ALIGNER` and `FA_KARA_AUDIO_INPUT` are ignored (the aligner
-   always uses the full mix), and `ECHORA_LANGUAGE_BACKFILL_BATCH_SIZE` no longer exists. Other
+   always reads the full mix; step 9 covers the separated vocals it now reads as well), and `ECHORA_LANGUAGE_BACKFILL_BATCH_SIZE` no longer exists. Other
    old setting names keep working and are listed as deprecated in `configs/runtime.env.example`.
 8. **Backfill routes.** The lyrics, voice, karaoke and recordings backfills are now
    administrator-only.
+9. **Karaoke realignment.** The karaoke pipeline revision changes, so every song's word timing is
+   stale and is aligned again by the next library sync. The aligner now also reads the separated
+   vocals (`ECHORA_KARA_STEM_READING`, on by default), so each song is separated first: expect
+   the first sync to take roughly as long as aligning the library from scratch. Each song's
+   separated vocals are kept in the prepared-audio cache (about 170 MB per song), which evicts
+   its oldest entries at `ECHORA_PREPROCESS_MAX_BYTES` (20 GiB by default). Keep that limit below
+   the free space on the volume behind `ECHORA_PREPROCESS_DIR`; a full volume fails the songs
+   being prepared.
