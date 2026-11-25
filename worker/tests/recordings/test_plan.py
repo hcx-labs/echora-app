@@ -6,6 +6,18 @@ from unittest.mock import MagicMock
 import worker.recordings.encoder as recording_encoder
 from worker.planning.audio import audio_prerequisites, plan_audio
 
+ARTIFACTS = (
+    "external_id",
+    "track_id",
+    "has_muq",
+    "has_mert",
+    "has_fingerprint",
+    "has_melody",
+    "has_descriptors",
+    "has_waveform",
+    "has_visual_features",
+)
+
 
 def test_recording_only_backfill_requests_shared_8khz_decode(monkeypatch):
     monkeypatch.setattr(
@@ -14,8 +26,8 @@ def test_recording_only_backfill_requests_shared_8khz_decode(monkeypatch):
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     cursor.fetchall.side_effect = [
-        [("song", "track", True, True, True, True, True, True, True)],
-        [("song",)],
+        [dict(zip(ARTIFACTS, ("song", "track", True, True, True, True, True, True, True)))],
+        [{"external_id": "song"}],
     ]
     plan = plan_audio(connection, "library", ["song"])
     assert plan.recording_fingerprint_external_ids == frozenset({"song"})
@@ -29,7 +41,7 @@ def test_recording_only_backfill_requests_shared_8khz_decode(monkeypatch):
 def test_current_representation_and_disabled_encoder_need_no_work(monkeypatch):
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
-    complete = [("song", "track", True, True, True, True, True, True, True)]
+    complete = [dict(zip(ARTIFACTS, ("song", "track", True, True, True, True, True, True, True)))]
     monkeypatch.setattr(
         recording_encoder, "config_from_env", lambda: SimpleNamespace(representation_id="current")
     )

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 
+from core.planning import store
 from worker.artwork.settings import sync_selection
 from worker.planning.audio import plan_audio, plan_karaoke
 from worker.planning.freshness import sources_needing_refresh
@@ -28,20 +29,12 @@ def select_sync_tracks(
     ids = list(dict.fromkeys(external_ids))
     if not ids:
         return []
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT id FROM libraries WHERE namespace=%s",
-            (uuid.uuid5(uuid.NAMESPACE_URL, url.rstrip("/")),),
-        )
-        library = cursor.fetchone()
-        if library is None:
-            return ids
-        library_id = library[0]
-        cursor.execute(
-            "SELECT external_id FROM track_sources WHERE library_id=%s AND source_type='subsonic' AND external_id=ANY(%s)",
-            (library_id, ids),
-        )
-        known = {row[0] for row in cursor.fetchall()}
+    library_id = store.library_with_namespace(
+        connection, uuid.uuid5(uuid.NAMESPACE_URL, url.rstrip("/"))
+    )
+    if library_id is None:
+        return ids
+    known = store.known_sources(connection, library_id, ids)
     selected = set(ids) - known
     if mode == "missing":
         return [item for item in ids if item in selected]
@@ -58,47 +51,12 @@ def select_sync_tracks(
 
     selected.update(sources_needing_refresh(connection, library_id, ids, catalog))
     selected.update(plan_audio(connection, library_id, ids).download_external_ids)
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """SELECT DISTINCT ts.external_id
-            FROM track_sources ts LEFT JOIN lyrics l ON l.track_id=ts.track_id
-            WHERE ts.library_id=%s AND ts.source_type='subsonic' AND ts.external_id=ANY(%s)
-            AND (
-                l.track_id IS NULL
-                OR (l.provenance->>'manual_status')='missing'
-                OR (l.text IS NOT NULL AND NOT EXISTS (
-                    SELECT 1 FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
-                    WHERE e.track_id=ts.track_id AND e.embedding_type='lyrics'
-                      AND e.window_index IS NULL AND ar.model_name='bge_m3'))
-                OR EXISTS (
-                    SELECT 1 FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
-                    WHERE e.track_id=ts.track_id AND e.embedding_type='audio-track'
-                      AND e.window_index IS NULL AND ar.model_name IN ('muq_mulan','mert')
-                      AND NOT EXISTS (SELECT 1 FROM current_audio_profiles p
-                          WHERE p.track_id=e.track_id AND p.source_run_id=e.run_id
-                            AND p.model_name=ar.model_name))
-                OR NOT EXISTS (
-                    SELECT 1 FROM current_embeddings e
-                    JOIN track_vocal_activity activity ON activity.track_id=e.track_id AND activity.run_id=e.run_id
-                    WHERE e.track_id=ts.track_id AND e.embedding_type='voice-gender')
-            )""",
-            (library_id, ids),
-        )
-        selected.update(row[0] for row in cursor.fetchall())
+    selected.update(store.songs_needing_backfill(connection, library_id, ids))
 
     from worker.transcription.config import transcription_enabled, transcription_model
 
     if transcription_model() and transcription_enabled(connection):
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """SELECT DISTINCT ts.external_id FROM track_sources ts
-                LEFT JOIN lyrics l ON l.track_id=ts.track_id
-                WHERE ts.library_id=%s AND ts.source_type='subsonic' AND ts.external_id=ANY(%s)
-                  AND NULLIF(btrim(l.text),'') IS NULL
-                  AND coalesce(l.availability_status,'missing') != 'instrumental'""",
-                (library_id, ids),
-            )
-            selected.update(row[0] for row in cursor.fetchall())
+        selected.update(store.songs_needing_transcription(connection, library_id, ids))
 
     # Share the exact karaoke compatibility contract with the executing pipeline.
     from worker.kara.pipeline import (

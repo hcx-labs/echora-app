@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from core.config import config_classes
+from core.planning import store as planning_store
 
 SOURCE = Path(__file__).parents[1] / "src"
 
@@ -42,12 +43,13 @@ class LibraryScopingTests(unittest.TestCase):
             os=SimpleNamespace(environ={}),
             ProcessingPlan=lambda **kw: SimpleNamespace(**kw),
             feature_enabled=lambda connection, feature, where=None: True,
+            store=planning_store,
         )
 
     def test_planners_scope_optional_library_and_ids(self):
         ns = self.plan_namespace()
         self.cursor.fetchone.return_value = (True,)
-        self.cursor.fetchall.return_value = [("shared-id",)]
+        self.cursor.fetchall.return_value = [{"external_id": "shared-id"}]
         for name, args in [("plan_lyrics", ()), ("plan_karaoke", ("pipeline",))]:
             for ids in (None, [], ["shared-id"]):
                 for library in (None, self.library_id):
@@ -70,11 +72,11 @@ class LibraryScopingTests(unittest.TestCase):
 
     def test_library_resolution_fails_closed(self):
         resolve = self.plan_namespace()["resolve_library_id"]
-        for rows in ([], [(uuid.uuid4(),), (uuid.uuid4(),)]):
+        for rows in ([], [{"id": uuid.uuid4()}, {"id": uuid.uuid4()}]):
             self.cursor.fetchall.return_value = rows
             with self.assertRaises(ValueError):
                 resolve(self.connection, "https://music/")
-        self.cursor.fetchall.return_value = [(self.library_id,)]
+        self.cursor.fetchall.return_value = [{"id": self.library_id}]
         self.assertEqual(resolve(self.connection, "https://music/"), self.library_id)
         sql, params = self.cursor.execute.call_args.args
         self.assertIn("lower(rtrim(root_path", sql)
