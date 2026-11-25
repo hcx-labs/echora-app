@@ -25,7 +25,8 @@ secret). Nothing reads ``.env`` files: Docker Compose passes them to the process
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+import importlib
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, Self
 
@@ -212,6 +213,20 @@ class EchoraConfig(BaseSettings):
 def config_classes() -> list[type[EchoraConfig]]:
     """Every settings class defined so far (import the packages first), in definition order."""
     return list(_registry)
+
+
+def load_all(modules: Iterable[str]) -> None:
+    """Import the modules and load every settings class they define, at process start.
+
+    An invalid value then stops the process when it starts (``pydantic.ValidationError``, naming
+    the setting but not its value) instead of failing the first job or request that needs it.
+    """
+    names = tuple(modules)
+    for name in names:
+        importlib.import_module(name)
+    for cls in config_classes():
+        if cls.__module__ in names:
+            cls.load()
 
 
 def reset_config_cache() -> None:

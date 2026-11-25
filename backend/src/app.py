@@ -12,7 +12,8 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from backend.api import v1
 from backend.api.errors import install_error_handlers
-from backend.config import ApiConfig, OidcConfig, SessionConfig
+from backend.config import CONFIG_MODULES, ApiConfig, OidcConfig, SessionConfig
+from core.config import load_all
 from core.db.connection import connect
 from core.embeddings.representations import configure_representations
 
@@ -57,6 +58,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def _startup() -> None:
+    # An invalid setting stops the API here, not the first request that reads it.
+    load_all(CONFIG_MODULES)
     enforce_secure_cookie_policy()
     with connect() as connection:
         configure_representations(connection)

@@ -7,31 +7,8 @@ python scripts/export-runtime-settings.py [--ui]   (with core, worker and backen
 
 import importlib
 
+from backend.config import CONFIG_MODULES
 from core.config import EchoraConfig, config_classes
-
-# Every module that defines a config class, in catalog order.
-CONFIG_MODULES = (
-    "core.db.config",
-    "core.jobs.config",
-    "core.integrations.config",
-    "core.library.config",
-    "core.embeddings.config",
-    "core.lyrics.config",
-    "core.media.config",
-    "worker.config",
-    "worker.library.config",
-    "worker.media.config",
-    "worker.models.config",
-    "worker.melody.config",
-    "worker.fusion.config",
-    "worker.remote.config",
-    "worker.artwork.config",
-    "worker.curation.config",
-    "worker.transcription.config",
-    "worker.kara.config",
-    "worker.recordings.config",
-    "backend.config",
-)
 
 
 def catalog() -> list[type[EchoraConfig]]:

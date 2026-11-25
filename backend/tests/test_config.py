@@ -194,3 +194,17 @@ def test_environment_catalog_matches_settings_defaults():
 def test_browser_defaults_match_settings():
     defaults = ROOT / "web/components/runtime/runtimeConfig.defaults.json"
     assert json.loads(defaults.read_text()) == EXPORTER["ui_defaults"]()
+
+
+def test_every_settings_class_is_loaded_at_startup():
+    """The startup list names every module under src/ that defines a settings class."""
+    from backend.config import CONFIG_MODULES
+
+    defined = set()
+    for project in ("core", "worker", "backend"):
+        for path in (ROOT / project / "src").rglob("*.py"):
+            if "(EchoraConfig" in path.read_text():
+                relative = path.relative_to(ROOT / project / "src").with_suffix("")
+                defined.add(".".join((project, *relative.parts)))
+    defined.discard("core.config")  # The base class's own module (its docstring shows a subclass).
+    assert defined == set(CONFIG_MODULES)
