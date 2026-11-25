@@ -93,3 +93,40 @@ def test_themes_are_stored_and_replaced(db):
         "SELECT status, error_code, themes FROM track_lyric_themes WHERE track_id=%s", (track,)
     ).fetchone()
     assert row == ("ready", None, ["love"])
+
+
+def test_karaoke_writes_replace_the_unbounded_variant(db):
+    track = song(db)
+    library = uuid.uuid4()
+    db.execute(
+        "INSERT INTO libraries (id, name, root_path, namespace) VALUES (%s, 'N', %s, %s)",
+        (library, "https://music.test/" + uuid.uuid4().hex, uuid.uuid4()),
+    )
+    db.execute(
+        "INSERT INTO track_sources (library_id, track_id, source_type, external_id, source_data)"
+        " VALUES (%s, %s, 'subsonic', 's1', '{}')",
+        (library, track),
+    )
+    store.save_lyrics(
+        db,
+        track,
+        "embedded",
+        "Hello",
+        "en",
+        {"word_timing": [1], "word_timing_digest": "d"},
+        "available",
+    )
+    [row] = store.karaoke_sources(db, ["s1"], library)
+    assert (row["text"], row["word_timing"], row["word_timing_digest"]) == ("Hello", [1], "d")
+    store.save_supplied_karaoke(db, track, [{"text": "Hello"}], {"alignment_mode": "supplied"})
+    store.save_aligned_karaoke(
+        db, track, [{"text": "Hi"}], "rev", {"alignment_mode": "ctc"}, {}, {}
+    )
+    variant = db.execute(
+        "SELECT model, lines FROM karaoke_lyrics_variants WHERE track_id=%s", (track,)
+    ).fetchall()
+    assert variant == [("fa_kara", [{"text": "Hi"}])]
+    lyrics = db.execute(
+        "SELECT karaoke_model, provenance->'karaoke' FROM lyrics WHERE track_id=%s", (track,)
+    ).fetchone()
+    assert lyrics == ("fa_kara", {"alignment_mode": "ctc"})

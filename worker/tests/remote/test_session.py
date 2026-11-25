@@ -543,9 +543,10 @@ def test_modal_batch_aligns_karaoke_remotely(monkeypatch):
     import worker.kara.pipeline as karaoke_pipeline
 
     reset_config_cache()
+    keys = ("track_id", "external_id", "title", "text", "language", "lines")
     rows = [
-        (uuid4(), "a", "A", "lyrics a", "ja", [{"text": "a"}]),
-        (uuid4(), "b", "B", "lyrics b", None, None),
+        dict(zip(keys, (uuid4(), "a", "A", "lyrics a", "ja", [{"text": "a"}]))),
+        dict(zip(keys, (uuid4(), "b", "B", "lyrics b", None, None))),
     ]
     connection, cursor = database(rows)
     client = MagicMock()

@@ -428,3 +428,91 @@ def save_themes(
             embedding_model,
         ),
     )
+
+
+# Karaoke timing written by the karaoke stage (worker.kara.pipeline).
+
+
+def karaoke_sources(
+    db: Connection, external_ids: list[str], library_id: uuid.UUID
+) -> list[dict[str, Any]]:
+    """One source per song among the library's sources, with the song's lyrics.
+
+    Rows are ``track_id``, ``external_id``, ``title``, ``text``, ``language``, ``lines`` (the
+    provider's lines), ``word_timing`` and ``word_timing_digest`` (supplied word timing).
+    """
+    return fetch_all(
+        db,
+        """SELECT DISTINCT ON (ts.track_id) ts.track_id, ts.external_id, t.title, l.text, l.language,
+                   l.provenance->'lines' AS lines, l.provenance->'word_timing' AS word_timing,
+                   l.provenance->>'word_timing_digest' AS word_timing_digest
+            FROM track_sources ts JOIN tracks t ON t.id=ts.track_id JOIN lyrics l ON l.track_id=ts.track_id
+            WHERE ts.source_type='subsonic' AND ts.external_id=ANY(%s) AND ts.library_id=%s
+            ORDER BY ts.track_id, ts.id""",
+        (external_ids, library_id),
+    )
+
+
+def save_supplied_karaoke(
+    db: Connection, track_id: uuid.UUID, lines: list[Any], provenance: dict[str, Any]
+) -> None:
+    """Store word timing that came with the lyrics as the song's unbounded karaoke."""
+    db.execute(
+        """INSERT INTO karaoke_lyrics_variants
+             (track_id, bounded, lines, ass, lrc, model, model_revision, provenance,
+              alignment_document, diagnostics, created_at)
+           VALUES (%s,false,%s,NULL,NULL,'navidrome','supplied',%s,NULL,'{}',now())
+           ON CONFLICT (track_id, bounded) DO UPDATE SET lines=EXCLUDED.lines,
+             ass=NULL, lrc=NULL, model=EXCLUDED.model, model_revision=EXCLUDED.model_revision,
+             provenance=EXCLUDED.provenance, alignment_document=NULL, diagnostics='{}',
+             created_at=now()""",
+        (track_id, Jsonb(lines), Jsonb(provenance)),
+    )
+    db.execute(
+        """UPDATE lyrics SET karaoke_lines=%s, karaoke_ass=NULL, karaoke_lrc=NULL,
+                  karaoke_model='navidrome', karaoke_model_revision='supplied',
+                  karaoke_bounded=false, karaoke_created_at=now(),
+                  provenance=provenance || %s
+           WHERE track_id=%s""",
+        (Jsonb(lines), Jsonb({"karaoke": provenance}), track_id),
+    )
+
+
+def save_aligned_karaoke(
+    db: Connection,
+    track_id: uuid.UUID,
+    lines: list[Any],
+    model_revision: str,
+    provenance: dict[str, Any],
+    alignment_document: dict[str, Any],
+    diagnostics: dict[str, Any],
+) -> None:
+    """Store a FA-Kara alignment as the song's unbounded karaoke."""
+    db.execute(
+        """INSERT INTO karaoke_lyrics_variants
+             (track_id, bounded, lines, ass, lrc, model, model_revision, provenance,
+              alignment_document, diagnostics, created_at)
+           VALUES (%s,%s,%s,NULL,NULL,'fa_kara',%s,%s,%s,%s,now())
+           ON CONFLICT (track_id, bounded) DO UPDATE SET lines=EXCLUDED.lines,
+             ass=EXCLUDED.ass, lrc=EXCLUDED.lrc, model=EXCLUDED.model,
+             model_revision=EXCLUDED.model_revision, provenance=EXCLUDED.provenance,
+             alignment_document=EXCLUDED.alignment_document,
+             diagnostics=EXCLUDED.diagnostics, created_at=now()""",
+        (
+            track_id,
+            False,
+            Jsonb(lines),
+            model_revision,
+            Jsonb(provenance),
+            Jsonb(alignment_document),
+            Jsonb(diagnostics),
+        ),
+    )
+    db.execute(
+        """UPDATE lyrics SET karaoke_lines=%s, karaoke_ass=NULL, karaoke_lrc=NULL,
+                  karaoke_model='fa_kara', karaoke_model_revision=%s, karaoke_bounded=%s,
+                  karaoke_created_at=now(),
+                  provenance=provenance || %s
+           WHERE track_id=%s""",
+        (Jsonb(lines), model_revision, False, Jsonb({"karaoke": provenance}), track_id),
+    )

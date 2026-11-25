@@ -20,6 +20,25 @@ from worker.kara.pipeline import (
 from worker.processing import ProcessingContext, run_stage
 
 
+def _row(*values):
+    """A karaoke source row as the store returns it."""
+    return dict(
+        zip(
+            (
+                "track_id",
+                "external_id",
+                "title",
+                "text",
+                "language",
+                "lines",
+                "word_timing",
+                "word_timing_digest",
+            ),
+            values,
+        )
+    )
+
+
 def align_batch(progress=None, ids=("0", "1", "2")):
     """The karaoke stage's summary for a batch of these Navidrome ids."""
     context = ProcessingContext(
@@ -216,7 +235,7 @@ def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch,
     connection = MagicMock()
     monkeypatch.setattr(pipeline, "connect", lambda **_: connection)
     connection.__enter__.return_value = connection
-    tracks = [(uuid.UUID(int=i), str(i), str(i), "Hello", "en", []) for i in range(3)]
+    tracks = [_row(uuid.UUID(int=i), str(i), str(i), "Hello", "en", []) for i in range(3)]
     connection.cursor.return_value.__enter__.return_value.fetchall.return_value = tracks
     client = MagicMock()
     client.__enter__.return_value = client
@@ -286,7 +305,7 @@ def test_backfill_aligns_the_original_mix_without_separating(monkeypatch):
     connection = MagicMock()
     monkeypatch.setattr(pipeline, "connect", lambda **_: connection)
     connection.__enter__.return_value = connection
-    tracks = [(uuid.UUID(int=i), str(i), str(i), "Hello", "en", []) for i in range(3)]
+    tracks = [_row(uuid.UUID(int=i), str(i), str(i), "Hello", "en", []) for i in range(3)]
     connection.cursor.return_value.__enter__.return_value.fetchall.return_value = tracks
     client = MagicMock()
     client.__enter__.return_value = client
@@ -673,7 +692,7 @@ def test_karaoke_scope_and_cleanup_on_cancellation(monkeypatch):
     connection = MagicMock()
     connection.__enter__.return_value = connection
     cursor = connection.cursor.return_value.__enter__.return_value
-    cursor.fetchall.return_value = [(uuid.uuid4(), "shared-id", "Title", "words", "en", [])]
+    cursor.fetchall.return_value = [_row(uuid.uuid4(), "shared-id", "Title", "words", "en", [])]
     monkeypatch.setattr(pipeline, "connect", lambda **_: connection)
     monkeypatch.setattr(pipeline, "resolve_library_id", lambda *a: "library")
     planner = MagicMock(return_value=SimpleNamespace(karaoke_external_ids=("shared-id",)))
@@ -717,7 +736,7 @@ def test_supplied_word_timing_is_stored_without_aligning(monkeypatch):
     track = uuid.uuid4()
     timing = [{"text": "Hello", "start_ms": 0}]
     connection.cursor.return_value.__enter__.return_value.fetchall.return_value = [
-        (track, "0", "Title", "Hello", "en", [], timing, "digest")
+        _row(track, "0", "Title", "Hello", "en", [], timing, "digest")
     ]
     monkeypatch.setattr(pipeline, "connect", lambda **_: connection)
     monkeypatch.setattr(pipeline, "resolve_library_id", lambda *a: "library")
