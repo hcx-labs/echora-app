@@ -76,6 +76,7 @@ def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -
     summary.total = len(items)
     if not items:
         context.report(Progress("planning", processor.current_message, 0, 0, processor.unit))
+        summary.extra.update(processor.facts())
         return summary
 
     pending = {item.key: item for item in items}
@@ -120,4 +121,5 @@ def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -
         summary.count("failed", len(pending))
     finally:
         processor.close()
+    summary.extra.update(processor.facts())
     return summary

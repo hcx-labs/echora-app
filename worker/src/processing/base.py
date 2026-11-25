@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -113,3 +113,7 @@ class Processor[ConfigT: EchoraConfig | None, InputT: Item, OutputT](ABC):
 
     def close(self) -> None:  # noqa: B027
         """Release what ``open`` loaded."""
+
+    def facts(self) -> dict[str, Any]:
+        """Stage-specific facts the summary carries beyond its counts (the run it wrote to)."""
+        return {}

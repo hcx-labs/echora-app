@@ -3,7 +3,6 @@
 from core.testing import stub_module
 from core.config import reset_config_cache
 
-import sys
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -139,7 +138,7 @@ def test_batch_profiles_are_canonical_and_scoped(monkeypatch, library_helpers):
             context(),
         )
     assert result == {"profiled": 1}
-    assert profiles.call_args.args[0] == ["owned"]
+    assert profiles.call_args.args[1] == ["owned"]
 
 
 def test_hum_parent_creates_durable_corpus_from_job_id(monkeypatch, library_helpers):

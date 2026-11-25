@@ -81,3 +81,58 @@ def test_store_profile_accepts_dictionary_rows_for_profile_and_mode_ids():
     _store_profile(connection, uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), "muq_mulan", profile)
     cursor.execute.assert_any_call("DELETE FROM audio_modes WHERE profile_id=%s", (profile_id,))
     assert cursor.executemany.call_args.args[1][0][0] == mode_id
+
+
+def test_profile_processor_summary_and_run(monkeypatch):
+    import uuid
+    from unittest.mock import MagicMock
+
+    import worker.profiles.pipeline as profiles
+    from worker.processing import ProcessingContext, run_stage
+
+    good, empty = uuid.uuid4(), uuid.uuid4()
+    run, source = uuid.uuid4(), uuid.uuid4()
+    planning = MagicMock()
+    planning.__enter__.return_value = planning
+    planning.cursor.return_value.__enter__.return_value.fetchall.return_value = [
+        {
+            "track_id": track,
+            "source_run_id": source,
+            "duration_seconds": 20.0,
+            "window_seconds": None,
+            "stride_seconds": None,
+        }
+        for track in (good, empty)
+    ]
+    working = MagicMock()
+    windows = working.cursor.return_value.__enter__.return_value
+    window = {
+        "window_index": 0,
+        "window_start_seconds": 0.0,
+        "window_end_seconds": 10.0,
+        "embedding": "[1,0]",
+    }
+    windows.fetchall.side_effect = [[window], []]
+    connections = iter([planning, working])
+    monkeypatch.setattr(profiles.psycopg, "connect", lambda *a, **kw: next(connections))
+    monkeypatch.setattr(profiles, "_create_profile_run", lambda *a: run)
+    monkeypatch.setattr(profiles, "derive_audio_profile", lambda *a: "profile")
+    stored = []
+    monkeypatch.setattr(profiles, "_store_profile", lambda conn, *args: stored.append(args))
+    monkeypatch.setattr(
+        "core.embeddings.representations.configure_representations", lambda connection: None
+    )
+    summary = run_stage(
+        profiles.AudioProfileProcessor([good, empty], "mert"), ProcessingContext()
+    ).as_dict()
+    # The summary keys a profile build always had.
+    assert summary == {
+        "total": 2,
+        "profiled": 1,
+        "failed": 1,
+        "model": "mert",
+        "profile_run_id": str(run),
+    }
+    assert stored == [(good, source, run, "mert", "profile")]
+    completed = [c for c in windows.execute.call_args_list if "status='complete'" in c.args[0]]
+    assert completed and completed[0].args[1] == (run,)

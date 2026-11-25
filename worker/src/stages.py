@@ -97,12 +97,13 @@ def _add_links(user_id, url: str, ids: list[str]) -> int:
         return update_memberships(connection, library[0], user_id, ids)["linked"]
 
 
-def profiles(ids, report) -> dict[str, Any]:
+def profiles(batch: Batch, ids) -> dict[str, Any]:
     """Audio profiles of canonical tracks for every supported embedding model."""
-    from worker.profiles.pipeline import SUPPORTED_PROFILE_MODELS, build_audio_profiles
+    from worker.profiles.pipeline import SUPPORTED_PROFILE_MODELS, AudioProfileProcessor
 
+    track_ids = [uuid.UUID(str(v)) for v in ids]
     models = {
-        name: build_audio_profiles([uuid.UUID(str(v)) for v in ids], report, model_name=name)
+        name: run_stage(AudioProfileProcessor(track_ids, name), batch.context()).as_dict()
         for name in SUPPORTED_PROFILE_MODELS
     }
     return {
@@ -130,13 +131,13 @@ def _library(batch: Batch) -> dict[str, Any]:
     attach_user_library(batch.user_id, batch.url)
     summary["linked"] = _add_links(batch.user_id, batch.url, batch.track_ids)
     canonical = list({row[1] for row in source_rows(batch.user_id, batch.url, batch.track_ids)})
-    summary["audio_profiles"] = profiles(canonical, batch.report)
+    summary["audio_profiles"] = profiles(batch, canonical)
     return summary
 
 
 def _audio_profiles(batch: Batch) -> dict[str, Any]:
     allowed = {str(v) for v in user_audio_track_ids(batch.user_id)}
-    return profiles([v for v in batch.track_ids if str(v) in allowed], batch.report)
+    return profiles(batch, [v for v in batch.track_ids if str(v) in allowed])
 
 
 # Lyrics and what is derived from them.

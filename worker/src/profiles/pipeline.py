@@ -6,7 +6,7 @@ import logging
 import math
 import platform
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -16,12 +16,14 @@ from psycopg.types.json import Jsonb
 from sklearn.metrics import adjusted_rand_score
 
 from core.db.config import require_database_url
+from core.errors import ProcessingError
 from core.embeddings.representations import (
     DEFAULT_PARAMETERS,
     AudioProfileParameters,
     profile_config,
 )
 from core.revisions import AUDIO_PROFILE_REVISION, SUPPORTED_PROFILE_MODELS
+from worker.processing import Item, ItemResult, ProcessingContext, Processor
 
 logger = logging.getLogger(__name__)
 
@@ -522,134 +524,167 @@ def _store_profile(
             )
 
 
-def build_audio_profiles(
-    track_ids: Sequence[uuid.UUID] | None = None,
-    progress: Callable[[dict[str, object]], None] | None = None,
-    parameters: AudioProfileParameters = DEFAULT_PARAMETERS,
-    model_name: str = "muq_mulan",
-) -> dict[str, object]:
-    from core.embeddings.representations import configure_representations
+class ProfileItem(Item):
+    """A song whose current audio embedding has no profile in the current profile run."""
 
-    report = progress or (lambda _: None)
-    summary: dict[str, object] = {
-        "model": model_name,
-        "total": 0,
-        "profiled": 0,
-        "failed": 0,
-        "profile_run_id": None,
-    }
-    with psycopg.connect(require_database_url(), row_factory=dict_row) as connection:
-        configure_representations(connection)
-        profile_run_id = _create_profile_run(connection, model_name, parameters)
-        summary["profile_run_id"] = str(profile_run_id)
-        connection.commit()
-        restriction = " AND e.track_id=ANY(%s)" if track_ids is not None else ""
-        arguments = [list(track_ids)] if track_ids is not None else []
-        with connection.cursor() as cursor:
-            cursor.execute(
-                f"""SELECT DISTINCT ON (e.track_id)
-                          e.track_id, e.run_id AS source_run_id, t.duration_seconds,
-                          ar.config->>'window_seconds' AS window_seconds,
-                          ar.config->>'stride_seconds' AS stride_seconds
-                    FROM current_embeddings e
-                    JOIN analysis_runs ar ON ar.id=e.run_id
-                    JOIN tracks t ON t.id=e.track_id
-                    WHERE e.embedding_type='audio-track' AND e.window_index IS NULL
-                      AND ar.model_name=%s
-                      AND NOT EXISTS (
-                        SELECT 1 FROM track_audio_profiles tap
-                        JOIN analysis_runs profile_run ON profile_run.id=tap.profile_run_id
-                        WHERE tap.track_id=e.track_id
-                          AND tap.source_run_id=e.run_id
-                          AND tap.model_name=%s
-                          AND profile_run.kind='audio_profile'
-                          AND profile_run.id=%s
-                      ){restriction}
-                    ORDER BY e.track_id, ar.created_at DESC""",
-                [model_name, model_name, profile_run_id, *arguments],
+    track_id: uuid.UUID
+    source_run_id: uuid.UUID
+    duration: float
+    window_seconds: float
+    stride_seconds: float
+
+
+class AudioProfileProcessor(Processor[None, ProfileItem, TrackAudioProfile]):
+    """Derives multi-vector audio profiles from one model's stored window embeddings.
+
+    Reads only the database: the embeddings were computed during ingest. Songs are canonical
+    track ids (``track_ids``), not a library's.
+    """
+
+    name = "audio_profiles"
+    summary_key = "audio_profiles"
+    counters = ("profiled",)
+
+    def __init__(
+        self,
+        track_ids: Sequence[uuid.UUID],
+        model_name: str = "muq_mulan",
+        parameters: AudioProfileParameters = DEFAULT_PARAMETERS,
+    ) -> None:
+        super().__init__()
+        self.track_ids = list(track_ids)
+        self.model_name = model_name
+        self.parameters = parameters
+        self.activity = f"Deriving {model_name} multi-vector audio profiles"
+        self.run_id: uuid.UUID | None = None
+
+    def plan(self, context: ProcessingContext) -> list[ProfileItem]:
+        from core.embeddings.representations import configure_representations
+
+        with psycopg.connect(require_database_url(), row_factory=dict_row) as connection:
+            configure_representations(connection)
+            # Get or create: the run of the current profile parameters.
+            self.run_id = _create_profile_run(connection, self.model_name, self.parameters)
+            connection.commit()
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """SELECT DISTINCT ON (e.track_id)
+                              e.track_id, e.run_id AS source_run_id, t.duration_seconds,
+                              ar.config->>'window_seconds' AS window_seconds,
+                              ar.config->>'stride_seconds' AS stride_seconds
+                        FROM current_embeddings e
+                        JOIN analysis_runs ar ON ar.id=e.run_id
+                        JOIN tracks t ON t.id=e.track_id
+                        WHERE e.embedding_type='audio-track' AND e.window_index IS NULL
+                          AND ar.model_name=%s
+                          AND NOT EXISTS (
+                            SELECT 1 FROM track_audio_profiles tap
+                            JOIN analysis_runs profile_run ON profile_run.id=tap.profile_run_id
+                            WHERE tap.track_id=e.track_id
+                              AND tap.source_run_id=e.run_id
+                              AND tap.model_name=%s
+                              AND profile_run.kind='audio_profile'
+                              AND profile_run.id=%s
+                          ) AND e.track_id=ANY(%s)
+                        ORDER BY e.track_id, ar.created_at DESC""",
+                    [self.model_name, self.model_name, self.run_id, self.track_ids],
+                )
+                rows = cursor.fetchall()
+        return [
+            ProfileItem(
+                key=str(row["track_id"]),
+                track_id=row["track_id"],
+                source_run_id=row["source_run_id"],
+                duration=float(row["duration_seconds"]),
+                window_seconds=float(row["window_seconds"] or 10),
+                stride_seconds=float(row["stride_seconds"] or 5),
             )
-            tracks = cursor.fetchall()
-        summary["total"] = len(tracks)
-        for completed, track in enumerate(tracks):
+            for row in rows
+        ]
+
+    def open(self, context, items) -> None:
+        self.connection = psycopg.connect(require_database_url(), row_factory=dict_row)
+
+    def process(self, context, items):
+        for item in items:
+            context.check()
             try:
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        """SELECT window_index, window_start_seconds, window_end_seconds,
-                                  embedding::text AS embedding
-                           FROM embeddings
-                           WHERE track_id=%s AND run_id=%s AND embedding_type='audio-window'
-                           ORDER BY window_index""",
-                        (track["track_id"], track["source_run_id"]),
-                    )
-                    rows = cursor.fetchall()
-                if not rows:
-                    raise ValueError(f"{model_name} run has no stored window embeddings")
-                duration = float(track["duration_seconds"])
-                exact = all(
-                    row["window_start_seconds"] is not None
-                    and row["window_end_seconds"] is not None
-                    for row in rows
-                )
-                window_seconds = float(track["window_seconds"] or 10)
-                stride_seconds = float(track["stride_seconds"] or 5)
-                if exact:
-                    duration = max(
-                        duration,
-                        max(float(row["window_end_seconds"]) for row in rows),
-                    )
-                elif len(rows) > 1:
-                    # With the ingestion rule, the penultimate window is still
-                    # stride-aligned even when the final window has an irregular start.
-                    minimum_compatible_duration = window_seconds + stride_seconds * max(
-                        0, len(rows) - 2
-                    )
-                    duration = max(duration, minimum_compatible_duration)
-                elif duration <= 0:
-                    duration = window_seconds
-                inferred = infer_window_ranges(
-                    len(rows),
-                    duration,
-                    window_seconds,
-                    stride_seconds,
-                )
-                windows = [
-                    WindowVector(
-                        int(row["window_index"]),
-                        float(row["window_start_seconds"] if exact else inferred[index][0]),
-                        float(row["window_end_seconds"] if exact else inferred[index][1]),
-                        np.fromstring(row["embedding"].strip("[]"), sep=","),
-                    )
-                    for index, row in enumerate(rows)
-                ]
-                profile = derive_audio_profile(windows, duration, exact, parameters)
-                _store_profile(
-                    connection,
-                    track["track_id"],
-                    track["source_run_id"],
-                    profile_run_id,
-                    model_name,
-                    profile,
-                )
-                connection.commit()
-                summary["profiled"] = int(summary["profiled"]) + 1
-            except Exception:
-                connection.rollback()
-                summary["failed"] = int(summary["failed"]) + 1
-                logger.exception("Failed to derive audio profile for track %s", track["track_id"])
-            report(
-                {
-                    "phase": "audio_profiles",
-                    "message": f"Deriving {model_name} multi-vector audio profiles",
-                    "completed": completed + 1,
-                    "total": len(tracks),
-                    "unit": "tracks",
-                    "summary": summary,
-                }
-            )
-        with connection.cursor() as cursor:
+                profile = self._derive(item)
+            except Exception as error:  # noqa: BLE001 - one song's stored windows
+                logger.exception("Failed to derive audio profile for track %s", item.track_id)
+                failure = ProcessingError("Audio profile failed", stage=type(error).__name__)
+                yield ItemResult.failed(item, failure)
+                continue
+            yield ItemResult(item=item, outcome="profiled", output=profile)
+        # Every planned song has a result: the run is complete.
+        with self.connection.cursor() as cursor:
             cursor.execute(
                 "UPDATE analysis_runs SET status='complete', finished_at=now() WHERE id=%s",
-                (profile_run_id,),
+                (self.run_id,),
             )
-        connection.commit()
-    return summary
+        self.connection.commit()
+
+    def _derive(self, item: ProfileItem) -> TrackAudioProfile:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """SELECT window_index, window_start_seconds, window_end_seconds,
+                          embedding::text AS embedding
+                   FROM embeddings
+                   WHERE track_id=%s AND run_id=%s AND embedding_type='audio-window'
+                   ORDER BY window_index""",
+                (item.track_id, item.source_run_id),
+            )
+            rows = cursor.fetchall()
+        if not rows:
+            raise ValueError(f"{self.model_name} run has no stored window embeddings")
+        duration = item.duration
+        exact = all(
+            row["window_start_seconds"] is not None and row["window_end_seconds"] is not None
+            for row in rows
+        )
+        window_seconds, stride_seconds = item.window_seconds, item.stride_seconds
+        if exact:
+            duration = max(duration, max(float(row["window_end_seconds"]) for row in rows))
+        elif len(rows) > 1:
+            # With the ingestion rule, the penultimate window is still
+            # stride-aligned even when the final window has an irregular start.
+            minimum_compatible_duration = window_seconds + stride_seconds * max(0, len(rows) - 2)
+            duration = max(duration, minimum_compatible_duration)
+        elif duration <= 0:
+            duration = window_seconds
+        inferred = infer_window_ranges(len(rows), duration, window_seconds, stride_seconds)
+        windows = [
+            WindowVector(
+                int(row["window_index"]),
+                float(row["window_start_seconds"] if exact else inferred[index][0]),
+                float(row["window_end_seconds"] if exact else inferred[index][1]),
+                np.fromstring(row["embedding"].strip("[]"), sep=","),
+            )
+            for index, row in enumerate(rows)
+        ]
+        return derive_audio_profile(windows, duration, exact, self.parameters)
+
+    def persist(self, context, item: ProfileItem, output: TrackAudioProfile) -> None:
+        try:
+            _store_profile(
+                self.connection,
+                item.track_id,
+                item.source_run_id,
+                self.run_id,
+                self.model_name,
+                output,
+            )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+
+    def close(self) -> None:
+        if hasattr(self, "connection"):
+            self.connection.close()
+
+    def facts(self) -> dict[str, object]:
+        return {
+            "model": self.model_name,
+            "profile_run_id": str(self.run_id) if self.run_id else None,
+        }
