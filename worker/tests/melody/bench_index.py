@@ -2,7 +2,7 @@
 
 Synthesizes contours sized like production data (4-minute tracks at 10 Hz,
 10-20 s hum queries) and times query extraction prep, per-catalog matching,
-and full search_corpus-equivalent scans. Timing only: every code path here is
+and full match_hum-equivalent scans. Timing only: every code path here is
 the production one, and the correctness oracles in test_hum_search.py stay the
 source of truth for matching behavior.
 """
@@ -87,7 +87,7 @@ def main() -> None:
         lambda: _match_prepared_motifs(prepared, target, target_mask),
     )
 
-    # --- Full corpus scan (as in search_corpus thread pool) ---------------
+    # --- Full corpus scan (as in match_hum's thread pool) ---------------
     contours = [
         _catalog_contour(rng, CONTOUR_SECONDS * 10)
         for _ in range(CATALOG_TRACKS * SOURCES_PER_TRACK)

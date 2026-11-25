@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 import platform
-import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -43,8 +42,6 @@ DEFAULT_CORPUS_SIZE = 50
 _TEMPO_RATIOS = (0.75, 0.9, 1.0, 1.1, 1.25, 1.4, 1.5)
 # Contours only change while a sync or corpus build is running. Caching the
 # parsed arrays removes the per-query array decoding cost.
-_CONTOUR_CACHE: dict[str, object] = {"key": None, "contours": ()}
-_CACHE_LOCK = threading.Lock()
 
 
 def _smooth_pitch(pitch: np.ndarray, voiced: np.ndarray, radius: int = 2) -> np.ndarray:
@@ -512,7 +509,8 @@ def store_track_contours(
     return len(usable)
 
 
-def _contour_cache_key(connection: psycopg.Connection, user_id: uuid.UUID) -> tuple[str, int, str]:
+def contour_index_key(connection: psycopg.Connection, user_id: uuid.UUID) -> tuple[str, int, str]:
+    """Changes whenever the user's current contours do: revision, count and newest contour."""
     with connection.cursor(row_factory=tuple_row) as cursor:
         cursor.execute(
             """SELECT count(*),coalesce(max(mc.created_at)::text,'')
@@ -527,34 +525,28 @@ def _contour_cache_key(connection: psycopg.Connection, user_id: uuid.UUID) -> tu
     return f"{user_id}:{MELODY_CONTOUR_REVISION}", int(count), str(latest or "")
 
 
-def _load_contours(connection: psycopg.Connection, user_id: uuid.UUID) -> list[dict[str, object]]:
-    key = _contour_cache_key(connection, user_id)
-    with _CACHE_LOCK:
-        if _CONTOUR_CACHE["key"] == key and _CONTOUR_CACHE["contours"]:
-            return _CONTOUR_CACHE["contours"]  # type: ignore[return-value]
-        with connection.cursor(row_factory=dict_row) as cursor:
-            cursor.execute(
-                """SELECT DISTINCT ON (mc.track_id,mc.source)
-                          mc.track_id,mc.source,mc.pitch,mc.voiced
-                   FROM melody_contours mc JOIN analysis_runs ar ON ar.id=mc.run_id
-                   WHERE ar.status IN ('complete','running') AND ar.model_revision=%s
-                     AND EXISTS (SELECT 1 FROM user_track_links utl
-                                 WHERE utl.user_id=%s AND utl.track_id=mc.track_id)
-                   ORDER BY mc.track_id,mc.source,ar.created_at DESC""",
-                (MELODY_CONTOUR_REVISION, user_id),
-            )
-            rows = cursor.fetchall()
-        contours = [
-            {
-                **row,
-                "pitch": np.asarray(row["pitch"], dtype=np.float32),
-                "voiced": np.asarray(row["voiced"], dtype=bool),
-            }
-            for row in rows
-        ]
-        _CONTOUR_CACHE["key"] = key
-        _CONTOUR_CACHE["contours"] = contours
-        return contours
+def load_contours(connection: psycopg.Connection, user_id: uuid.UUID) -> list[dict[str, object]]:
+    """The user's current contours (one per track and source), as arrays ready to match."""
+    with connection.cursor(row_factory=dict_row) as cursor:
+        cursor.execute(
+            """SELECT DISTINCT ON (mc.track_id,mc.source)
+                      mc.track_id,mc.source,mc.pitch,mc.voiced
+               FROM melody_contours mc JOIN analysis_runs ar ON ar.id=mc.run_id
+               WHERE ar.status IN ('complete','running') AND ar.model_revision=%s
+                 AND EXISTS (SELECT 1 FROM user_track_links utl
+                             WHERE utl.user_id=%s AND utl.track_id=mc.track_id)
+               ORDER BY mc.track_id,mc.source,ar.created_at DESC""",
+            (MELODY_CONTOUR_REVISION, user_id),
+        )
+        rows = cursor.fetchall()
+    return [
+        {
+            **row,
+            "pitch": np.asarray(row["pitch"], dtype=np.float32),
+            "voiced": np.asarray(row["voiced"], dtype=bool),
+        }
+        for row in rows
+    ]
 
 
 def _capture_hum_diagnostic(
@@ -621,15 +613,16 @@ def _motif_windows(
     ]
 
 
-def search_corpus(user_id: uuid.UUID, audio: bytes, limit: int = 10) -> dict[str, object]:
+def match_hum(
+    user_id: uuid.UUID, contours: list[dict[str, object]], audio: bytes, limit: int = 10
+) -> dict[str, object]:
+    """Rank ``contours`` (from ``load_contours``) against a hummed recording."""
     query, query_mask = extract_hum_contour(audio)
     windows = _motif_windows(query, query_mask)
     prepared_motifs = _prepare_motifs(windows)
+    if not contours:
+        raise ValueError("Build the melody hum index before searching")
     with psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection:
-        contours = _load_contours(connection, user_id)
-        if not contours:
-            raise ValueError("Build the melody hum index before searching")
-
         workers = min(MelodyConfig.load().max_workers, os.cpu_count() or 2)
         best_by_window: list[dict[uuid.UUID, tuple[float, float, str]]] = [{} for _ in windows]
         best_across_windows: dict[uuid.UUID, tuple[float, float, str]] = {}

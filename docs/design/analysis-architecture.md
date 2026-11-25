@@ -151,7 +151,9 @@ class HumSearch(Endpoint):
 - `Endpoint` holds method, path, request and response models, dependencies, status code and OpenAPI
   metadata. A category's `__init__.py` lists its endpoint classes and the v1 router mounts every
   category. Nothing registers routes with decorators on a global `app`.
-- Request bodies derive from `RequestModel` (Pydantic, unknown fields rejected, strings stripped):
+- Request bodies derive from `RequestModel` (Pydantic, unknown fields rejected; strings are kept
+  as sent, since stripping would also trim passwords and lyrics, and a field opts in with
+  `StrippedStr`):
   - `PostRequest` creates or performs something;
   - `PutRequest` replaces a resource completely, so every field is required unless it has a
     default;

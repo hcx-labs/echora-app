@@ -45,3 +45,27 @@ def load_connection(
     except InvalidToken as error:
         raise RuntimeError("Stored Navidrome credentials cannot be decrypted") from error
     return url, username, password
+
+
+def save_connection(credentials: tuple[str, str, str], user_id: uuid.UUID) -> str:
+    """Store (or refresh the password of) the user's connection; returns its id."""
+    url, username, password = credentials
+    encrypted = credential_cipher().encrypt(password.encode())
+    with session_scope() as session:
+        stored = session.scalar(
+            select(NavidromeConnection).where(
+                NavidromeConnection.owner_user_id == user_id,
+                NavidromeConnection.url == url,
+                NavidromeConnection.username == username,
+            )
+        )
+        if stored is None:
+            stored = NavidromeConnection(
+                url=url, username=username, encrypted_password=encrypted, owner_user_id=user_id
+            )
+            session.add(stored)
+            session.flush()
+        else:
+            stored.encrypted_password = encrypted
+            stored.last_used_at = datetime.now(UTC)
+        return str(stored.id)

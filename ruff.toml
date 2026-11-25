@@ -42,11 +42,18 @@ ignore = [
     "B905",
 ]
 
+[lint.flake8-bugbear]
+# FastAPI declares dependencies and parameters as argument defaults.
+extend-immutable-calls = [
+    "fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body", "fastapi.Cookie",
+    "fastapi.Header", "fastapi.File", "fastapi.Form",
+]
+
 [lint.pydocstyle]
 convention = "pep257"
 
 [lint.isort]
-known-first-party = ["core", "worker", "echora_backend"]
+known-first-party = ["core", "worker", "backend"]
 combine-as-imports = true
 
 [lint.per-file-ignores]
