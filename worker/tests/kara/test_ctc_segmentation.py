@@ -3,6 +3,7 @@ import torch
 from worker.kara.aligner.ctc import align_ctc  # noqa: E402
 from worker.kara.aligner.decoder import (  # noqa: E402
     _assign_ctc_blank_holds,
+    _decode_background_blocks,
     _inference_chunk_starts,
 )
 
@@ -238,3 +239,101 @@ def test_optional_runs_at_the_song_edges_and_without_options_change_nothing():
     assert [[(s.start, s.end) for s in g] for g in plain] == [
         [(s.start, s.end) for s in g] for g in empty
     ]
+
+
+def _background_blocks(plan, encoded, lead, background, lead_emission=None, **options):
+    """Background lines of ``plan`` decoded against lead tokens at ``lead`` (start, end) frames."""
+    from types import SimpleNamespace
+
+    from torchaudio.functional import TokenSpan
+
+    model = SimpleNamespace(
+        last_background_log_probs=background,
+        blank=0,
+        tokenizer=SimpleNamespace(get_vocab=lambda: {"a": 1, "b": 2, "c": 3}),
+    )
+    lead_tokens = [i for _, flag, tokens in plan if not flag for i in tokens]
+    spans = [
+        [TokenSpan(encoded[i][0], start, end, 1.0)] for i, (start, end) in zip(lead_tokens, lead)
+    ]
+    ranges, offset = [], 0
+    for _, flag, tokens in plan:
+        if not flag:
+            ranges.append((offset, offset + len(tokens)))
+            offset += len(tokens)
+    blocks = _decode_background_blocks(
+        plan,
+        encoded,
+        spans,
+        ranges,
+        model,
+        0.02,
+        40,
+        100,
+        True,
+        lead_emission=_heard(background.shape[0], []) if lead_emission is None else lead_emission,
+        **options,
+    )
+    return [(group[0].start, group[-1].end) for block in blocks for group in block["spans"]]
+
+
+def _heard(frames, sounds):
+    """A head that hears silence except ``sounds``: (letter, start, end, strength)."""
+    logits = torch.zeros(frames, 4)
+    logits[:, 0] = 6.0
+    for letter, start, end, strength in sounds:
+        logits[start:end, 0] = 0.0
+        logits[start:end, letter] = strength
+    return torch.log_softmax(logits, dim=-1)
+
+
+def test_backing_lines_the_lead_sings_keep_the_leads_time_between_lines():
+    # The lead sings "a" then "b" 30 frames apart; the backing voice repeats both lines later. The
+    # background head hears the first clearly and something like "b" right after it (a pickup).
+    plan = [(0, False, [0]), (1, False, [1]), (2, True, [2]), (3, True, [3])]
+    encoded = [[1], [2], [1], [2]]
+    background = _heard(160, [(1, 70, 80, 8.0), (2, 82, 86, 8.0)])
+
+    paced = _background_blocks(plan, encoded, [(10, 20), (40, 50)], background)
+
+    assert paced[0][0] == 70
+    # Not on the pickup 12 frames later: 0.9 of the lead's 30 frames between the lines.
+    assert paced[1][0] - paced[0][0] >= 27
+
+
+def test_backing_lines_after_the_lead_are_read_on_the_lead_head_too():
+    # Nothing else is singing after the last lead line: the lead head hears the backing voice there.
+    plan = [(0, False, [0]), (1, True, [1])]
+    encoded = [[1], [2]]
+    silent = _heard(200, [])
+    lead_emission = _heard(200, [(1, 10, 20, 8.0), (2, 120, 130, 8.0)])
+
+    spans = _background_blocks(plan, encoded, [(10, 20)], silent, lead_emission=lead_emission)
+
+    assert spans == [(120, 130)]
+
+
+def test_a_backing_block_does_not_start_on_top_of_the_lead_line_before_it():
+    # The background head hears the long lead line too; the backing line is sung after it.
+    plan = [(0, False, [0, 1]), (1, True, [2])]
+    encoded = [[1], [1], [3]]
+    background = _heard(200, [(3, 20, 26, 8.0), (3, 110, 120, 4.0)])
+
+    paced = _background_blocks(plan, encoded, [(10, 20), (90, 100)], background)
+
+    # Not at frame 20, where the head hears the lead line itself.
+    assert paced[0][0] == 110
+
+
+def test_the_text_head_places_a_backing_line_neither_head_can_read():
+    plan = [(0, False, [0]), (1, True, [1])]
+    encoded = [[1], [2]]
+    silent = _heard(200, [])
+    share = torch.full((200, 1), -6.0)
+    share[150:160] = 0.0
+
+    spans = _background_blocks(
+        plan, encoded, [(10, 20)], silent, text_share=(share, {1: 0}), text_bonus=2.0
+    )
+
+    assert spans[0][0] == 150
