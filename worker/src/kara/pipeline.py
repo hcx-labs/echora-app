@@ -73,8 +73,32 @@ def current_model_revision() -> str:
 
 
 def _stored_model_revision(model_revision: str) -> str:
-    # ":mix" names the audio the aligner hears (the full mix); stored alignments carry it.
-    return f"{FA_KARA_REVISION}:{model_revision}:mix"
+    # The suffix names the audio the aligner hears: the full mix, with or without the reading of
+    # the separated vocals added. Stored alignments carry it, so changing the setting redoes them.
+    audio = "mix+stem" if KaraConfig.load().stem_reading else "mix"
+    return f"{FA_KARA_REVISION}:{model_revision}:{audio}"
+
+
+def _prepare_vocals(source: bytes, check) -> None:
+    """Separate a song's vocals into the prepared-audio cache, for the stem reading."""
+    from worker.media.preprocessing import prepare_audio
+
+    prepare_audio(source, vocals=True, check=check)
+
+
+def _write_stem(audio: bytes, path: Path) -> str:
+    """Write the song's separated vocals to ``path``; returns the separator's revision.
+
+    Read from the prepared-audio cache when the stage separated them first, separated here
+    otherwise.
+    """
+    import soundfile as sf
+
+    from worker.media.preprocessing import vocal_stereo
+    from worker.media.roformer import SEPARATION_REVISION
+
+    sf.write(str(path), vocal_stereo(audio, get_check()), 44100, subtype="FLOAT")
+    return SEPARATION_REVISION
 
 
 def _restore_display_text(
@@ -483,7 +507,11 @@ def _run_fa_kara(
     source_lines: list[dict[str, object]] | None = None,
     provided_audio: bool = False,
 ) -> dict[str, object]:
-    """Align lyrics to the song's full mix, or (``provided_audio``) to audio the caller cut."""
+    """Align lyrics to the song's full mix, or (``provided_audio``) to audio the caller cut.
+
+    With ``stem_reading`` the song's separated vocals are read as well and added to the mix's
+    reading (the mix stays the reference). Audio the caller cut is aligned as given.
+    """
     model_id = KaraConfig.load().model_id
     model_revision = current_model_revision()
     snapshot = (
@@ -507,8 +535,13 @@ def _run_fa_kara(
         input_text = "\n".join(line_texts) if line_texts else lyrics_text.rstrip("\r\n")
         config = KaraConfig.load()
         languages = fa_kara_languages(config.label_rules)
+        stem_path, separator_revision = None, None
+        if config.stem_reading and not provided_audio:
+            stem_path = str(work / "stem.wav")
+            separator_revision = _write_stem(audio, Path(stem_path))
         request = AlignRequest(
             audio_path=str(audio_path),
+            stem_path=stem_path,
             text=input_text,
             model_path=str(snapshot),
             language=language if language in languages else "auto",
@@ -544,7 +577,7 @@ def _run_fa_kara(
         diagnostics = alignment_document.setdefault("diagnostics", {})
         diagnostics["audio_source"] = "provided_audio" if provided_audio else "original_mix"
         diagnostics["separator"] = None
-        diagnostics["separator_revision"] = None
+        diagnostics["separator_revision"] = separator_revision
         lines = build_lines_from_alignment_document(alignment_document)
         # Keep the model's token-derived line boundaries. The former display
         # padding expanded every line into nearby silence, which moved otherwise
@@ -718,8 +751,29 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
     def _prepare(self, context, items):
         """Fetch every song (into the batch's source cache, or up to Modal) before the aligner loads.
 
+        With the stem reading, each song's vocals are separated here too (one separator for the
+        batch, released before the aligner loads; on Modal, one separation phase).
         Returns the prepared songs' keys (with their Modal upload digest) and the failed songs.
         """
+        from worker.media.roformer import separation_phase
+
+        with separation_phase():
+            prepared, failed = self._fetch(context, items)
+        stem_reading = KaraConfig.load().stem_reading
+        if context.remote is not None and stem_reading and prepared:
+            ready = [item for item in items if item.key in prepared]
+            separated = context.remote.prepare_vocals(
+                [prepared[item.key] for item in ready], vocals=True
+            )
+            for item, outcome in zip(ready, separated):
+                if isinstance(outcome, BaseException):
+                    logger.error("Vocal separation on Modal failed for %s", item.key)
+                    del prepared[item.key]
+                    failed.append(item)
+        return prepared, failed
+
+    def _fetch(self, context, items):
+        stem_reading = KaraConfig.load().stem_reading
         prepared: dict[str, str | None] = {}
         failed = []
         for index, item in enumerate(items):
@@ -736,6 +790,8 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
                 digest = None
                 if context.remote is not None:
                     digest = context.remote.upload_audio(source)
+                elif stem_reading:
+                    _prepare_vocals(source, context.check)
                 prepared[item.key] = digest
                 del source
             except Exception as error:  # noqa: BLE001 - one song's audio

@@ -5,6 +5,7 @@ from worker.kara.aligner.decoder import (  # noqa: E402
     _assign_ctc_blank_holds,
     _decode_background_blocks,
     _inference_chunk_starts,
+    with_stem_reading,
 )
 
 
@@ -358,3 +359,28 @@ def test_a_line_the_plain_pass_did_not_hear_takes_the_full_floor():
         vowel_ids={2},
     )
     assert minimums == [5, 5, 5]
+
+
+def test_the_stem_reading_adds_letters_and_never_silences_the_mix():
+    # Frames 0-9: only the mix hears "a" (the separator removed it). Frames 10-19: only the stem
+    # hears "b" (instruments mask it). Frames 20-29: both are silent.
+    mix = _heard(30, [(1, 0, 10, 8.0)])
+    stem = _heard(30, [(2, 10, 20, 8.0)])
+
+    fused = with_stem_reading(mix, stem, blank=0)
+
+    assert torch.allclose(fused.exp().sum(dim=-1), torch.ones(30), atol=1e-5)
+    assert (fused[:10].argmax(dim=-1) == 1).all()
+    assert torch.allclose(fused[:10, 1], mix[:10, 1], atol=0.05)
+    assert (fused[10:20].argmax(dim=-1) == 2).all()
+    assert (fused[20:].argmax(dim=-1) == 0).all()
+
+
+def test_a_stem_a_frame_shorter_than_the_mix_is_read_as_far_as_it_goes():
+    mix = _heard(30, [(1, 0, 10, 8.0)])
+    stem = _heard(28, [(2, 10, 20, 8.0)])
+
+    fused = with_stem_reading(mix, stem, blank=0)
+
+    assert fused.shape == mix.shape
+    assert torch.allclose(fused[28:], mix[28:])
