@@ -16,7 +16,11 @@ lyrics that stage keeps current. The aligner itself lives in [`aligner/`](aligne
   Navidrome.
 - **process**: songs whose lyrics came with word timing (TTML or enhanced LRC from Navidrome) are
   stored as they are (`supplied`). The rest are fetched first, every one of them (`preprocess`;
-  on Modal each song is uploaded once), then the aligner loads once (`models`) and aligns them all.
+  on Modal each song is uploaded once), and their vocals separated into the prepared-audio cache
+  (`stem_reading`); then the aligner loads once (`models`) and aligns them all. The aligner hears
+  the full mix and the separated vocals, and adds what it reads on the vocals to what it reads on
+  the mix: instruments mask quiet singing, the separator removes some of it, and the mix stays
+  the reference (a letter the mix hears is never lost).
   The aligner runs in a resident worker process (`python -m worker.kara.aligner.worker`) that
   takes one `AlignRequest` per song; on Modal every song aligns in one call.
 - **persist**: writes the alignment as the song's karaoke variant.
@@ -32,7 +36,7 @@ Summary `karaoke`: `total`, `aligned`, `supplied` (when any), `failed`.
 
 A song is redone when its stored `pipeline_revision` differs from `KARAOKE_PIPELINE_REVISION`
 (`core/src/revisions.py`) or its model revision differs from the current one. The model revision
-is `<FA_KARA_REVISION>:<checkpoint revision>:mix`; for a local checkpoint
+is `<FA_KARA_REVISION>:<checkpoint revision>:mix+stem` (`:mix` with `stem_reading` off); for a local checkpoint
 (`ECHORA_KARA_MODEL_PATH`) it is a digest of the weights. Supplied timing is current while its
 `source_digest` matches the lyrics' `word_timing_digest`.
 

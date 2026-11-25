@@ -310,7 +310,11 @@ class Analysis:
         source_lines,
         settings: dict[str, object],
     ):
-        """FA-Kara alignment of one track's lyrics on its full mix."""
+        """FA-Kara alignment of one track's lyrics on its full mix.
+
+        With the stem reading the separated vocals come from the container's cache, which the
+        stage's separation phase (``prepare_vocals``) filled first.
+        """
         from worker.kara.pipeline import _run_fa_kara
 
         self._adopt(settings)

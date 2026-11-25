@@ -53,12 +53,27 @@ def align_batch(progress=None, ids=("0", "1", "2")):
 REQUEST = AlignRequest(audio_path="i.audio", text="Hello", model_path="model")
 
 
-def test_stored_model_revision_names_the_full_mix(monkeypatch):
+@pytest.fixture(autouse=True)
+def _no_real_separation(monkeypatch):
+    """Tests never load the separator: the stem file is a stub unless a test replaces it."""
+
+    def write_stem(audio, path):
+        path.write_bytes(b"separated vocals")
+        return "separator-revision"
+
+    monkeypatch.setattr(pipeline, "_write_stem", write_stem)
+
+
+def test_stored_model_revision_names_what_the_aligner_hears(monkeypatch):
     # The legacy separation switches no longer change what the aligner hears.
     for name in ("FA_KARA_VOCAL_SEPARATION", "FA_KARA_AUDIO_INPUT"):
         monkeypatch.setenv(name, "vocals")
     reset_config_cache()
-    assert _stored_model_revision("model-revision") == f"{FA_KARA_REVISION}:model-revision:mix"
+    assert _stored_model_revision("revision") == f"{FA_KARA_REVISION}:revision:mix+stem"
+    # Turning the stem reading off changes the identity, so stored alignments are redone.
+    monkeypatch.setenv("ECHORA_KARA_STEM_READING", "false")
+    reset_config_cache()
+    assert _stored_model_revision("revision") == f"{FA_KARA_REVISION}:revision:mix"
 
 
 def test_alignment_document_restores_punctuation_and_spaces_to_display_syllables():
@@ -184,8 +199,20 @@ def test_worker_aligns_the_audio_as_given_without_line_times(
     original = b"original compressed full mix"
     monkeypatch.setattr(pipeline, "_fa_kara_worker", lambda *args: object())
 
+    def write_stem(audio, path):
+        assert audio == original
+        path.write_bytes(b"separated vocals")
+        return "separator-revision"
+
+    monkeypatch.setattr(pipeline, "_write_stem", write_stem)
+
     def job(worker, request):
         assert Path(request.audio_path).read_bytes() == original
+        # The song's separated vocals are read too; audio the caller cut is aligned as given.
+        if provided:
+            assert request.stem_path is None
+        else:
+            assert Path(request.stem_path).read_bytes() == b"separated vocals"
         # Synced lines give the line text; their start times never reach the aligner.
         assert request.text == "Hello"
         # The Echora Kara decoder defaults reach the aligner.
@@ -226,6 +253,9 @@ def test_worker_aligns_the_audio_as_given_without_line_times(
     )
     assert result["diagnostics"]["audio_source"] == source
     assert result["diagnostics"]["separator"] is None
+    assert result["diagnostics"]["separator_revision"] == (
+        None if provided else "separator-revision"
+    )
 
 
 @pytest.mark.parametrize("cancel", [False, True])
@@ -263,9 +293,13 @@ def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch,
         lambda *args, **kwargs: SimpleNamespace(karaoke_external_ids=["0", "1", "2"]),
     )
     monkeypatch.setattr(pipeline, "_stop_fa_kara_worker", lambda: events.append("stop"))
+    separated = []
+    monkeypatch.setattr(pipeline, "_prepare_vocals", lambda data, check: separated.append(data))
 
     def align(data, *args):
         assert events[:4] == ["stop", b"0", b"1", b"2"]
+        # Every fetched song's vocals were separated before the aligner loaded.
+        assert separated == [b"0", b"2"]
         assert data != b"1"
         events.append(("align", data))
         return {
@@ -301,7 +335,11 @@ def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch,
 
 def test_backfill_aligns_the_original_mix_without_separating(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "unused-mocked")
+    monkeypatch.setenv("ECHORA_KARA_STEM_READING", "false")
     reset_config_cache()
+    monkeypatch.setattr(
+        pipeline, "_prepare_vocals", lambda *args: pytest.fail("separated with stem reading off")
+    )
     connection = MagicMock()
     monkeypatch.setattr(pipeline, "connect", lambda **_: connection)
     connection.__enter__.return_value = connection

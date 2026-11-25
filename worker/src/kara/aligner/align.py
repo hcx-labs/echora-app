@@ -227,6 +227,15 @@ def align(request: AlignRequest) -> dict:
             cursor += len(tokens)
         return flags_out
 
+    stem_audio = None
+    if request.stem_path:
+        stem_channels, stem_rate = _read_audio(request.stem_path)
+        stem_mono = stem_channels.mean(axis=1)
+        if stem_rate != sr:
+            import soxr
+
+            stem_mono = soxr.resample(stem_mono, stem_rate, sr, quality="HQ")
+        stem_audio = _time_stretch(stem_mono, request.audio_speed)
     alignment_results = align_audio_with_timeline(
         y_processed,
         [tokens for tokens in alignment_token_lines if tokens],
@@ -250,6 +259,7 @@ def align(request: AlignRequest) -> dict:
         text_bonus=request.text_bonus,
         in_line_gap_cost=request.in_line_gap_cost,
         fusion=request.fusion,
+        stem_audio=stem_audio,
     )
     if len(alignment_results) != len(alignment_tokens):
         raise RuntimeError(
