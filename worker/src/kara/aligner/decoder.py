@@ -168,7 +168,12 @@ class Wav2Vec2ForcedAligner(ForcedAligner):
         self._fusion_layer = 0
         fusion_record = getattr(self.model.config, "fusion", None)
         if fusion_record:
-            from worker.kara.aligner.muq_fusion import FUSION_MODES, MuQBranch, load_fusion_adapter, load_fusion_lora
+            from worker.kara.aligner.muq_fusion import (
+                FUSION_MODES,
+                MuQBranch,
+                load_fusion_adapter,
+                load_fusion_lora,
+            )
 
             if fusion not in FUSION_MODES:
                 raise ValueError(f"fusion must be one of {FUSION_MODES}")

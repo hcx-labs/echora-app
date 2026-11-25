@@ -80,9 +80,7 @@ class DecoderIdentityTests(unittest.TestCase):
         )
         env.update(overrides)
         exec(
-            compile(
-                ast.Module(body=[node], type_ignores=[]), str(ALIGNER / "decoder.py"), "exec"
-            ),
+            compile(ast.Module(body=[node], type_ignores=[]), str(ALIGNER / "decoder.py"), "exec"),
             env,
         )
         return env["_decode_lead"](torch.zeros(2, 2))

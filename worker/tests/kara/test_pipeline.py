@@ -39,8 +39,6 @@ def test_stored_model_revision_tracks_the_audio_input(monkeypatch):
     )
 
 
-
-
 def test_alignment_document_restores_punctuation_and_spaces_to_display_syllables():
     document = {
         "alignment": {
@@ -104,8 +102,6 @@ def test_adaptive_padding_uses_real_silence_and_syllable_duration():
 
     assert result[0]["end_ms"] == 1500
     assert result[1]["start_ms"] == 1900
-
-
 
 
 def test_validate_alignment_document_accepts_monotonic_structured_output():
@@ -214,25 +210,28 @@ def test_worker_aligns_the_configured_audio_without_line_times(
         assert request.timing_offset_ms == 0
         assert not request.gap_onset_pull and request.inline_backing
         assert not request.optional_brackets
-        return {"ok": True, "document": {
-            "schema_version": 1,
-            "alignment": {
-                "lines": [
-                    {
-                        "source_index": 0,
-                        "text": "Hello",
-                        "tokens": [
-                            {
-                                "text": "Hello",
-                                "start_ms": 100,
-                                "end_ms": 200,
-                                "ctc_score": 0.9,
-                            }
-                        ],
-                    }
-                ]
+        return {
+            "ok": True,
+            "document": {
+                "schema_version": 1,
+                "alignment": {
+                    "lines": [
+                        {
+                            "source_index": 0,
+                            "text": "Hello",
+                            "tokens": [
+                                {
+                                    "text": "Hello",
+                                    "start_ms": 100,
+                                    "end_ms": 200,
+                                    "ctc_score": 0.9,
+                                }
+                            ],
+                        }
+                    ]
+                },
             },
-        }}
+        }
 
     monkeypatch.setattr(pipeline, "_run_worker_job", job)
     result = pipeline._run_fa_kara(
@@ -440,25 +439,28 @@ def test_local_model_path_overrides_snapshot(monkeypatch, tmp_path):
 
     def job(worker, request):
         seen["model"] = request.model_path
-        return {"ok": True, "document": {
-            "schema_version": 1,
-            "alignment": {
-                "lines": [
-                    {
-                        "source_index": 0,
-                        "text": "Hello",
-                        "tokens": [
-                            {
-                                "text": "Hello",
-                                "start_ms": 100,
-                                "end_ms": 200,
-                                "ctc_score": 0.9,
-                            }
-                        ],
-                    }
-                ]
+        return {
+            "ok": True,
+            "document": {
+                "schema_version": 1,
+                "alignment": {
+                    "lines": [
+                        {
+                            "source_index": 0,
+                            "text": "Hello",
+                            "tokens": [
+                                {
+                                    "text": "Hello",
+                                    "start_ms": 100,
+                                    "end_ms": 200,
+                                    "ctc_score": 0.9,
+                                }
+                            ],
+                        }
+                    ]
+                },
             },
-        }}
+        }
 
     monkeypatch.setattr(pipeline, "_run_worker_job", job)
     try:

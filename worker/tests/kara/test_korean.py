@@ -1,5 +1,3 @@
-
-
 from worker.kara.aligner.normalize import process_haruhi_line  # noqa: E402
 
 

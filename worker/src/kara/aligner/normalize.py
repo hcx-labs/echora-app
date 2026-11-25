@@ -13,6 +13,7 @@ import unicodedata
 from worker.kara.aligner import indic as indic_romanization
 from worker.kara.aligner import label_rules
 from worker.kara.aligner import romanization as script_romanization
+
 kks = pykakasi.kakasi()
 tokenizer = Tokenizer()
 tail_pron = ""  # 'h'
