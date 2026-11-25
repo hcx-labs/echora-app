@@ -112,14 +112,19 @@ class EchoraConfig(BaseSettings):
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
-        """Read each field's legacy environment name after its canonical one."""
+        """Read each field's legacy environment name after its canonical one.
+
+        The bare field name is not a choice: ``REVISION`` or ``MODEL_ID`` in a container's
+        environment must never configure a model. Code still passes fields by name
+        (``populate_by_name``).
+        """
         super().__pydantic_init_subclass__(**kwargs)
         prefix = cls.model_config.get("env_prefix", "")
         changed = False
         for name, field in cls.model_fields.items():
             legacy = _extra(field).get(_LEGACY)
             if legacy and field.validation_alias is None:
-                field.validation_alias = AliasChoices(f"{prefix}{name}".upper(), legacy, name)
+                field.validation_alias = AliasChoices(f"{prefix}{name}".upper(), legacy)
                 changed = True
         if changed:
             cls.model_rebuild(force=True)
@@ -136,7 +141,10 @@ class EchoraConfig(BaseSettings):
 
     @classmethod
     def from_environ(cls, environ: Mapping[str, str]) -> Self:
-        """The config these variables give, by the same names, ignoring the process environment."""
+        """The config with these variables (by the same names) taking the place of the process's.
+
+        A field ``environ`` does not name is still read from the process environment.
+        """
         given = {name.upper(): value for name, value in environ.items()}
         values: dict[str, Any] = {}
         for entry in cls.entries():

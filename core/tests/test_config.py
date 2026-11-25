@@ -99,3 +99,16 @@ def test_catalog_entries():
     assert entries["token"].secret
     assert entries["token"].default is None
     assert _AlignConfig in config_classes()
+
+
+def test_a_bare_field_name_is_not_an_environment_variable(monkeypatch):
+    class _Model(EchoraConfig, env_prefix="ECHORA_TEST_BARE_"):
+        revision: str = setting("pinned", legacy="OLD_TEST_BARE_REVISION")
+
+    monkeypatch.setenv("REVISION", "stray")
+    assert _Model().revision == "pinned"
+    monkeypatch.setenv("OLD_TEST_BARE_REVISION", "legacy")
+    assert _Model().revision == "legacy"
+    monkeypatch.setenv("ECHORA_TEST_BARE_REVISION", "canonical")
+    assert _Model().revision == "canonical"
+    assert _Model(revision="given").revision == "given"
