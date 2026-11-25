@@ -92,7 +92,7 @@ def sign_in(claims: Mapping[str, Any]) -> tuple[str, datetime]:
                 is_admin=not admin_exists and email == bootstrap_email,
             )
             if allowed is not None:
-                session.delete(allowed)
+                users.disallow_email(session, email)
         else:
             if user.is_blocked:
                 raise HTTPException(status_code=403, detail="This Echora account is blocked")
