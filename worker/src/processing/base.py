@@ -29,6 +29,10 @@ class Item(BaseModel):
     label: str = ""
     """What progress messages show (a song title)."""
 
+    def track(self) -> dict[str, Any] | None:
+        """The song a "started" progress update names (``id``, ``title``, ``artist``)."""
+        return None
+
 
 @dataclass(frozen=True)
 class ItemResult[InputT: Item, OutputT]:
@@ -88,6 +92,10 @@ class Processor[ConfigT: EchoraConfig | None, InputT: Item, OutputT](ABC):
     current_message: ClassVar[str | None] = "Already current"
     """Progress message when nothing needs this stage (``None``: no update, for a step inside
     a larger stage)."""
+
+    announces_items: ClassVar[bool] = False
+    """Publish a progress update as each item starts, naming its song (``Item.track``), besides
+    the one after it. For stages that take long per song and yield results in planned order."""
 
     storage_failure_fails_job: ClassVar[bool] = False
     """Whether an exception from ``persist`` fails the job (and so retries the batch) instead of

@@ -221,6 +221,10 @@ class VoiceItem(Item):
     track_id: uuid.UUID
     external_id: str
 
+    def track(self) -> dict[str, object]:
+        """The song as the setup screen names it."""
+        return {"id": self.external_id, "title": self.label}
+
 
 Evidence = tuple[dict[str, float], dict[str, object]]
 """Mean activations by label, and the song's vocal activity."""
@@ -239,6 +243,7 @@ class VoiceProcessor(Processor[None, VoiceItem, Evidence]):
     counters = ("classified",)
     activity = "Classifying vocals for"
     current_message = "Voice classification already current"
+    announces_items = True
 
     def __init__(self, limit: int | None = None) -> None:
         super().__init__()

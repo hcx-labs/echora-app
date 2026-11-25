@@ -111,6 +111,25 @@ def test_progress_follows_each_item_with_the_running_summary():
     assert updates[-1]["summary"] == {"total": 2, "doubled": 1, "failed": 1}
 
 
+def test_an_announcing_stage_names_each_song_as_it_starts():
+    class _Named(_Song):
+        def track(self):
+            return {"id": self.key, "title": self.label}
+
+    class _Announcing(_Doubler):
+        announces_items = True
+
+    items = [_Named(key=f"t{i}", label=f"Song {i}", value=v) for i, v in enumerate((2, 4))]
+    updates = []
+    run_stage(_Announcing(_Config(), items), ProcessingContext(publish=updates.append))
+    assert [(u["message"], u["completed"], u.get("track", {}).get("id")) for u in updates] == [
+        ("Doubling Song 0", 0, "t0"),
+        ("Doubling Song 0", 1, None),
+        ("Doubling Song 1", 1, "t1"),
+        ("Doubling Song 1", 2, None),
+    ]
+
+
 def test_a_domain_error_escaping_process_fails_the_remaining_items():
     processor = _Doubler(_Config(), _songs(2, 4, 6), crash_after=1)
     summary = run_stage(processor, ProcessingContext())

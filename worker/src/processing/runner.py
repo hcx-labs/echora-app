@@ -62,6 +62,10 @@ def _log_failure(processor: Processor[Any, Any, Any], item: Item, error: BaseExc
         )
 
 
+def _message(processor: Processor[Any, Any, Any], item: Item) -> str:
+    return f"{processor.activity} {item.label}" if item.label else processor.activity
+
+
 def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -> StageSummary:
     """Run one stage over the context's batch and return its summary.
 
@@ -83,8 +87,26 @@ def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -
         return summary
 
     pending = {item.key: item for item in items}
+
+    def announce(index: int) -> None:
+        # The item about to start: results arrive in planned order for an announcing stage.
+        if processor.announces_items and index < len(items):
+            upcoming = items[index]
+            context.report(
+                Progress(
+                    processor.name,
+                    _message(processor, upcoming),
+                    index,
+                    len(items),
+                    processor.unit,
+                    summary.as_dict(),
+                    upcoming.track(),
+                )
+            )
+
     try:
         processor.open(context, items)
+        announce(0)
         for index, result in enumerate(processor.process(context, items), start=1):
             context.check()
             item = result.item
@@ -110,13 +132,14 @@ def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -
             context.report(
                 Progress(
                     processor.name,
-                    f"{processor.activity} {item.label}" if item.label else processor.activity,
+                    _message(processor, item),
                     index,
                     len(items),
                     processor.unit,
                     summary.as_dict(),
                 )
             )
+            announce(index)
     except ProcessingError as error:
         logger.error(
             "%s stopped: %s (%d items without a result)",

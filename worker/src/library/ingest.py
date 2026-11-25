@@ -235,6 +235,10 @@ class SongItem(Item):
     song: Any
     """The ``NavidromeTrack``."""
 
+    def track(self) -> dict[str, Any]:
+        """The song as the setup screen names it."""
+        return {"id": self.song.id, "title": self.song.title, "artist": self.song.artist}
+
 
 def _song_item(song: NavidromeTrack) -> SongItem:
     return SongItem(key=song.id, label=song.title or "", song=song)
@@ -249,6 +253,7 @@ class _SongPhase(Processor[None, SongItem, Any]):
 
     total_key = None
     current_message = None
+    announces_items = True
     failure_message = "Analysis failed"
 
     def __init__(self, batch: IngestBatch, external_ids: frozenset[str] = frozenset()) -> None:
