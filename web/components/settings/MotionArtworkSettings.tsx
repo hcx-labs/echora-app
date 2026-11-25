@@ -254,7 +254,7 @@ export default function MotionArtworkSettings({ connectionId }: { connectionId: 
                 : comfy.mode === "embedded"
                   ? comfy.installed
                     ? "Built into the analysis worker. Starts only while rendering."
-                    : "Not installed in this analysis image. Use the GPU image, or enter an external ComfyUI below."
+                    : "Not included in the CPU worker image. Use the GPU images, or enter an external ComfyUI below."
                   : comfy.reachable
                     ? `External · connected${comfy.version ? ` · ComfyUI ${comfy.version}` : ""}${comfy.device ? ` · ${comfy.device}` : ""}`
                     : "External · not reachable"
