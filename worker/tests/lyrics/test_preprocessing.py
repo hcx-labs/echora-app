@@ -270,3 +270,28 @@ def test_new_transcripts_are_refined_before_embedding(monkeypatch):
     result = run_lyrics()
     assert (result["refined"], result["embedded"], result["failed"]) == (1, 1, 0)
     assert embedded == ["corrected words"]
+
+
+def test_manual_lyrics_stay_authoritative_after_archiving_the_provider_original(monkeypatch):
+    original = {
+        "text": "Original Navidrome text",
+        "status": "available",
+        "source": "getLyricsBySongId",
+    }
+    state = setup(monkeypatch, {"song": original})
+    state.stored[state.ids["song"]] = ("Manual authoritative text", {}, "available", "manual")
+    archived = Mock(side_effect=lambda *args: state.events.append(("archive", None)))
+    monkeypatch.setattr(lp, "store_original", archived)
+    lp._store_embeddings.side_effect = lambda *args: state.events.append(("embed", None))
+    model = Mock()
+    monkeypatch.setattr(lp, "LyricsEmbeddingModel", lambda *args: model)
+    result = run_lyrics()
+    assert result["failed"] == 0 and result["embedded"] == 1
+    # The provider's original is archived before the manual text is embedded; nothing overwrites it.
+    assert [event for event, _ in state.events if event in ("archive", "embed")] == [
+        "archive",
+        "embed",
+    ]
+    assert archived.call_args.args[2:] == ("song", state.ids["song"], original)
+    model.embed.assert_called_once_with("Manual authoritative text")
+    state.store.assert_not_called()

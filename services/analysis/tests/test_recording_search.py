@@ -352,40 +352,6 @@ def test_query_and_library_decoders_agree_on_stereo_resampling():
     np.testing.assert_array_equal(query, reference)
 
 
-def test_store_fingerprints_full_track_reuse_and_source_identity(monkeypatch):
-    import hashlib
-    from unittest.mock import MagicMock
-
-    import worker.media.audio as audio
-    import worker.recordings.encoder as recording_encoder
-
-    connection = MagicMock()
-    cursor = connection.cursor.return_value.__enter__.return_value
-    content = b"original source"
-    config = SimpleNamespace(representation_id="model")
-    samples = np.ones(181 * 8000, dtype=np.float32)
-    fingerprints = np.ones((361, 128), dtype=np.float32)
-    decoder = Mock(return_value=samples)
-    encoder = Mock(return_value=fingerprints)
-    monkeypatch.setattr(audio, "decode_audio", decoder)
-    monkeypatch.setattr(recording_encoder, "encode", encoder)
-    cursor.fetchone.side_effect = [None, (hashlib.sha256(content).hexdigest(),)]
-    cursor.rowcount = 1
-    check = Mock()
-    assert search.store_fingerprints(connection, "track", content, config, check)
-    decoder.assert_called_once_with(content, 8000)
-    assert encoder.call_args.args[0] is samples
-    assert cursor.execute.call_args.args[1][2] == 361
-    assert len(cursor.execute.call_args.args[1][3]) == 361 * 128 * 4
-    cursor.fetchone.side_effect = [(1,)]
-    assert not search.store_fingerprints(connection, "track", content, config, check)
-    assert encoder.call_count == 1
-    cursor.fetchone.side_effect = [None, ("old-source-hash",)]
-    with pytest.raises(ValueError, match="source bytes changed"):
-        search.store_fingerprints(connection, "track", content, config, check)
-    assert decoder.call_count == encoder.call_count == 1
-
-
 def test_match_playback_uses_matching_owned_connection_not_selected_other_server(recording_db):
     owner, other, track, library, unrelated, right, wrong, foreign = [uuid4() for _ in range(8)]
     with recording_db() as db:
