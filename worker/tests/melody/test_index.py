@@ -210,7 +210,7 @@ def test_search_loads_only_current_recipe_and_owned_tracks(monkeypatch):
 
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = (0, "")
+    cursor.fetchone.return_value = {"count": 0, "latest": ""}
     cursor.fetchall.return_value = []
     assert h.contour_index_key(connection, "owner") == (
         f"owner:{h.MELODY_CONTOUR_REVISION}",

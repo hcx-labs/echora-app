@@ -12,6 +12,7 @@ import psycopg
 from core.db.connection import connect
 from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient
+from core.melody import store
 from worker.library.sources import source_rows
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
 
@@ -46,12 +47,8 @@ class MelodyCorpusProcessor(Processor[None, CorpusSong, CorpusEntry]):
 
     def plan(self, context: ProcessingContext) -> list[CorpusSong]:
         self.corpus_id = context.options["corpus_id"]
-        with connect() as connection, connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT id FROM hum_corpora WHERE id=%s AND user_id=%s",
-                (self.corpus_id, context.user_id),
-            )
-            if not cursor.fetchone():
+        with connect() as connection:
+            if not store.owns_corpus(connection, self.corpus_id, context.user_id):
                 raise ValueError("Unknown hum corpus")
         rows = source_rows(context.user_id, context.library_url, list(context.track_ids))
         return [
@@ -64,11 +61,7 @@ class MelodyCorpusProcessor(Processor[None, CorpusSong, CorpusEntry]):
 
         self.connection: psycopg.Connection = connect()
         self.run_id = create_sync_run(self.connection)
-        with self.connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE hum_corpora SET run_id=%s WHERE id=%s AND user_id=%s",
-                (self.run_id, self.corpus_id, context.user_id),
-            )
+        store.set_corpus_run(self.connection, self.corpus_id, context.user_id, self.run_id)
         self.connection.commit()
         self.client = NavidromeClient(*context.library)
         self.client.__enter__()
@@ -78,12 +71,7 @@ class MelodyCorpusProcessor(Processor[None, CorpusSong, CorpusEntry]):
     ) -> Iterator[ItemResult[CorpusSong, CorpusEntry]]:
         for item in items:
             context.check()
-            with self.connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT count(*) FROM melody_contours WHERE track_id=%s AND run_id=%s",
-                    (item.track_id, self.run_id),
-                )
-                current = bool(cursor.fetchone()[0])
+            current = store.has_contours(self.connection, item.track_id, self.run_id)
             if current:
                 yield ItemResult(item=item, outcome="tracks", output=CorpusEntry(None))
                 continue
@@ -123,12 +111,7 @@ class MelodyCorpusProcessor(Processor[None, CorpusSong, CorpusEntry]):
                 stored = store_track_contours(
                     self.connection, item.track_id, self.run_id, b"", output.contours
                 )
-            with self.connection.cursor() as cursor:
-                cursor.execute(
-                    """INSERT INTO hum_corpus_tracks(corpus_id,track_id) VALUES (%s,%s)
-                       ON CONFLICT DO NOTHING""",
-                    (self.corpus_id, item.track_id),
-                )
+            store.add_corpus_track(self.connection, self.corpus_id, item.track_id)
             self.connection.commit()
         except Exception:
             self.connection.rollback()

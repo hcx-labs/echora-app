@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from core.db.connection import connect
+from core.melody import store
 from worker.melody.config import MelodyConfig
 
 # The service package is read-only for its unprivileged runtime user. Numba must
@@ -23,8 +24,6 @@ import librosa
 import numpy as np
 import psycopg
 from numba import njit, prange
-from psycopg.rows import dict_row, tuple_row
-from psycopg.types.json import Jsonb
 
 from core.revisions import (
     MELODY_CONTOUR_REVISION,
@@ -452,21 +451,13 @@ def create_sync_run(connection: psycopg.Connection) -> uuid.UUID:
         "contour_hz": CONTOUR_HZ,
     }
     config_hash = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO analysis_runs (kind,model_name,model_revision,config_hash,config,environment,device,precision,status,started_at)
-               VALUES ('melody_contour','melody_contour',%s,%s,%s,%s,'mixed','float32','running',now())
-               ON CONFLICT (kind,model_name,model_revision,config_hash)
-               DO UPDATE SET status='running',started_at=now(),finished_at=NULL RETURNING id""",
-            (
-                MELODY_CONTOUR_REVISION,
-                config_hash,
-                Jsonb(config),
-                Jsonb({"python": platform.python_version()}),
-            ),
-        )
-        row = cursor.fetchone()
-        return row["id"] if isinstance(row, dict) else row[0]
+    return store.contour_run(
+        connection,
+        MELODY_CONTOUR_REVISION,
+        config_hash,
+        config,
+        {"python": platform.python_version()},
+    )
 
 
 def track_contours(audio: bytes) -> dict[str, tuple[np.ndarray, np.ndarray]]:
@@ -496,49 +487,23 @@ def store_track_contours(
 
         remote = current_remote()
         usable = remote.melody_one(audio) if remote else track_contours(audio)
-    with connection.cursor() as cursor:
-        for source, (pitch, voiced) in usable.items():
-            cursor.execute(
-                """INSERT INTO melody_contours (track_id,run_id,source,hop_seconds,pitch,voiced)
-                   VALUES (%s,%s,%s,%s,%s,%s)
-                   ON CONFLICT (track_id,run_id,source) DO UPDATE
-                   SET hop_seconds=EXCLUDED.hop_seconds,pitch=EXCLUDED.pitch,voiced=EXCLUDED.voiced,
-                       created_at=clock_timestamp()""",
-                (track_id, run_id, source, 1 / CONTOUR_HZ, pitch.tolist(), voiced.tolist()),
-            )
+    for source, (pitch, voiced) in usable.items():
+        store.save_contour(
+            connection, track_id, run_id, source, 1 / CONTOUR_HZ, pitch.tolist(), voiced.tolist()
+        )
     return len(usable)
 
 
 def contour_index_key(connection: psycopg.Connection, user_id: uuid.UUID) -> tuple[str, int, str]:
     """Changes whenever the user's current contours do: revision, count and newest contour."""
-    with connection.cursor(row_factory=tuple_row) as cursor:
-        cursor.execute(
-            """SELECT count(*),coalesce(max(mc.created_at)::text,'')
-               FROM melody_contours mc JOIN analysis_runs ar ON ar.id=mc.run_id
-               WHERE ar.model_revision=%s AND ar.status IN ('complete','running')
-                 AND EXISTS (SELECT 1 FROM user_track_links utl
-                             WHERE utl.user_id=%s AND utl.track_id=mc.track_id)""",
-            (MELODY_CONTOUR_REVISION, user_id),
-        )
-        row = cursor.fetchone()
-    count, latest = row
+    row = store.contour_digest(connection, MELODY_CONTOUR_REVISION, user_id)
+    count, latest = row["count"], row["latest"]
     return f"{user_id}:{MELODY_CONTOUR_REVISION}", int(count), str(latest or "")
 
 
 def load_contours(connection: psycopg.Connection, user_id: uuid.UUID) -> list[dict[str, object]]:
     """The user's current contours (one per track and source), as arrays ready to match."""
-    with connection.cursor(row_factory=dict_row) as cursor:
-        cursor.execute(
-            """SELECT DISTINCT ON (mc.track_id,mc.source)
-                      mc.track_id,mc.source,mc.pitch,mc.voiced
-               FROM melody_contours mc JOIN analysis_runs ar ON ar.id=mc.run_id
-               WHERE ar.status IN ('complete','running') AND ar.model_revision=%s
-                 AND EXISTS (SELECT 1 FROM user_track_links utl
-                             WHERE utl.user_id=%s AND utl.track_id=mc.track_id)
-               ORDER BY mc.track_id,mc.source,ar.created_at DESC""",
-            (MELODY_CONTOUR_REVISION, user_id),
-        )
-        rows = cursor.fetchall()
+    rows = store.user_contours(connection, MELODY_CONTOUR_REVISION, user_id)
     return [
         {
             **row,
@@ -622,7 +587,7 @@ def match_hum(
     prepared_motifs = _prepare_motifs(windows)
     if not contours:
         raise ValueError("Build the melody hum index before searching")
-    with connect(dict_rows=True) as connection:
+    with connect() as connection:
         workers = min(MelodyConfig.load().max_workers, os.cpu_count() or 2)
         best_by_window: list[dict[uuid.UUID, tuple[float, float, str]]] = [{} for _ in windows]
         best_across_windows: dict[uuid.UUID, tuple[float, float, str]] = {}
@@ -660,17 +625,7 @@ def match_hum(
         if not selected:
             return {"tracks": [], "query_seconds": len(query) / CONTOUR_HZ}
         ids = [item[0] for item in selected]
-        with connection.cursor(row_factory=dict_row) as cursor:
-            cursor.execute(
-                """SELECT t.id,t.title,t.artist,t.album,t.duration_seconds,max(utl.external_id) source_id,
-                          max(ts.source_data->>'coverArt') cover_art
-                   FROM tracks t JOIN user_track_links utl ON utl.track_id=t.id AND utl.user_id=%s
-                   LEFT JOIN track_sources ts ON ts.library_id=utl.library_id AND ts.track_id=utl.track_id
-                                              AND ts.external_id=utl.external_id
-                   WHERE t.id=ANY(%s) GROUP BY t.id""",
-                (user_id, ids),
-            )
-            metadata = {row["id"]: row for row in cursor.fetchall()}
+        metadata = {row["id"]: row for row in store.matched_songs(connection, user_id, ids)}
     results = []
     for track_id, cost, offset, source in selected:
         row = dict(metadata[track_id])
