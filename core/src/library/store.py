@@ -499,3 +499,21 @@ def save_community_snapshot(
             ),
         ),
     )
+
+
+def songs_without_contour(db: Connection, revision: str) -> int:
+    """Navidrome songs that have no melody contour at ``revision`` yet."""
+    row = fetch_one(
+        db,
+        """SELECT count(DISTINCT ts.track_id) AS pending
+           FROM track_sources ts
+           WHERE ts.source_type='subsonic'
+             AND NOT EXISTS (
+               SELECT 1 FROM melody_contours mc
+               JOIN analysis_runs ar ON ar.id=mc.run_id
+               WHERE mc.track_id=ts.track_id
+                 AND ar.model_name='melody_contour' AND ar.model_revision=%s
+             )""",
+        (revision,),
+    )
+    return int(row["pending"]) if row else 0

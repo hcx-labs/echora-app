@@ -6,8 +6,8 @@ from fastapi import Depends, Response
 
 from backend.api.deps import SessionUser, admin_user
 from backend.api.endpoint import Endpoint
-from core.db.models import OidcAllowedEmail
 from core.db.session import session_scope
+from core.users import store as users
 
 
 class DisallowOidcEmail(Endpoint):
@@ -19,7 +19,5 @@ class DisallowOidcEmail(Endpoint):
 
     def handle(self, email: str, admin: SessionUser = Depends(admin_user)) -> Response:
         with session_scope() as session:
-            allowed = session.get(OidcAllowedEmail, email.casefold())
-            if allowed is not None:
-                session.delete(allowed)
+            users.disallow_email(session, email.casefold())
         return Response(status_code=204)

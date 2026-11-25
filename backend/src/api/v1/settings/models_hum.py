@@ -9,7 +9,9 @@ from backend.api.endpoint import Endpoint
 from backend.api.v1.settings._deps import admin_required
 from backend.api.v1.settings._models import ModelSwitch, SwitchWithBacklog
 from core.db.connection import connect
+from core.library import store as library
 from core.revisions import MELODY_CONTOUR_REVISION
+from core.settings import store as settings
 
 
 class HumSwitch(Endpoint):
@@ -24,31 +26,11 @@ class HumSwitch(Endpoint):
         self, request: ModelSwitch, user: SessionUser = Depends(admin_required)
     ) -> dict[str, object]:
         column = "hum_modal_enabled" if request.location == "modal" else "hum_processing_enabled"
-        with (
-            connect(dict_rows=True) as connection,
-            connection.cursor() as cursor,
-        ):
-            cursor.execute(
-                f"""INSERT INTO analysis_settings
-                     (singleton, karaoke_bound_to_synced_lines, {column}, updated_at)
-                   VALUES (true,false,%s,now()) ON CONFLICT (singleton) DO UPDATE
-                   SET {column}=EXCLUDED.{column},
-                       karaoke_bound_to_synced_lines=false, updated_at=now()""",
-                (request.enabled,),
+        with connect() as connection:
+            settings.set_switch(connection, column, request.enabled, unbind_karaoke=True)
+            pending = (
+                library.songs_without_contour(connection, MELODY_CONTOUR_REVISION)
+                if request.enabled
+                else 0
             )
-            pending = 0
-            if request.enabled:
-                cursor.execute(
-                    """SELECT count(DISTINCT ts.track_id) AS pending
-                       FROM track_sources ts
-                       WHERE ts.source_type='subsonic'
-                         AND NOT EXISTS (
-                           SELECT 1 FROM melody_contours mc
-                           JOIN analysis_runs ar ON ar.id=mc.run_id
-                           WHERE mc.track_id=ts.track_id
-                             AND ar.model_name='melody_contour' AND ar.model_revision=%s
-                         )""",
-                    (MELODY_CONTOUR_REVISION,),
-                )
-                pending = int(cursor.fetchone()["pending"])
         return {"enabled": request.enabled, "location": request.location, "pending": pending}

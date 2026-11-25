@@ -9,6 +9,8 @@ from backend.api.endpoint import Endpoint
 from backend.api.v1.settings._deps import admin_required
 from backend.api.v1.settings._models import ModelSwitch, SwitchWithBacklog
 from core.db.connection import connect
+from core.lyrics import store as lyrics
+from core.settings import store as settings
 from worker.kara.pipeline import KARAOKE_PIPELINE_REVISION
 
 
@@ -26,28 +28,11 @@ class KaraokeSwitch(Endpoint):
         column = (
             "karaoke_modal_enabled" if request.location == "modal" else "karaoke_processing_enabled"
         )
-        with (
-            connect(dict_rows=True) as connection,
-            connection.cursor() as cursor,
-        ):
-            cursor.execute(
-                f"""INSERT INTO analysis_settings
-                     (singleton, {column}, karaoke_bound_to_synced_lines, updated_at)
-                   VALUES (true,%s,false,now()) ON CONFLICT (singleton) DO UPDATE
-                   SET {column}=EXCLUDED.{column},
-                       karaoke_bound_to_synced_lines=false, updated_at=now()""",
-                (request.enabled,),
+        with connect() as connection:
+            settings.set_switch(connection, column, request.enabled, unbind_karaoke=True)
+            pending = (
+                lyrics.synced_without_karaoke(connection, KARAOKE_PIPELINE_REVISION)
+                if request.enabled
+                else 0
             )
-            pending = 0
-            if request.enabled:
-                cursor.execute(
-                    """SELECT count(*) AS pending FROM lyrics l
-                       WHERE l.text IS NOT NULL
-                         AND coalesce((l.provenance->>'synced')::boolean,false)
-                         AND NOT EXISTS (SELECT 1 FROM karaoke_lyrics_variants kv
-                                         WHERE kv.track_id=l.track_id AND kv.bounded=false
-                                           AND kv.provenance->>'pipeline_revision'=%s)""",
-                    (KARAOKE_PIPELINE_REVISION,),
-                )
-                pending = int(cursor.fetchone()["pending"])
         return {"enabled": request.enabled, "location": request.location, "pending": pending}

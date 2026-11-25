@@ -4,15 +4,14 @@ from __future__ import annotations
 
 from fastapi import Depends
 from pydantic import Field
-from sqlalchemy import func, select
 
 from backend.api.deps import SessionUser, admin_user
 from backend.api.endpoint import Endpoint
 from backend.api.requests import PostRequest
 from backend.api.responses import ResponseModel
-from core.db.models import OidcAllowedEmail, User
 from core.db.session import session_scope
 from core.errors import ConflictError, InvalidQueryError
+from core.users import store as users
 
 
 class AllowEmail(PostRequest):
@@ -43,8 +42,7 @@ class AllowOidcEmail(Endpoint):
         if "@" not in email:
             raise InvalidQueryError("Enter a valid email address")
         with session_scope() as session:
-            if session.scalar(select(User.id).where(func.lower(User.email) == email)):
+            if users.email_in_use(session, email):
                 raise ConflictError("This user already exists")
-            if session.get(OidcAllowedEmail, email) is None:
-                session.add(OidcAllowedEmail(email=email, created_by=admin["id"]))
+            users.allow_email(session, email, admin["id"])
         return {"email": email}

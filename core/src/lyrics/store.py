@@ -145,3 +145,18 @@ def coverage(db: Connection) -> dict[str, int]:
                FROM tracks t LEFT JOIN lyrics l ON l.track_id=t.id""",
         ),
     )
+
+
+def synced_without_karaoke(db: Connection, pipeline_revision: str) -> int:
+    """Songs with synced lyrics and no unbounded karaoke from ``pipeline_revision`` yet."""
+    row = fetch_one(
+        db,
+        """SELECT count(*) AS pending FROM lyrics l
+           WHERE l.text IS NOT NULL
+             AND coalesce((l.provenance->>'synced')::boolean,false)
+             AND NOT EXISTS (SELECT 1 FROM karaoke_lyrics_variants kv
+                             WHERE kv.track_id=l.track_id AND kv.bounded=false
+                               AND kv.provenance->>'pipeline_revision'=%s)""",
+        (pipeline_revision,),
+    )
+    return int(row["pending"]) if row else 0

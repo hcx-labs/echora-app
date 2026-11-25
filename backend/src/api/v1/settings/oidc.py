@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 from fastapi import Depends
-from sqlalchemy import func, select
 
 from backend.api.deps import SessionUser, admin_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
 from backend.config import OidcConfig
 from backend.sessions.oidc import issuer, oidc_client
-from core.db.models import OidcAllowedEmail, OidcSetting, User
 from core.db.session import session_scope
+from core.users import store as users
 
 
 class OidcAccount(ResponseModel):
@@ -44,13 +43,9 @@ class OidcSettings(Endpoint):
 
     def handle(self, admin: SessionUser = Depends(admin_user)) -> dict[str, object]:
         with session_scope() as session:
-            policy = session.get(OidcSetting, True)
-            users = session.scalars(
-                select(User).where(User.email.is_not(None)).order_by(func.lower(User.email))
-            ).all()
-            allowed = session.scalars(
-                select(OidcAllowedEmail).order_by(OidcAllowedEmail.email)
-            ).all()
+            policy = users.oidc_policy(session)
+            accounts = users.users_with_email(session)
+            allowed = users.allowed_emails(session)
             return {
                 "configured": oidc_client() is not None,
                 "issuer": issuer() or None,
@@ -64,7 +59,7 @@ class OidcSettings(Endpoint):
                         "is_admin": item.is_admin,
                         "is_blocked": item.is_blocked,
                     }
-                    for item in users
+                    for item in accounts
                 ],
                 "allowed_emails": [item.email for item in allowed],
             }

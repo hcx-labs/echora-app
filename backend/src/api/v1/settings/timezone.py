@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Depends
@@ -12,9 +11,9 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.requests import PutRequest
 from backend.api.responses import ResponseModel
-from core.db.models import UserPreference
 from core.db.session import session_scope
-from core.errors import InvalidQueryError, NotFoundError
+from core.errors import InvalidQueryError
+from core.users import store as users
 
 
 class TimezoneUpdate(PutRequest):
@@ -45,9 +44,7 @@ class UpdateTimezone(Endpoint):
         except (ZoneInfoNotFoundError, ValueError) as error:
             raise InvalidQueryError("Unknown timezone") from error
         with session_scope() as session:
-            preference = session.get(UserPreference, user["id"])
-            if preference is None:
-                raise NotFoundError("User preferences are unavailable")
+            preference = users.require_preference(session, user["id"])
             preference.timezone = request.timezone
-            preference.updated_at = datetime.now(UTC)
+            users.touch(preference)
         return {"timezone": request.timezone}

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 
 from fastapi import Depends
 
@@ -11,10 +10,10 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.requests import PutRequest
 from backend.api.responses import ResponseModel
-from core.db.models import NavidromeConnection, UserPreference
 from core.db.session import session_scope
 from core.errors import NotFoundError
 from core.library.membership import attach_user_library
+from core.users import store as users
 
 
 class OnboardingPreference(PutRequest):
@@ -43,19 +42,13 @@ class SaveOnboarding(Endpoint):
         self, preference: OnboardingPreference, user: SessionUser = Depends(current_user)
     ) -> dict[str, object]:
         with session_scope() as session:
-            stored = session.get(UserPreference, user["id"])
-            if stored is None:
-                raise NotFoundError("User preferences are unavailable")
+            stored = users.require_preference(session, user["id"])
             stored.onboarding_complete = preference.complete
-            selected = (
-                session.get(NavidromeConnection, preference.connection_id)
-                if preference.connection_id
-                else None
-            )
+            selected = users.navidrome_connection(session, preference.connection_id)
             if selected is not None and selected.owner_user_id != user["id"]:
                 raise NotFoundError("Connection not found")
             stored.navidrome_connection_id = preference.connection_id
-            stored.updated_at = datetime.now(UTC)
+            users.touch(stored)
             selected_url = selected.url if selected else None
         if selected_url is not None:
             attach_user_library(user["id"], selected_url)
