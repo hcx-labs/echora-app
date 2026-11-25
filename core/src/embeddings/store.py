@@ -209,3 +209,81 @@ def songs_with_audio_embeddings(
         (models, user_id),
     )
     return sorted({row["track_id"] for row in rows})
+
+
+def journey_corpus(db: Connection) -> list[dict[str, Any]]:
+    """Every song with both a MuQ-MuLan and a MERT audio embedding, for journeys.
+
+    Rows are the song (``id``, ``title``, ``artist``, ``album``, ``duration_seconds``,
+    ``source_id``, ``cover_art``, ``recording_group_id``) with ``semantic_embedding`` and
+    ``acoustic_embedding`` in text form, by song id. It is not limited to one user's library.
+    """
+    return fetch_all(
+        db,
+        """
+        WITH semantic AS (
+          SELECT DISTINCT ON (e.track_id) e.track_id, e.embedding::text AS embedding
+          FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
+          WHERE e.embedding_type='audio-track' AND ar.model_name='muq_mulan'
+          ORDER BY e.track_id, ar.created_at DESC
+        ), acoustic AS (
+          SELECT DISTINCT ON (e.track_id) e.track_id, e.embedding::text AS embedding
+          FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
+          WHERE e.embedding_type='audio-track' AND ar.model_name='mert'
+          ORDER BY e.track_id, ar.created_at DESC
+        )
+        SELECT t.id, t.title, t.artist, t.album, t.duration_seconds,
+               semantic.embedding AS semantic_embedding, acoustic.embedding AS acoustic_embedding,
+               max(ts.external_id) AS source_id, max(ts.source_data->>'coverArt') AS cover_art,
+               max(member.group_id::text) AS recording_group_id
+        FROM tracks t JOIN semantic ON semantic.track_id=t.id JOIN acoustic ON acoustic.track_id=t.id
+        LEFT JOIN track_sources ts ON ts.track_id=t.id
+        LEFT JOIN recording_group_members member ON member.track_id=t.id
+        GROUP BY t.id, semantic.embedding, acoustic.embedding ORDER BY t.id
+        """,
+    )
+
+
+# The current whole-song embeddings each per-user corpus is built from.
+_CORPUS_FILTERS = {
+    "semantic": "e.embedding_type='audio-track' AND ar.model_name='muq_mulan'",
+    "lyrics": "e.embedding_type='lyrics' AND e.window_index IS NULL AND ar.model_name='bge_m3'",
+}
+
+
+def corpus_digest(db: Connection, kind: str, user_id: uuid.UUID) -> str:
+    """A digest of the user's current (song, run) pairs for the corpus kind.
+
+    Kinds are ``semantic`` (MuQ-MuLan audio) and ``lyrics`` (BGE-M3).
+    """
+    row = fetch_one(
+        db,
+        f"""SELECT coalesce(md5(string_agg(e.track_id::text || ':' || e.run_id::text, ','
+                                        ORDER BY e.track_id, e.run_id)), '') AS digest
+            FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
+            WHERE {_CORPUS_FILTERS[kind]}
+              AND EXISTS (SELECT 1 FROM user_track_links utl
+                          WHERE utl.track_id=e.track_id AND utl.user_id=%s)""",
+        (user_id,),
+    )
+    return str(row["digest"]) if row else ""
+
+
+def user_corpus(db: Connection, kind: str, user_id: uuid.UUID) -> list[dict[str, Any]]:
+    """The user's songs with their newest embedding of the corpus kind.
+
+    Rows are ``id``, ``title``, ``artist``, ``album``, ``embedding`` (text) and ``run_id``.
+    """
+    return fetch_all(
+        db,
+        f"""SELECT DISTINCT ON (e.track_id) t.id, t.title, t.artist, t.album,
+                   e.embedding::text AS embedding, ar.id AS run_id
+            FROM current_embeddings e
+            JOIN analysis_runs ar ON ar.id=e.run_id
+            JOIN tracks t ON t.id=e.track_id
+            WHERE {_CORPUS_FILTERS[kind]}
+              AND EXISTS (SELECT 1 FROM user_track_links utl
+                          WHERE utl.track_id=t.id AND utl.user_id=%s)
+            ORDER BY e.track_id, ar.created_at DESC""",
+        (user_id,),
+    )

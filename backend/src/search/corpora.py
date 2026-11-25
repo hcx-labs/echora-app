@@ -15,12 +15,8 @@ import numpy as np
 
 from backend.search.service import SearchService, search_now
 from core.db.connection import connect
+from core.embeddings import store
 from core.errors import ConflictError
-
-_FILTERS = {
-    "semantic": "e.embedding_type='audio-track' AND ar.model_name='muq_mulan'",
-    "lyrics": "e.embedding_type='lyrics' AND e.window_index IS NULL AND ar.model_name='bge_m3'",
-}
 
 
 @dataclass(frozen=True)
@@ -47,40 +43,14 @@ class _CorpusService(SearchService[None, Corpus]):
         changes it.
         """
         with connect() as connection:
-            (digest,) = connection.execute(
-                f"""SELECT coalesce(md5(string_agg(e.track_id::text || ':' || e.run_id::text, ','
-                                                ORDER BY e.track_id, e.run_id)), '')
-                    FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
-                    WHERE {_FILTERS[self.kind]}
-                      AND EXISTS (SELECT 1 FROM user_track_links utl
-                                  WHERE utl.track_id=e.track_id AND utl.user_id=%s)""",
-                (self.scope,),
-            ).fetchone()
-        return str(digest)
+            return store.corpus_digest(connection, self.kind, self.scope)
 
     def open(self) -> None:
-        with (
-            connect(dict_rows=True) as connection,
-            connection.cursor() as cursor,
-        ):
-            cursor.execute(
-                f"""SELECT DISTINCT ON (e.track_id) t.id, t.title, t.artist, t.album,
-                           e.embedding::text AS embedding, ar.id AS run_id
-                    FROM current_embeddings e
-                    JOIN analysis_runs ar ON ar.id=e.run_id
-                    JOIN tracks t ON t.id=e.track_id
-                    WHERE {_FILTERS[self.kind]}
-                      AND EXISTS (SELECT 1 FROM user_track_links utl
-                                  WHERE utl.track_id=t.id AND utl.user_id=%s)
-                    ORDER BY e.track_id, ar.created_at DESC""",
-                (self.scope,),
-            )
-            rows = cursor.fetchall()
+        with connect() as connection:
+            rows = store.user_corpus(connection, self.kind, self.scope)
         self.corpus: Corpus | None = None
         if rows:
-            matrix = np.stack(
-                [np.fromstring(row.pop("embedding").strip("[]"), sep=",") for row in rows]
-            )
+            matrix = np.stack([store.parse_vector(row.pop("embedding")) for row in rows])
             matrix.flags.writeable = False
             run_id = str(rows[0]["run_id"])
             for row in rows:

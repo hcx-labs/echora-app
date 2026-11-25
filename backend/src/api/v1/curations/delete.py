@@ -5,14 +5,13 @@ from __future__ import annotations
 import uuid
 
 from fastapi import Depends, Response
-from sqlalchemy import select
 
 import worker.curation.jobs as curation_jobs
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
-from core.db.models import Curation
+from core.curation import store
 from core.db.session import session_scope
-from core.errors import ConflictError, NotFoundError
+from core.errors import ConflictError
 from core.integrations.navidrome import NavidromeClient
 from core.library.connections import load_connection
 
@@ -32,13 +31,7 @@ class DeleteCuration(Endpoint):
     ) -> Response:
         with curation_jobs.locked(curation_id) as lock_connection:
             with session_scope() as session:
-                curation = session.scalar(
-                    select(Curation).where(
-                        Curation.id == curation_id, Curation.user_id == user["id"]
-                    )
-                )
-                if curation is None:
-                    raise NotFoundError("Curation not found")
+                curation = store.require_owned_curation(session, curation_id, user["id"])
                 curation_jobs.assert_mutable(
                     lock_connection, curation_id, deleting=True, delete_remote=delete_navidrome
                 )
@@ -60,11 +53,5 @@ class DeleteCuration(Endpoint):
                     client.delete_playlist(str(playlist_id))
 
             with session_scope() as session:
-                curation = session.scalar(
-                    select(Curation).where(
-                        Curation.id == curation_id, Curation.user_id == user["id"]
-                    )
-                )
-                if curation is not None:
-                    session.delete(curation)
+                store.remove_curation(session, curation_id, user["id"])
             return Response(status_code=204)

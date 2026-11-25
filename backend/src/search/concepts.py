@@ -15,6 +15,7 @@ import numpy as np
 
 from backend.search.corpora import lyrics_corpus, semantic_corpus
 from backend.search.service import SearchService
+from core.curation import store as curation
 from core.curation.concepts import (
     combine_concept_percentiles,
     empirical_percentiles,
@@ -54,16 +55,8 @@ def concept_lens(user_id: uuid.UUID, request: LensQuery) -> dict[str, object]:
     """
     requested = list(dict.fromkeys(name.strip() for name in request.concepts if name.strip()))
     definitions = {str(item["name"]).casefold(): item for item in predefined_concepts()}
-    with (
-        connect(dict_rows=True) as connection,
-        connection.cursor() as cursor,
-    ):
-        cursor.execute(
-            """SELECT name, positive_prompts, negative_prompts, positive_track_ids, negative_track_ids
-               FROM concepts WHERE user_id=%s AND enabled""",
-            (user_id,),
-        )
-        for item in cursor.fetchall():
+    with connect() as connection:
+        for item in curation.enabled_concepts(connection, user_id):
             definitions[str(item["name"]).casefold()] = item
     missing = [name for name in requested if name.casefold() not in definitions]
     if missing:
