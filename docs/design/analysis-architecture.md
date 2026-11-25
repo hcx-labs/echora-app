@@ -43,12 +43,16 @@ echora/
 
 Each Python project keeps its code in `src/` and its tests in `tests/`, beside `pyproject.toml`.
 The code imports under the project's name: `core/src/config.py` is `core.config`, and
-`worker/src/kara/` is `worker.kara`. A three-line `setup.py` maps the name to `src/`, for wheels and
-for editable installs alike.
+`worker/src/kara/` is `worker.kara`. A three-line `setup.py` maps the name to `src/` for editable
+installs; the images copy the source onto `PYTHONPATH`. Wheels are not built: the aligner and the
+migrations are directories without `__init__.py`, which a wheel would leave out.
 
-Dependencies point one way: `backend -> core`, `worker -> core`. The backend never imports the
-worker and the worker never imports the backend. They talk through PostgreSQL: the backend enqueues
-jobs and reads results; the worker claims jobs and writes results.
+Dependencies point one way: `backend -> worker -> core`. The worker never imports the backend.
+The backend imports the worker where an API needs the same code: search encodes queries with the
+worker's models (recordings, melody), and the settings endpoints read the worker's domain
+settings (motion artwork, Modal). `backend/pyproject.toml` declares that dependency and the
+backend image carries the worker's source. Work itself still crosses through PostgreSQL: the
+backend enqueues jobs and reads results; the worker claims jobs and writes results.
 
 ### core (`core`)
 
@@ -330,7 +334,7 @@ each and build two targets:
 
 Compose builds the targets as the `backend`, `analysis-worker` and `scheduled-worker` services
 (the scheduled worker always uses the CPU image), and the release workflow publishes all five
-images. The homelab chart needs the new image names; that change lives in its own repository.
+images. Deployments outside this repository need the new image names (`docs/upgrading.md`).
 
 ## Tooling
 
@@ -373,7 +377,13 @@ what it removed. Found so far:
 - `main._curation_scheduler` (an empty compatibility hook);
 - the `karaoke_ass` and `karaoke_lrc` columns in the track lyrics response (no reader);
 - the per-router `require_user`/`admin` factories and the duplicate request and redacting route
-  classes of the settings routers.
+  classes of the settings routers;
+- the aligner's ASS and LRC output: `karaoke_lyrics_variants.ass`/`lrc` and
+  `lyrics.karaoke_ass`/`karaoke_lrc` are written NULL for new alignments (nothing read them; the
+  lines and the alignment document carry the timing), and the fallback that rebuilt lines from
+  the ASS is gone with it;
+- `backfill_languages.py` (a one-off command) and its `ECHORA_LANGUAGE_BACKFILL_BATCH_SIZE`;
+- `hum_search.build_corpus` and `preprocessing.vocal_audio_bytes`.
 
 Kept as operator tools: the backfill routes (`lyrics`, `voice`, `karaoke`, `recordings`) have no
 caller in the web app and are restricted to administrators
