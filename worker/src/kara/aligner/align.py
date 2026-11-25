@@ -360,6 +360,7 @@ def align(request: AlignRequest) -> dict:
             },
             "opening_backing_lines_on_lead": len(opening_backing_lines),
             "audio_source": "input_audio",
-            "inference_config": request.model_dump(),
+            # Without the lyrics: the document already holds every line, and this is stored per song.
+            "inference_config": request.model_dump(exclude={"text"}),
         },
     }
