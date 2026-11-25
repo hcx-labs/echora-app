@@ -17,6 +17,7 @@ import time
 import unicodedata
 import uuid
 from pathlib import Path
+from typing import Any
 
 from core.db.connection import connect
 from core.errors import InputUnavailableError, ProcessingError
@@ -582,10 +583,20 @@ class KaraokeItem(Item):
     external_id: str
     text: str
     language: str | None = None
-    source_lines: list[dict[str, object]] | None = None
-    supplied: list[dict[str, object]] | None = None
+    # Stored JSON, kept as read: one song's malformed value fails that song in ``process``,
+    # not the batch's plan.
+    source_lines: Any = None
+    supplied: Any = None
     """Word timing the lyrics came with; stored as it is instead of aligning."""
     supplied_digest: str | None = None
+
+    def malformed(self) -> bool:
+        """Whether the stored lines or word timing are not lists of objects."""
+        return not all(
+            value is None
+            or (isinstance(value, list) and all(isinstance(entry, dict) for entry in value))
+            for value in (self.source_lines, self.supplied)
+        )
 
 
 class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
@@ -647,9 +658,12 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
 
     def process(self, context, items):
         for item in items:
-            if item.supplied is not None:
+            if item.malformed():
+                logger.warning("Stored lyric lines are malformed for %s", item.key)
+                yield ItemResult.failed(item, ProcessingError("Stored lyrics are malformed"))
+            elif item.supplied is not None:
                 yield ItemResult(item=item, outcome="supplied", output={"supplied": True})
-        aligning = [item for item in items if item.supplied is None]
+        aligning = [item for item in items if item.supplied is None and not item.malformed()]
         if not aligning:
             return
         _stop_fa_kara_worker()

@@ -3,7 +3,7 @@ from collections.abc import Iterator, Sequence
 import pytest
 
 from core.config import EchoraConfig, setting
-from core.errors import JobCancelled, ModelUnavailableError, ProcessingError
+from core.errors import IntegrationError, JobCancelled, ModelUnavailableError, ProcessingError
 from worker.processing import Item, ItemResult, ProcessingContext, Processor, run_stage
 
 
@@ -45,6 +45,8 @@ class _Doubler(Processor[_Config, _Song, int]):
                 raise ModelUnavailableError("model gone")
             if item.value == 99:
                 raise RuntimeError("bug")
+            if item.value == 77:
+                raise IntegrationError("service down")
             if item.value == 0:
                 yield ItemResult(item=item, outcome="reused")
             elif item.value % 2:
@@ -109,11 +111,48 @@ def test_progress_follows_each_item_with_the_running_summary():
     assert updates[-1]["summary"] == {"total": 2, "doubled": 1, "failed": 1}
 
 
+def test_an_announcing_stage_names_each_song_as_it_starts():
+    class _Named(_Song):
+        def track(self):
+            return {"id": self.key, "title": self.label}
+
+    class _Announcing(_Doubler):
+        announces_items = True
+
+    items = [_Named(key=f"t{i}", label=f"Song {i}", value=v) for i, v in enumerate((2, 4))]
+    updates = []
+    run_stage(_Announcing(_Config(), items), ProcessingContext(publish=updates.append))
+    assert [(u["message"], u["completed"], u.get("track", {}).get("id")) for u in updates] == [
+        ("Doubling Song 0", 0, "t0"),
+        ("Doubling Song 0", 1, None),
+        ("Doubling Song 1", 1, "t1"),
+        ("Doubling Song 1", 2, None),
+    ]
+
+
 def test_a_domain_error_escaping_process_fails_the_remaining_items():
     processor = _Doubler(_Config(), _songs(2, 4, 6), crash_after=1)
     summary = run_stage(processor, ProcessingContext())
     assert processor.events[-1] == "close"
     assert summary.as_dict() == {"total": 3, "doubled": 1, "failed": 2}
+
+
+def test_an_integration_failure_fails_the_job_after_closing():
+    processor = _Doubler(_Config(), _songs(2, 77, 6))
+    with pytest.raises(IntegrationError):
+        run_stage(processor, ProcessingContext())
+    assert processor.events[-1] == "close"
+    assert processor.stored == {"t0": 4}
+
+
+def test_a_storage_failure_fails_the_job_when_the_stage_says_so():
+    class _Strict(_Doubler):
+        storage_failure_fails_job = True
+
+    processor = _Strict(_Config(), _songs(2, 4, 6))
+    with pytest.raises(ValueError, match="storage failed"):
+        run_stage(processor, ProcessingContext())
+    assert processor.events[-1] == "close"
 
 
 def test_a_bug_propagates_after_closing():

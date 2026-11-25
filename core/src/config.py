@@ -25,7 +25,8 @@ secret). Nothing reads ``.env`` files: Docker Compose passes them to the process
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+import importlib
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, Self
 
@@ -112,14 +113,19 @@ class EchoraConfig(BaseSettings):
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
-        """Read each field's legacy environment name after its canonical one."""
+        """Read each field's legacy environment name after its canonical one.
+
+        The bare field name is not a choice: ``REVISION`` or ``MODEL_ID`` in a container's
+        environment must never configure a model. Code still passes fields by name
+        (``populate_by_name``).
+        """
         super().__pydantic_init_subclass__(**kwargs)
         prefix = cls.model_config.get("env_prefix", "")
         changed = False
         for name, field in cls.model_fields.items():
             legacy = _extra(field).get(_LEGACY)
             if legacy and field.validation_alias is None:
-                field.validation_alias = AliasChoices(f"{prefix}{name}".upper(), legacy, name)
+                field.validation_alias = AliasChoices(f"{prefix}{name}".upper(), legacy)
                 changed = True
         if changed:
             cls.model_rebuild(force=True)
@@ -136,7 +142,10 @@ class EchoraConfig(BaseSettings):
 
     @classmethod
     def from_environ(cls, environ: Mapping[str, str]) -> Self:
-        """The config these variables give, by the same names, ignoring the process environment."""
+        """The config with these variables (by the same names) taking the place of the process's.
+
+        A field ``environ`` does not name is still read from the process environment.
+        """
         given = {name.upper(): value for name, value in environ.items()}
         values: dict[str, Any] = {}
         for entry in cls.entries():
@@ -204,6 +213,20 @@ class EchoraConfig(BaseSettings):
 def config_classes() -> list[type[EchoraConfig]]:
     """Every settings class defined so far (import the packages first), in definition order."""
     return list(_registry)
+
+
+def load_all(modules: Iterable[str]) -> None:
+    """Import the modules and load every settings class they define, at process start.
+
+    An invalid value then stops the process when it starts (``pydantic.ValidationError``, naming
+    the setting but not its value) instead of failing the first job or request that needs it.
+    """
+    names = tuple(modules)
+    for name in names:
+        importlib.import_module(name)
+    for cls in config_classes():
+        if cls.__module__ in names:
+            cls.load()
 
 
 def reset_config_cache() -> None:

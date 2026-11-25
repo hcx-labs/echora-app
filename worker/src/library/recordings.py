@@ -75,6 +75,11 @@ class FingerprintProcessor(Processor[None, FingerprintItem, Fingerprint]):
     ) -> Iterator[ItemResult[FingerprintItem, Fingerprint]]:
         for item in items:
             context.check()
+            # A song listed under two source ids is planned twice: the second is the fallback
+            # when the first could not be read, and is skipped once the song has a fingerprint.
+            if store.unfingerprinted_duration(self.connection, item.track_id) is None:
+                yield ItemResult(item=item, outcome=None)
+                continue
             try:
                 audio = self.client.audio_bytes(item.external_id)
             except Exception:  # noqa: BLE001 - one song's audio

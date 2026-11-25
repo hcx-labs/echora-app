@@ -2,7 +2,8 @@
 
 A ``SearchService`` is built for one scope (usually a user), loads what it needs in ``open()``
 and answers ``search(query)``. The ``registry`` keeps a ``persistent`` service open and reuses it
-until its ``index_key()`` changes or the per-class LRU bound evicts it; a non-persistent service
+until its ``index_key()`` changes or the per-class LRU bound evicts it (searches already
+running on the old instance finish on it); a non-persistent service
 is opened per request. ``run_search`` runs a search on the bounded search pool, so heavy queries
 never occupy the event loop or more than ``SearchConfig.max_concurrent`` threads.
 """
@@ -46,7 +47,12 @@ class SearchService[QueryT, ResultT]:
         raise NotImplementedError
 
     def close(self) -> None:
-        """Release what ``open()`` loaded."""
+        """Release what ``open()`` loaded.
+
+        Called after each request for a non-persistent service, and at shutdown for a persistent
+        one. A persistent instance that was replaced or evicted is not closed, since searches may
+        still be running on it; it must hold nothing that garbage collection does not free.
+        """
 
 
 class _Entry:
@@ -84,18 +90,13 @@ class Registry:
                     entries.move_to_end(scope)
                     return entry.service  # type: ignore[return-value]
             probe.open()
-            stale: list[SearchService] = []
             with self._lock:
-                old = entries.pop(scope, None)
-                if old is not None:
-                    stale.append(old.service)
                 entries[scope] = _Entry(probe, key)
+                entries.move_to_end(scope)
                 while len(entries) > cls.max_instances:
-                    _, evicted = entries.popitem(last=False)
-                    stale.append(evicted.service)
-            # Searches still running on a replaced instance keep their own references.
-            for service in stale:
-                service.close()
+                    entries.popitem(last=False)
+            # A replaced or evicted instance is dropped, never closed: a request that acquired
+            # it a moment ago may still be searching it. Its index is freed with its last user.
             return probe
 
     def clear(self) -> None:

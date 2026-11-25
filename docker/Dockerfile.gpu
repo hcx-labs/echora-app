@@ -36,6 +36,8 @@ RUN mkdir -p /models/huggingface /home/echora \
 
 # --- echora-backend: the API (/api/v1). Runs the migrations, then serves.
 FROM base AS backend
+# The worker target below carries ComfyUI; the API reports it from this flag.
+ENV ECHORA_COMFYUI_IN_WORKER_IMAGE=true
 # core, worker and backend import under their project names.
 COPY core/src ./packages/core
 COPY worker/src ./packages/worker

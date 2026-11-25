@@ -253,15 +253,19 @@ _CORPUS_FILTERS = {
 
 
 def corpus_digest(db: Connection, kind: str, user_id: uuid.UUID) -> str:
-    """A digest of the user's current (song, run) pairs for the corpus kind.
+    """A digest of what ``user_corpus`` returns for the corpus kind.
 
+    It covers each embedding row's id and its song's title, artist and album. A re-embedded song
+    gets a new row under the same run, so the row id (not the run id) is what tells it changed.
     Kinds are ``semantic`` (MuQ-MuLan audio) and ``lyrics`` (BGE-M3).
     """
     row = fetch_one(
         db,
-        f"""SELECT coalesce(md5(string_agg(e.track_id::text || ':' || e.run_id::text, ','
-                                        ORDER BY e.track_id, e.run_id)), '') AS digest
-            FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
+        f"""SELECT coalesce(md5(string_agg(ROW(e.id, t.title, t.artist, t.album)::text, ','
+                                        ORDER BY e.id)), '') AS digest
+            FROM current_embeddings e
+            JOIN analysis_runs ar ON ar.id=e.run_id
+            JOIN tracks t ON t.id=e.track_id
             WHERE {_CORPUS_FILTERS[kind]}
               AND EXISTS (SELECT 1 FROM user_track_links utl
                           WHERE utl.track_id=e.track_id AND utl.user_id=%s)""",

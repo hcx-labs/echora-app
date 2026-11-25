@@ -49,7 +49,9 @@ def test_persistent_service_is_reused_until_its_key_changes():
     assert second is not first
     assert second.search(5) == 105
     assert Counting.opened == ["a", "a"]
-    assert Counting.closed == ["a"]
+    # The replaced instance may still be answering another request: it is not closed.
+    assert Counting.closed == []
+    assert first.search(5) == 5
 
 
 def test_lru_bound_evicts_the_least_recent_scope():
@@ -58,7 +60,11 @@ def test_lru_bound_evicts_the_least_recent_scope():
     registry.acquire(Counting, "b")
     registry.acquire(Counting, "a")
     registry.acquire(Counting, "c")
-    assert Counting.closed == ["b"]
+    assert Counting.closed == []
+    registry.acquire(Counting, "a")
+    assert Counting.opened == ["a", "b", "c"]
+    registry.acquire(Counting, "b")
+    assert Counting.opened == ["a", "b", "c", "b"]
 
 
 def test_concurrent_first_requests_open_once():

@@ -137,7 +137,7 @@ How much GPU you need depends on your library and which steps you enable. There 
 - An **OpenAI-compatible endpoint**, local or hosted, for lyric translation and motion-artwork prompts.
 - A **Hugging Face token** with access to the gated LTX-2.5 repository, if you want motion artwork.
 
-The Compose file also defines a CPU-only analysis service under the `cpu` profile. The web service talks to the GPU service by default, so running without a GPU means changing the Compose configuration yourself.
+To run without a GPU, add the CPU override: `docker compose -f compose.yaml -f compose.cpu.yaml up -d --build`. It builds the CPU images, which do not include motion artwork's ComfyUI.
 
 ---
 
@@ -199,16 +199,16 @@ Run it again whenever an update changes the pinned models. To add motion artwork
 docker compose up -d --build
 ```
 
-The database schema is created and upgraded automatically when the analysis service starts. Check that everything is healthy:
+The database schema is created and upgraded automatically when the backend service starts. Check that everything is healthy:
 
 ```sh
 docker compose ps
 curl http://localhost:3000/api/health
 ```
 
-**6. Sign in and connect your music.** Open <http://localhost:3000>, sign in as the administrator, and enter your Navidrome address and account. That address is contacted **from inside the analysis container**, so `localhost` there means the container, not your computer. For a Navidrome running on the same machine, use `http://host.docker.internal:4533`. Choose a first batch of songs and let it finish before syncing everything. A small batch is a quick way to confirm the setup works.
+**6. Sign in and connect your music.** Open <http://localhost:3000>, sign in as the administrator, and enter your Navidrome address and account. That address is contacted **from inside the backend and worker containers**, so `localhost` there means the container, not your computer. For a Navidrome running on the same machine, use `http://host.docker.internal:4533`. Choose a first batch of songs and let it finish before syncing everything. A small batch is a quick way to confirm the setup works.
 
-Optional settings and their defaults are listed in [runtime settings](docs/runtime-settings.md).
+Optional settings and their defaults are listed in [runtime settings](docs/runtime-settings.md). Upgrading from a release before the `/api/v1` API needs a few manual steps: see [upgrading](docs/upgrading.md).
 
 ---
 

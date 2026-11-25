@@ -99,3 +99,33 @@ def test_catalog_entries():
     assert entries["token"].secret
     assert entries["token"].default is None
     assert _AlignConfig in config_classes()
+
+
+def test_a_bare_field_name_is_not_an_environment_variable(monkeypatch):
+    class _Model(EchoraConfig, env_prefix="ECHORA_TEST_BARE_"):
+        revision: str = setting("pinned", legacy="OLD_TEST_BARE_REVISION")
+
+    monkeypatch.setenv("REVISION", "stray")
+    assert _Model().revision == "pinned"
+    monkeypatch.setenv("OLD_TEST_BARE_REVISION", "legacy")
+    assert _Model().revision == "legacy"
+    monkeypatch.setenv("ECHORA_TEST_BARE_REVISION", "canonical")
+    assert _Model().revision == "canonical"
+    assert _Model(revision="given").revision == "given"
+
+
+def test_load_all_validates_every_class_of_the_named_modules(monkeypatch):
+    from core.config import load_all
+    from core.jobs.config import QueueConfig
+
+    reset_config_cache()
+    monkeypatch.setenv("DATABASE_URL", "postgresql://example.invalid/echora")
+    load_all(("core.db.config", "core.jobs.config"))
+    assert QueueConfig in EchoraConfig._instances
+
+    reset_config_cache()
+    field = next(e for e in QueueConfig.entries() if e.field == "lease_seconds")
+    monkeypatch.setenv(field.name, "not a number")
+    with pytest.raises(ValidationError):
+        load_all(("core.jobs.config",))
+    reset_config_cache()

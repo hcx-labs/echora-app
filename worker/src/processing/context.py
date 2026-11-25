@@ -19,6 +19,8 @@ class Progress:
     total: int
     unit: str = "tracks"
     summary: Mapping[str, Any] | None = None
+    track: Mapping[str, Any] | None = None
+    """The song being worked on (``id``, ``title``, ``artist``), which the setup screen names."""
 
     def as_dict(self) -> dict[str, Any]:
         """The update as stored in the job's progress column."""
@@ -31,6 +33,8 @@ class Progress:
         }
         if self.summary is not None:
             update["summary"] = dict(self.summary)
+        if self.track is not None:
+            update["track"] = dict(self.track)
         return update
 
 

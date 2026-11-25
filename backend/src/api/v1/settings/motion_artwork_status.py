@@ -50,7 +50,10 @@ def _embedded_status() -> dict[str, object]:
     from huggingface_hub import try_to_load_from_cache
 
     comfyui = ComfyUIConfig.load()
-    installed = (Path(comfyui.dir) / "main.py").is_file() and Path(comfyui.python).is_file()
+    # ComfyUI lives in the worker image, not in this one: the GPU build says its worker has it.
+    installed = comfyui.in_worker_image or (
+        (Path(comfyui.dir) / "main.py").is_file() and Path(comfyui.python).is_file()
+    )
     missing = [
         filename.rsplit("/", 1)[-1]
         for repo, revision, filename in MODEL_FILES

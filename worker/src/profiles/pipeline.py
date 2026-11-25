@@ -10,6 +10,7 @@ import platform
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 import psycopg
@@ -478,9 +479,10 @@ class ProfileItem(Item):
 
     track_id: uuid.UUID
     source_run_id: uuid.UUID
-    duration: float
-    window_seconds: float
-    stride_seconds: float
+    # As stored: converted per song in ``process``, so one bad row fails one song.
+    duration: Any
+    window_seconds: Any
+    stride_seconds: Any
 
 
 class AudioProfileProcessor(Processor[None, ProfileItem, TrackAudioProfile]):
@@ -524,9 +526,9 @@ class AudioProfileProcessor(Processor[None, ProfileItem, TrackAudioProfile]):
                 key=str(row["track_id"]),
                 track_id=row["track_id"],
                 source_run_id=row["source_run_id"],
-                duration=float(row["duration_seconds"]),
-                window_seconds=float(row["window_seconds"] or 10),
-                stride_seconds=float(row["stride_seconds"] or 5),
+                duration=row["duration_seconds"],
+                window_seconds=row["window_seconds"],
+                stride_seconds=row["stride_seconds"],
             )
             for row in rows
         ]
@@ -553,12 +555,13 @@ class AudioProfileProcessor(Processor[None, ProfileItem, TrackAudioProfile]):
         rows = store.window_embeddings(self.connection, item.track_id, item.source_run_id)
         if not rows:
             raise ValueError(f"{self.model_name} run has no stored window embeddings")
-        duration = item.duration
+        duration = float(item.duration)
         exact = all(
             row["window_start_seconds"] is not None and row["window_end_seconds"] is not None
             for row in rows
         )
-        window_seconds, stride_seconds = item.window_seconds, item.stride_seconds
+        window_seconds = float(item.window_seconds or 10)
+        stride_seconds = float(item.stride_seconds or 5)
         if exact:
             duration = max(duration, max(float(row["window_end_seconds"]) for row in rows))
         elif len(rows) > 1:

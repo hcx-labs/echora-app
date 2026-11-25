@@ -8,6 +8,11 @@ from typing import Self
 from pydantic import SecretStr, model_validator
 
 from core.config import EchoraConfig, secret, setting
+from worker.config import CONFIG_MODULES as WORKER_CONFIG_MODULES
+
+# Every module that defines a settings class: the API reads the worker's too (search, settings
+# endpoints). The API loads them all when it starts, and the settings catalog lists them.
+CONFIG_MODULES = (*WORKER_CONFIG_MODULES, "backend.config")
 
 # Without a configured secret, sessions survive only as long as this process.
 _SESSION_SECRET = secrets.token_urlsafe(48)

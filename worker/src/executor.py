@@ -15,9 +15,10 @@ import time
 import uuid
 
 import core.jobs.queue as jobs
+from core.config import load_all
 from core.errors import ConfigurationError
 from core.jobs.config import QueueConfig
-from worker.config import WorkerConfig
+from worker.config import CONFIG_MODULES, WorkerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -238,6 +239,8 @@ def main() -> None:
     if args.poll_seconds <= 0 or args.lease_seconds < 15:
         parser.error("poll seconds must be positive and lease seconds must be at least 15")
     logging.basicConfig(level=logging.INFO)
+    # An invalid setting stops the worker here, not the first job that reads it.
+    load_all(CONFIG_MODULES)
     run(
         args.worker_type,
         once=args.once,

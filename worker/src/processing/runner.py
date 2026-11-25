@@ -7,7 +7,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.errors import EchoraError, ProcessingError
+from core.errors import ProcessingError
 
 from .base import Item, Processor
 from .context import ProcessingContext, Progress
@@ -62,13 +62,19 @@ def _log_failure(processor: Processor[Any, Any, Any], item: Item, error: BaseExc
         )
 
 
+def _message(processor: Processor[Any, Any, Any], item: Item) -> str:
+    return f"{processor.activity} {item.label}" if item.label else processor.activity
+
+
 def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -> StageSummary:
     """Run one stage over the context's batch and return its summary.
 
-    Items that fail are counted, logged by key and skipped. ``JobCancelled`` and programming
-    errors propagate after ``close()``. When an ``EchoraError`` stops ``process``, the items
-    without a result count as failed; when ``process`` stops early on its own (the feature was
-    switched off mid-batch), they are left uncounted.
+    Items that fail are counted, logged by key and skipped. When a ``ProcessingError`` stops
+    ``process``, the items without a result count as failed; when ``process`` stops early on its
+    own (the feature was switched off mid-batch), they are left uncounted. Everything else
+    propagates after ``close()`` and fails the job, which the queue retries: ``JobCancelled``,
+    an integration that is down (``IntegrationError``), programming errors, and a storage
+    failure of a processor that sets ``storage_failure_fails_job``.
     """
     summary = StageSummary(type(processor))
     context.check()
@@ -81,8 +87,26 @@ def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -
         return summary
 
     pending = {item.key: item for item in items}
+
+    def announce(index: int) -> None:
+        # The item about to start: results arrive in planned order for an announcing stage.
+        if processor.announces_items and index < len(items):
+            upcoming = items[index]
+            context.report(
+                Progress(
+                    processor.name,
+                    _message(processor, upcoming),
+                    index,
+                    len(items),
+                    processor.unit,
+                    summary.as_dict(),
+                    upcoming.track(),
+                )
+            )
+
     try:
         processor.open(context, items)
+        announce(0)
         for index, result in enumerate(processor.process(context, items), start=1):
             context.check()
             item = result.item
@@ -94,6 +118,8 @@ def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -
                 try:
                     extra = processor.persist(context, item, result.output)
                 except Exception as error:  # noqa: BLE001 - one song's storage failure
+                    if processor.storage_failure_fails_job:
+                        raise
                     _log_failure(processor, item, error)
                     summary.count("failed")
                 else:
@@ -106,14 +132,15 @@ def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -
             context.report(
                 Progress(
                     processor.name,
-                    f"{processor.activity} {item.label}" if item.label else processor.activity,
+                    _message(processor, item),
                     index,
                     len(items),
                     processor.unit,
                     summary.as_dict(),
                 )
             )
-    except EchoraError as error:
+            announce(index)
+    except ProcessingError as error:
         logger.error(
             "%s stopped: %s (%d items without a result)",
             processor.name,

@@ -799,3 +799,15 @@ def test_settings_report_a_stored_hugging_face_token_without_decrypting_it(monke
     assert "IS NOT NULL" in cursor.execute.call_args.args[0]
     cursor.fetchone.return_value = None
     assert external_processing._has_hf_token(db) is False
+
+
+def test_a_local_karaoke_checkpoint_path_is_not_sent_to_modal(monkeypatch):
+    from core.config import reset_config_cache
+
+    monkeypatch.setenv("ECHORA_KARA_MODEL_PATH", "/models/local-checkpoint")
+    reset_config_cache()
+    try:
+        assert "/models/local-checkpoint" not in str(compute_settings())
+    finally:
+        monkeypatch.delenv("ECHORA_KARA_MODEL_PATH")
+        reset_config_cache()

@@ -65,3 +65,23 @@ def test_storage_failure_rolls_back(monkeypatch):
     with pytest.raises(RuntimeError):
         processor.persist(ProcessingContext(), item, recordings.Fingerprint(b"fp", 1.0, "1"))
     connection.rollback.assert_called_once()
+
+
+def test_a_song_under_two_source_ids_is_fingerprinted_once(monkeypatch):
+    connection = MagicMock()
+    planning = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
+    planning.fetchone.side_effect = [{"duration_seconds": 200.0}, {"duration_seconds": 200.0}]
+    # While processing: no fingerprint before the first source id, one before the second.
+    processing = connection.cursor.return_value.__enter__.return_value
+    processing.fetchone.side_effect = [{"duration_seconds": 200.0}, None]
+    monkeypatch.setattr(recordings, "connect", lambda **_: connection)
+    monkeypatch.setattr(recordings, "source_rows", lambda *a: [("b1", B), ("b2", B)])
+    client = MagicMock()
+    client.audio_bytes.return_value = b"audio"
+    monkeypatch.setattr(recordings, "NavidromeClient", lambda *a: client)
+    monkeypatch.setattr(recordings, "compute_chromaprint", lambda audio: (b"fp", 0.0, "1"))
+    monkeypatch.setattr(recordings, "store_fingerprint", lambda *a: {"matched": False})
+    context = ProcessingContext(user_id="user", library=("url", "u", "p"), track_ids=("b1", "b2"))
+    summary = run_stage(recordings.FingerprintProcessor(), context).as_dict()
+    assert summary == {"fingerprinted": 1, "matched": 0, "failed": 0}
+    client.audio_bytes.assert_called_once_with("b1")
