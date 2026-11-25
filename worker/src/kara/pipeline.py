@@ -1,3 +1,5 @@
+"""The karaoke stage: aligns each song's lyrics to its audio and stores the word timing."""
+
 from __future__ import annotations
 
 import functools
@@ -118,11 +120,11 @@ def _restore_display_text(
 
 
 def build_lines_from_alignment_document(document: dict[str, object]) -> list[dict[str, object]]:
-    """Build karaoke lines from the alignment document's millisecond-precision timing.
+    r"""Build karaoke lines from the alignment document's millisecond-precision timing.
 
     The alignment document stores token onset and offset in integer milliseconds
     derived directly from frame indices, avoiding the centisecond quantization
-    inherent in the ASS ``\\k`` tag format (10 ms resolution).  Using it as the
+    inherent in the ASS ``\k`` tag format (10 ms resolution).  Using it as the
     primary timing source eliminates the systematic rounding error that
     accumulates across dense syllable sequences.
     """
@@ -202,8 +204,10 @@ WORD_END = re.compile(r"\s[(\[]*$")
 
 
 def mark_backing_voice(lines: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Tag backing vocals: ``"voice": 2`` on syllables (players show them as a second, smaller
-    line) and ``"voice": "background"`` on a line that is backing as a whole.
+    """Tag backing vocals on syllables (``"voice": 2``) and on whole lines (``"background"``).
+
+    Players show ``"voice": 2`` syllables as a second, smaller line; ``"voice": "background"``
+    marks a line that is backing as a whole.
 
     Bracketed words are always backing vocals (``tag_bracketed_backing``), inline or as a whole
     line, wherever the aligner placed them. On top of that, a phrase (consecutive words of a line) that the
@@ -558,8 +562,9 @@ def _run_fa_kara(
 
 
 def _store_supplied_karaoke(connection, track_id, lines, digest) -> None:
-    """Word timing that came with the lyrics (TTML or enhanced LRC from Navidrome), stored as the
-    karaoke without alignment. Not AI-generated, so players show no AI disclosure for it.
+    """Word timing that came with the lyrics, stored as the karaoke without alignment.
+
+    TTML or enhanced LRC from Navidrome. Not AI-generated, so players show no AI disclosure for it.
     """
     provenance = {
         "alignment_mode": "supplied",

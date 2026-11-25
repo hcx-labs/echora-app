@@ -22,6 +22,7 @@ def reset_settings_cache():
 @pytest.fixture(autouse=True)
 def local_compute_by_default(monkeypatch, request):
     """Jobs without a recorded location ask the database for the instance default.
+
     Unit tests have no database, so they compute locally unless a test opts out.
     """
     if "real_compute_choice" in request.keywords:

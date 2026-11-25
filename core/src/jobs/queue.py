@@ -574,6 +574,11 @@ class JobCancelled(BaseException):
 
 
 class JobContext:
+    """A claimed job, for its runner: progress, heartbeats and completion under its claim.
+
+    Each call raises ``JobCancelled`` once the claim is lost or the job was cancelled.
+    """
+
     def __init__(self, job, *, lease_seconds=None):
         self.lease_seconds = (
             QueueConfig.load().lease_seconds if lease_seconds is None else lease_seconds

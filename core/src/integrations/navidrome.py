@@ -1,3 +1,5 @@
+"""A Subsonic client for Navidrome: songs, audio, cover art, lyrics and scrobbles."""
+
 from __future__ import annotations
 
 import hashlib
@@ -17,6 +19,8 @@ from core.integrations.config import NavidromeConfig
 
 @dataclass(frozen=True)
 class NavidromeTrack:
+    """A song as Navidrome describes it; ``raw`` keeps the Subsonic payload."""
+
     id: str
     title: str
     artist: str | None
@@ -279,8 +283,10 @@ class NavidromeClient:
         return response.content, response.headers.get("content-type", "image/jpeg")
 
     def scrobble(self, song_id: str, submission: bool = True) -> None:
-        """Subsonic scrobble: submission=False marks the song as now playing,
-        submission=True records a completed play (feeds Navidrome play counts).
+        """Scrobble a song to Navidrome.
+
+        ``submission=False`` marks the song as now playing, ``submission=True`` records a
+        completed play (feeds Navidrome play counts).
         """
         self._request("scrobble", id=song_id, submission="true" if submission else "false")
 

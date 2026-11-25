@@ -1,3 +1,5 @@
+"""Plans which songs of a batch need each analysis, from what is already stored."""
+
 from __future__ import annotations
 
 import uuid
@@ -16,6 +18,8 @@ from worker.library.waveforms import WAVEFORM_REVISION
 
 @dataclass(frozen=True)
 class ProcessingPlan:
+    """The songs that need lyrics and karaoke work."""
+
     lyrics_external_ids: tuple[str, ...] = ()
     karaoke_external_ids: tuple[str, ...] = ()
 
@@ -34,6 +38,8 @@ class ProcessingPlan:
 
 @dataclass(frozen=True)
 class AudioProcessingPlan:
+    """The songs (external ids) that need each audio analysis."""
+
     muq_external_ids: frozenset[str]
     mert_external_ids: frozenset[str]
     fingerprint_external_ids: frozenset[str]

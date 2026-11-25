@@ -10,8 +10,9 @@ BRACKET_OPEN, BRACKET_CLOSE = "(（", ")）"
 
 
 def _bracket_counts(texts: list[str]) -> list[tuple[int, int]]:
-    """Per text, how many of its letters and digits sit (inside, outside) round brackets; a
-    bracket opened in one text stays open in the next, until it closes or the texts end.
+    """Count, per text, the letters and digits (inside, outside) round brackets.
+
+    A bracket opened in one text stays open in the next, until it closes or the texts end.
     """
     counts, depth = [], 0
     for text in texts:
@@ -29,9 +30,11 @@ def _bracket_counts(texts: list[str]) -> list[tuple[int, int]]:
 
 
 def tag_bracketed_backing(lines: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Bracketed words are backing vocals, always: every syllable written inside round brackets
-    gets ``"voice": 2``, and a line that is bracketed as a whole (with or without syllables) gets
-    ``"voice": "background"``. Marks other than these are left as they are.
+    """Tag bracketed words as backing vocals, always.
+
+    Every syllable written inside round brackets gets ``"voice": 2``, and a line that is
+    bracketed as a whole (with or without syllables) gets ``"voice": "background"``. Marks other
+    than these are left as they are.
     """
     for line in lines:
         syllables = [s for s in line.get("syllables") or [] if isinstance(s, dict)]

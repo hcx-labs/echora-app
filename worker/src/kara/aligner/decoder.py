@@ -1,3 +1,5 @@
+"""CTC decoding of a song's lyrics against its audio: emissions, duration floors and token times."""
+
 import logging
 import math
 from collections.abc import Callable
@@ -64,7 +66,9 @@ def _inference_chunk_starts(
 
 
 class Wav2Vec2ForcedAligner:
-    """CTC emissions from a fine-tuned checkpoint. ``wav2vec2`` checkpoints (MMS, omniASR: every
+    """CTC emissions of a song from a fine-tuned wav2vec2 or w2v-BERT checkpoint.
+
+    CTC emissions from a fine-tuned checkpoint. ``wav2vec2`` checkpoints (MMS, omniASR: every
     shipped model) take the waveform through ``Wav2Vec2Processor``; a ``wav2vec2-bert`` checkpoint
     (w2v-BERT 2.0 / Sylla-600M, picked from ``config.json``) takes stacked fbank frames through
     ``Wav2Vec2BertProcessor`` on the same 20 ms grid with a 279.5-sample receptive-field centre.
@@ -414,7 +418,9 @@ class Wav2Vec2ForcedAligner:
         return result
 
     def _fused_hidden(self, hidden: torch.Tensor, chunk: torch.Tensor) -> torch.Tensor:
-        """The encoder's last hidden state of one chunk plus the gated MuQ projection, sampled
+        """One chunk's hidden state with the MuQ fusion term added.
+
+        The encoder's last hidden state of one chunk plus the gated MuQ projection, sampled
         on this backbone's frame clock (the same arithmetic as the trainer's ``fusion_hidden``).
         """
         from worker.kara.aligner.ctc import receptive_field_centre_samples
@@ -451,7 +457,9 @@ def _backbone(model: str) -> str:
 
 
 def _load_aux_heads(model: str, in_features: int) -> torch.nn.ModuleDict | None:
-    """``vad`` and ``f0`` linear heads from ``aux_heads.safetensors`` next to the checkpoint
+    """The checkpoint's auxiliary vad and f0 heads, if it ships them.
+
+    ``vad`` and ``f0`` linear heads from ``aux_heads.safetensors`` next to the checkpoint
     (local directory or hub repo), or None when the checkpoint ships none.
     """
     from transformers.utils import cached_file
@@ -480,7 +488,9 @@ def _load_aux_heads(model: str, in_features: int) -> torch.nn.ModuleDict | None:
 
 
 def pitch_from_f0_logits(logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """(voicing probability, Hz of the most likely bin) per frame from the F0 head's
+    """Voicing probability and pitch per frame from the F0 head.
+
+    (voicing probability, Hz of the most likely bin) per frame from the F0 head's
     ``1 + F0_BINS`` outputs: index 0 is the voicing logit, bin b (1-based) sits at
     10 * 2 ** ((20 b + 1997.38) / 1200) Hz (20-cent bins, about 32 Hz to 2 kHz).
     """
@@ -513,7 +523,9 @@ def _load_text_aligner(model_dir: str, record: dict):
 def _load_edge_head(
     model_dir: str, in_features: int, prefix: str = "edge_head", outputs: int = 1
 ) -> torch.nn.Linear:
-    """The S1 edge head (``edge_head.weight`` / ``edge_head.bias``) from a checkpoint directory;
+    """A linear head of a checkpoint directory (the edge head by default).
+
+    The S1 edge head (``edge_head.weight`` / ``edge_head.bias``) from a checkpoint directory;
     ``prefix``/``outputs`` load another linear head the same way (the v2 ``background_head``).
     """
     head = torch.nn.Linear(in_features, outputs)
@@ -573,7 +585,9 @@ def _format_time(time_sec):
 
 
 def _span_result(token, spans, frame_duration, offset=0.0, frame_times=None, fraction=0.0):
-    """Token times in seconds. Legacy clock: frame k at k x ``frame_duration``. With
+    """One token span's times in seconds.
+
+    Token times in seconds. Legacy clock: frame k at k x ``frame_duration``. With
     ``frame_times`` (E3) frame k is at its own receptive-field centre, and ``fraction`` (S2)
     moves the start by a fraction of a frame.
     """
@@ -681,7 +695,9 @@ def _display_span_results(
     token_offsets=None,
     second_stream=frozenset(),
 ):
-    """Token times in seconds. ``offset`` moves every time by a fixed amount (timing calibration);
+    """Display and acoustic times of every token, in seconds.
+
+    Token times in seconds. ``offset`` moves every time by a fixed amount (timing calibration);
     ``token_offsets`` (S2 onset-class table) adds a per-token amount, ``fractions`` a sub-frame
     start per token, ``frame_times`` the exact chunk clock (E3).
     """

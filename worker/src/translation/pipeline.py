@@ -45,9 +45,11 @@ MIXED_LID_CONFIDENCE = 0.7
 
 
 def foreign_lines(lines: list[str], language: str, sources: set[str]) -> list[int]:
-    """Indexes of lines not in the song's language: the karaoke aligner's per-line rule
-    (romanised Urdu, Hindi, Korean, ... that fastText cannot name), or fastText confident in a
-    language that is translated from (Spanish lines it names but the rule reads as English).
+    """Indexes of lines not in the song's language.
+
+    Either the karaoke aligner's per-line rule (romanised Urdu, Hindi, Korean, ... that fastText
+    cannot name), or fastText confident in a language that is translated from (Spanish lines it
+    names but the rule reads as English).
     """
     rules = label_rules
     found = []
@@ -70,8 +72,9 @@ def _comparable(text: str) -> str:
 
 
 def keep_foreign(lines: list[str], translated: list[dict], foreign: list[int]) -> list[dict]:
-    """Only translations of foreign lines, and only where the model changed them; every other line
-    is left empty, which the player shows as no translation.
+    """Only translations of foreign lines, and only where the model changed them.
+
+    Every other line is left empty, which the player shows as no translation.
     """
     chosen = set(foreign)
     return [

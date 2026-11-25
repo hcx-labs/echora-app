@@ -6,6 +6,8 @@ from transformers import LogitsProcessor
 
 
 class SegmentGuard(LogitsProcessor):
+    """Keeps generation to well-formed transcript segments, counting each intervention."""
+
     def __init__(self, tokenizer, prompt_len):
         self.tokenizer = tokenizer
         self.prompt_len = prompt_len

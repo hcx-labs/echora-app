@@ -1,3 +1,5 @@
+"""Alembic environment: runs the migrations against the configured database."""
+
 from __future__ import annotations
 
 from logging.config import fileConfig

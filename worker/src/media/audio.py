@@ -1,3 +1,5 @@
+"""Audio decoding with ffmpeg, and the model input windows of a waveform."""
+
 from __future__ import annotations
 
 import subprocess

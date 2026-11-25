@@ -1,3 +1,5 @@
+"""The lyrics embedding model (BGE-M3), over overlapping token windows of a song's lyrics."""
+
 from __future__ import annotations
 
 import threading
@@ -13,6 +15,8 @@ from core.embeddings.config import EmbeddingConfig
 
 @dataclass(frozen=True)
 class LyricsEmbeddingResult:
+    """A song's lyric vector, its per-window vectors and their token ranges, and the cost."""
+
     aggregate: np.ndarray
     windows: list[np.ndarray]
     token_ranges: list[tuple[int, int]]
@@ -30,6 +34,8 @@ _shared_lock = threading.Lock()
 
 
 class LyricsEmbeddingModel:
+    """BGE-M3 over lyrics, in overlapping windows of ``chunk_tokens`` tokens."""
+
     name = "bge_m3"
     dimension = 1024
     chunk_tokens = 7168

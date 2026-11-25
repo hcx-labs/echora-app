@@ -77,8 +77,9 @@ def generate_song(ranges, decode, retry_policy, check=lambda: None, progress=lam
 def reconcile_song(
     ranges, candidates, reconcile=lambda a, b, segments: segments, check=lambda: None
 ):
-    """Reconcile complete candidates before either retry or outer-window ownership
-    can discard words. All generation finishes before this phase starts.
+    """Reconcile complete candidates before retry or outer-window ownership can discard words.
+
+    All generation finishes before this phase starts.
     """
     results = [[] for _ in ranges]
     for i, a, b, segments, ownership in candidates:

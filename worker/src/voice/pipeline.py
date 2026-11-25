@@ -1,3 +1,5 @@
+"""Voice evidence with Essentia models: whether a song is sung, and the voice's gender."""
+
 from __future__ import annotations
 
 import hashlib

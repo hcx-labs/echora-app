@@ -82,8 +82,10 @@ def config(row: dict[str, object] | None = None) -> ModalConfig | None:
 
 
 def remote_settings() -> dict[str, object]:
-    """The settings Modal computes with: the worker's model settings, and whether Modal's
-    storage holds motion artwork models (its switch for syncs on Modal).
+    """The settings Modal computes with.
+
+    The worker's model settings, and whether Modal's storage holds motion artwork models (its
+    switch for syncs on Modal).
     """
     from worker.artwork.settings import _connect as motion_connect, load_settings as motion_settings
 

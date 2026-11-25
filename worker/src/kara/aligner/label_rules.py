@@ -352,7 +352,9 @@ def syllable_cuts(tokens: list[tuple[str, bool]]) -> list[int]:
 
 
 def syllabify(tokens: list[tuple[str, bool]]) -> list[str]:
-    """Phone syllables: one per vowel nucleus; a consonant cluster between two nuclei gives its
+    """Splits phone tokens into syllables.
+
+    Phone syllables: one per vowel nucleus; a consonant cluster between two nuclei gives its
     last consonant to the next syllable (maximal-onset simplification).
     """
     if sum(1 for _, vowel in tokens if vowel) <= 1:
@@ -1508,7 +1510,9 @@ _SPELLED_VOWEL = {"a": "a", "e": "e", "i": "i", "o": "o", "u": "u", "y": "i"}
 
 
 def _unit_cost(label: str, letters: str) -> float:
-    """Cost of one label unit covering ``letters``. Each vowel costs the same whichever vowel letters it
+    """The cost of one label unit over its letters.
+
+    Cost of one label unit covering ``letters``. Each vowel costs the same whichever vowel letters it
     covers and each consonant nothing over any of its spellings, so readings compete on structure (number
     and place of vowels, silent letters, letterless phones) and a tie goes to CMUdict's order, never to
     the reading that looks most like the spelling.
@@ -1539,7 +1543,9 @@ def _unit_cost(label: str, letters: str) -> float:
 
 
 def align_spelling(units, word: str) -> tuple[float, list[str], list[int]]:
-    """(cost, letters each unit covers, index of each unit's first letter) of the cheapest monotonic
+    """The cheapest monotonic alignment of label units to a word's letters.
+
+    (cost, letters each unit covers, index of each unit's first letter) of the cheapest monotonic
     alignment of label units to the word's a-z letters; letters no unit covers are silent (e, h, w, u, gh
     cost 0.5, others 1.0). A unit covering no letter gets the index where it sits.
     """
@@ -1579,7 +1585,9 @@ SUNG_READING_MARGIN = 0.6
 
 
 def sung_vowels(readings, word: str) -> tuple[tuple[str, bool], ...]:
-    """The first reading (unit lists with reduced slots), or a later one that aligns with ``word``'s letters
+    """The sung reading of a word among its CMUdict readings.
+
+    The first reading (unit lists with reduced slots), or a later one that aligns with ``word``'s letters
     better by SUNG_READING_MARGIN; each slot over one vowel letter reads as that vowel, any other as v3.
     """
     best = None
@@ -1597,7 +1605,9 @@ def sung_vowels(readings, word: str) -> tuple[tuple[str, bool], ...]:
 
 
 def _abbreviation(word: str) -> bool:
-    """Lower-case acronyms keep their letter names: an acronym (DJ, tv), or 2-4 letters without a vowel or
+    """Whether a lower-case word is read by its letter names.
+
+    Lower-case acronyms keep their letter names: an acronym (DJ, tv), or 2-4 letters without a vowel or
     a doubled letter (km, dms, fr). Doubled letters are onomatopoeia (brr, psst, skrrt).
     """
     if word.upper() in ACRONYMS:
@@ -1620,7 +1630,9 @@ def _cmu_spellout(word: str, tokens) -> bool:
 def _espeak_v3(
     word: str, language: str, sung: bool = False
 ) -> tuple[tuple[tuple[str, bool], ...], str | None]:
-    """(phone tokens, language espeak switched to or None) for one word or a spaced letter string;
+    """A word's phone tokens from espeak.
+
+    (phone tokens, language espeak switched to or None) for one word or a spaced letter string;
     ``sung`` (v3-sung, English): reduced vowels take their spelled vowel (``sung_vowels``).
     """
     ipa = _espeak_backend(language).phonemize([word], strip=True, njobs=1)[0]
@@ -1637,7 +1649,9 @@ def _espeak_label(text: str, language: str) -> str:
 
 
 def _espeak_spellout(word: str, label: str, language: str) -> bool:
-    """Espeak read the word (or its leading consonants) letter by letter: skrrt → es kei ar…, gbe → ji bi i,
+    """Whether espeak spelled the word out letter by letter.
+
+    Espeak read the word (or its leading consonants) letter by letter: skrrt → es kei ar…, gbe → ji bi i,
     nhlonipho → en eich lanifo. Compared with espeak's own letter names, so it holds for every voice.
     """
     if not (len(word) >= 2 and word.isascii() and word.isalpha()) or _abbreviation(word):
@@ -1718,7 +1732,9 @@ def _v3_word_label(word: str, language: str, sung: bool = False) -> str:
 
 
 def aligned_surface(tokens, word: str) -> list[str] | None:
-    """v3-sung: the word's spelling cut where its phone syllables are cut, through the letters each
+    """v3-sung: the word's spelling cut at its phone syllables.
+
+    v3-sung: the word's spelling cut where its phone syllables are cut, through the letters each
     phone was aligned to (intuition → in|tu|i|tion where pyphen gives in-tu-ition); silent letters stay
     with the syllable before. None when the alignment is impossible or a syllable gets no letter.
     """
@@ -1744,7 +1760,9 @@ def aligned_surface(tokens, word: str) -> list[str] | None:
 def pronunciation_items_v3(
     word: str, language: str, spell, context: tuple | None = None, sung: bool = False
 ) -> tuple[list[dict], str]:
-    """v3 counterpart of pronunciation_items; a letter spell-out falls back to ``spell`` with repeated
+    """The label items of one word under the v3 rules.
+
+    v3 counterpart of pronunciation_items; a letter spell-out falls back to ``spell`` with repeated
     letters collapsed (skrrt → skrt).
     """
     lowered = word.lower().translate(_APOS_MAP)

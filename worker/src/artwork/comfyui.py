@@ -184,6 +184,8 @@ def _wait_until_ready(
 
 
 class ComfyUI:
+    """A client for one ComfyUI server: queues workflows and fetches their outputs."""
+
     def __init__(self, base_url: str, timeout_seconds: float = 30):
         self.base_url = base_url.rstrip("/")
         self.client = httpx.Client(timeout=timeout_seconds, follow_redirects=False, trust_env=False)

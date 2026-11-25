@@ -30,6 +30,8 @@ Keep the words that are right; never rephrase a line that already makes sense, a
 
 
 class LanguagePair(BaseModel):
+    """A translation direction: two different language tags."""
+
     model_config = ConfigDict(extra="forbid")
     source: str
     target: str
@@ -53,6 +55,8 @@ Provider = Literal["openai", "anthropic"]
 
 
 class ExternalAISettings(BaseModel):
+    """The administrator's settings for the external AI provider."""
+
     model_config = ConfigDict(extra="forbid")
     enabled: bool = False
     provider: Provider = "openai"

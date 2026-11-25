@@ -112,7 +112,9 @@ def token_minimum_frames(
     group_frames: int,
     vowel_ids: set[int],
 ) -> list[int]:
-    """Minimum frames per target: each letter at least ``letter_frames``, each acoustic token
+    """Minimum frames per letter of each acoustic token.
+
+    Minimum frames per target: each letter at least ``letter_frames``, each acoustic token
     (group) at least ``group_frames``, its extra frames given to vowels (what singers hold).
     """
     minimums: list[int] = []
@@ -455,7 +457,9 @@ def vocal_activity(
 def with_vocal_activity(
     emission: torch.Tensor, activity: torch.Tensor, blank: int, weight: float
 ) -> torch.Tensor:
-    """Letters cost ``weight`` x (1 - activity) extra per frame, so the path can't hold a word
+    """Emissions with letters penalised where the vocals are quiet.
+
+    Letters cost ``weight`` x (1 - activity) extra per frame, so the path can't hold a word
     through silence or start a line in an instrumental; blanks (pauses) are unchanged.
     """
     penalty = weight * (1 - activity.to(emission.device, emission.dtype))
@@ -518,7 +522,9 @@ def stitched_frame_times(
     overlap_seconds: int = 2,
     backbone: str = "wav2vec2",
 ) -> torch.Tensor:
-    """Receptive-field-centre time (seconds) of every frame of the stitched lattice that
+    """Frame times of the stitched lattice, at each frame's receptive-field centre.
+
+    Receptive-field-centre time (seconds) of every frame of the stitched lattice that
     ``Wav2Vec2ForcedAligner.infer`` builds from 45 s chunks with 2 s shared context.
 
     Each chunk yields floor((N - 400) / 320) + 1 frames, one fewer than the nominal N / 320, so a

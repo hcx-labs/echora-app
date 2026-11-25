@@ -54,7 +54,7 @@ SCHEMA = {
 
 
 class RefinementError(Exception):
-    pass
+    """The external AI gave no usable refined transcript."""
 
 
 def enabled(settings: ExternalAISettings) -> bool:

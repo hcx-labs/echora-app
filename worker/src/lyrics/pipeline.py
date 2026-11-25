@@ -1,3 +1,5 @@
+"""The lyrics stage: retrieval or transcription, refinement and lyric embeddings."""
+
 from __future__ import annotations
 
 import hashlib

@@ -25,7 +25,7 @@ SAMPLE_RATE = 8000
 
 
 class QueueFull(ValueError):
-    pass
+    """Too many recording searches are waiting."""
 
 
 def search_configuration():

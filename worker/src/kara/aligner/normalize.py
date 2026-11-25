@@ -1,3 +1,5 @@
+"""Lyric normalisation: each language's text to the letters and syllables the aligner reads."""
+
 import re
 import unicodedata
 
@@ -103,7 +105,7 @@ newnums = [
 
 
 def normalize_numbers(text):
-    """将字符串中的各种数字字符转换为半角阿拉伯数字"""
+    """将字符串中的各种数字字符转换为半角阿拉伯数字."""
     # 全角数字转半角
     fullwidth_to_half = str.maketrans("０１２３４５６７８９", "0123456789")
     text = text.translate(fullwidth_to_half)
@@ -188,7 +190,7 @@ def normalize_numbers(text):
 
 
 def number_to_english(number_str):
-    """将数字字符串转换为英文单词"""
+    """将数字字符串转换为英文单词."""
     try:
         num = float(number_str) if "." in number_str else int(number_str)
     except ValueError:
@@ -432,13 +434,13 @@ def sylla_split(kana_str, sokuon_split=False, hatsuon_split=True):
 
 
 def convert_phoneme(ph):
-    """去除音素中的重音标记并映射为罗马音"""
+    """去除音素中的重音标记并映射为罗马音."""
     base_ph = ph.rstrip("012")  # 移除数字重音标记
     return phoneme_map.get(base_ph, "")
 
 
 def split_into_syllables_en(phonemes):
-    """将英语音素序列拆分为音节"""
+    """将英语音素序列拆分为音节."""
     vowels = [
         "AA",
         "AE",
@@ -504,7 +506,7 @@ def split_into_syllables_en(phonemes):
 
 
 def align_syllables_en(a, b):
-    """简单对齐表面音节和发音音节"""
+    """简单对齐表面音节和发音音节."""
     if len(a) > len(b):
         long_list, short_list = a, b
         long_to_short = True

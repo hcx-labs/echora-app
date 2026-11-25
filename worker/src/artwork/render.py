@@ -92,6 +92,8 @@ DEPTH_MOVES = re.compile(
 
 @dataclass(frozen=True)
 class Recipe:
+    """How a motion artwork loop is rendered: size, length, camera lock and prompt."""
+
     # The size the model renders at; upscaling doubles it.
     resolution: int = 768
     frames: int = 241
@@ -204,8 +206,10 @@ FRAME_CHANGES = re.compile(
 
 
 def zooms(prompt: str) -> bool:
-    """Whether a prompt asks for a zoom-like or any other camera move, or a subject moving toward or
-    away from the camera ("no pan", "never zooms", "nobody steps forward" do not count).
+    """Whether a prompt asks for a camera move, or a subject moving toward or away from it.
+
+    Zoom-like and any other camera moves count; "no pan", "never zooms", "nobody steps forward" do
+    not.
     """
     for pattern in (ZOOM_WORDS, CAMERA_MOVES, FRAME_CHANGES, DEPTH_MOVES):
         for match in pattern.finditer(prompt):

@@ -1,4 +1,4 @@
-"""Echora analysis on Modal (see docs/modal-compute.md).
+r"""Echora analysis on Modal (see docs/modal-compute.md).
 
 The image is Echora's published GPU analysis image with the deploying worker's
 own analysis source on top, so remote code is exactly the worker's code. Model
@@ -8,7 +8,7 @@ a manifest file on it records which pinned model set is present.
 Echora deploys this app itself from Settings → External processing. To deploy
 by hand, from services/analysis with a Modal token configured:
 
-    ECHORA_MODAL_IMAGE=ghcr.io/hackslashx/echora-analysis-gpu:<version> \\
+    ECHORA_MODAL_IMAGE=ghcr.io/hackslashx/echora-analysis-gpu:<version> \
         modal deploy -m worker.remote.modal_app
 
 Every compute call carries the worker's processing settings (model revisions,
@@ -132,6 +132,8 @@ def prepare_models(settings: dict[str, object], hf_token: str | None = None):
     max_containers=1,
 )
 class Analysis:
+    """The GPU container: runs analysis on uploaded audio, one model family resident at a time."""
+
     @modal.enter()
     def start(self) -> None:
         self.settings: dict[str, object] | None = None

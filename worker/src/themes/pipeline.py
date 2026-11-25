@@ -67,7 +67,7 @@ PROMPT_REVISION = LYRIC_THEMES_REVISION
 
 
 class ThemeError(Exception):
-    pass
+    """The external AI gave no usable theme description."""
 
 
 def enabled(settings: ExternalAISettings) -> bool:

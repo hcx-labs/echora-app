@@ -44,8 +44,10 @@ def _discard(_: dict[str, Any]) -> None:
 
 @dataclass
 class ProcessingContext:
-    """The batch a stage runs in: its songs and library, cancellation, progress, where
-    computation runs, and what earlier work prepared for it (``resources``).
+    """The batch a stage runs in.
+
+    Its songs and library, cancellation, progress, where computation runs, and what earlier work
+    prepared for it (``resources``).
     """
 
     check_cancelled: Callable[[], None] = _never_cancelled

@@ -1,3 +1,5 @@
+"""The SQLAlchemy engine and sessions for the configured database."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -10,7 +12,7 @@ from core.db.config import DatabaseConfig, require_database_url
 
 
 class Base(DeclarativeBase):
-    pass
+    """The declarative base of the ORM models."""
 
 
 _config = DatabaseConfig.load()

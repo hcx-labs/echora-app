@@ -1,5 +1,7 @@
-"""w2v-BERT (Sylla-600M) support in the karaoke aligner: the exact frame clock per
-backbone, the auxiliary heads and the activity source, with the wav2vec2 path unchanged.
+"""w2v-BERT (Sylla-600M) support in the karaoke aligner.
+
+The exact frame clock per backbone, the auxiliary heads and the activity source, with the wav2vec2
+path unchanged.
 """
 
 import json

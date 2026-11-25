@@ -166,8 +166,10 @@ def test_v3_fixes():
 
 @needs_v3
 def test_v3_training_and_inference_units_identical():
-    """main.py --label_rules v3 (FA_KARA_LABEL_RULES=v3 forwards en/de/fr) gives the units the v3
-    manifest is built with: the manifest calls process_haruhi_line(line, hint, rules="v3") per line.
+    """Label rules v3 give the units the v3 manifest is built with.
+
+    main.py --label_rules v3 (FA_KARA_LABEL_RULES=v3 forwards en/de/fr); the manifest calls
+    process_haruhi_line(line, hint, rules="v3") per line.
     """
     from worker.kara.aligner import align
 

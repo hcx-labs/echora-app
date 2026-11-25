@@ -92,6 +92,8 @@ def code_identity() -> str:
 
 @dataclass(frozen=True)
 class ModalConfig:
+    """What a Modal session needs: credentials, the GPU, the image and the Hugging Face token."""
+
     token_id: str
     token_secret: str
     gpu: str

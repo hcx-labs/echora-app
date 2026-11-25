@@ -1,3 +1,5 @@
+"""Chromaprint fingerprints, and grouping songs that are the same recording."""
+
 from __future__ import annotations
 
 import json

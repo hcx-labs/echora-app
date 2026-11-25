@@ -628,8 +628,10 @@ def test_worker_is_replaced_when_the_text_head_is_needed(monkeypatch, tmp_path):
 def test_lyrics_without_a_language_ask_the_aligner_to_identify_them(
     monkeypatch, tmp_path, language, detects
 ):
-    """A known language the normalizer has no rules for ("es") stays on the generic path; only a
-    missing one is identified by the aligner, which would otherwise spell English letter by letter.
+    """A known language without normalizer rules ("es") stays on the generic path.
+
+    Only a missing one is identified by the aligner, which would otherwise spell English letter by
+    letter.
     """
     monkeypatch.setenv("HF_HOME", str(tmp_path))
     reset_config_cache()

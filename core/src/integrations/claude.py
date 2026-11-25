@@ -16,7 +16,9 @@ DEFAULT_BASE_URL = "https://api.anthropic.com"
 
 
 class ClaudeError(Exception):
-    """`code` is one of: missing_key, endpoint_failure, transport_failure, refusal,
+    """A failed Claude request, by code.
+
+    `code` is one of: missing_key, endpoint_failure, transport_failure, refusal,
     incomplete_response, invalid_response.
     """
 

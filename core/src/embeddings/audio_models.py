@@ -1,3 +1,5 @@
+"""Audio embedding models (MuQ-MuLan and MERT) over fixed-length windows of a song."""
+
 from __future__ import annotations
 
 import gc
@@ -11,6 +13,8 @@ import torch
 
 @dataclass(frozen=True)
 class EmbeddingResult:
+    """A song's aggregate vector, its per-window vectors and what computing them cost."""
+
     vector: np.ndarray
     inference_ms: int
     peak_vram_bytes: int | None
@@ -37,6 +41,8 @@ def release_model(model: object) -> None:
 
 
 class AudioEmbeddingModel(ABC):
+    """A model that embeds mono windows of a song (``window_seconds`` at ``sample_rate``)."""
+
     name: str
     revision: str
     sample_rate = 24_000
@@ -48,6 +54,8 @@ class AudioEmbeddingModel(ABC):
 
 
 class MuQMuLanModel(AudioEmbeddingModel):
+    """MuQ-MuLan: music embeddings in a space shared with text."""
+
     name = "muq_mulan"
 
     def __init__(self, model_id: str, revision: str, device: str) -> None:
@@ -79,6 +87,8 @@ class MuQMuLanModel(AudioEmbeddingModel):
 
 
 class MertModel(AudioEmbeddingModel):
+    """MERT: acoustic music embeddings."""
+
     name = "mert"
 
     def __init__(self, model_id: str, revision: str, device: str) -> None:

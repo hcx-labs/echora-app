@@ -1,3 +1,5 @@
+"""Ranking a curation's candidate tracks from its prompts, examples and sound profile."""
+
 from __future__ import annotations
 
 import random

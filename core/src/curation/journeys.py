@@ -1,3 +1,5 @@
+"""Sonic journeys: interpolated targets between songs and the tracks picked along them."""
+
 from __future__ import annotations
 
 import numpy as np

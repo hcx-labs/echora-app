@@ -38,6 +38,8 @@ IMPOSSIBLE = -1e4  # score of a token column that does not belong to the voice
 
 @dataclass
 class TextAlignerConfig:
+    """Sizes of the text head."""
+
     frame_dim: int = 1024  # encoder hidden size (omniASR-300M)
     letter_dim: int = (
         30  # the encoder's CTC letter log-probabilities, appended to each frame (0: off)
@@ -77,7 +79,9 @@ WINDOW_OVERLAP_FRAMES = 250
 def frame_windows(
     frames: int, window: int = TRAINING_WINDOW_FRAMES, overlap: int = WINDOW_OVERLAP_FRAMES
 ):
-    """Windows of at most ``window`` frames covering ``frames``, neighbours sharing ``overlap``:
+    """Overlapping windows covering a sequence of frames.
+
+    Windows of at most ``window`` frames covering ``frames``, neighbours sharing ``overlap``:
     ``[(piece, keep), ...]`` with ``piece`` the slice to run and ``keep`` the slice of its output to
     use (half the overlap on each side), so the kept parts concatenate to exactly ``frames``.
     """
@@ -119,6 +123,8 @@ class TokenEmbedding(nn.Module):
 
 
 class CrossLayer(nn.Module):
+    """Self-attention over frames, cross-attention to the text, then a feed-forward block."""
+
     def __init__(self, config: TextAlignerConfig):
         super().__init__()
         d, h = config.dim, config.heads
@@ -231,7 +237,9 @@ class TextAligner(nn.Module):
         self.letter_scale = nn.Parameter(torch.ones(2))
 
     def encode_text(self, letters, voice, text_padding, line=None, position=None):
-        """Letters [B, N, L], voice [B, N] (0 lead / 1 backing), text_padding [B, N] (True = pad);
+        """The text encoder's states of the song's tokens.
+
+        Letters [B, N, L], voice [B, N] (0 lead / 1 backing), text_padding [B, N] (True = pad);
         ``line`` / ``position`` [B, N] (line index, position in the line) with ``line_embeddings``.
         """
         positions = torch.arange(letters.shape[1], device=letters.device).expand(letters.shape[:2])
@@ -255,7 +263,9 @@ class TextAligner(nn.Module):
         line=None,
         position=None,
     ):
-        """Per voice: ``combined`` [B, T, 1 + N] log-probabilities over [none, every token] (what the
+        """Per-voice log-probabilities over the song's tokens.
+
+        Per voice: ``combined`` [B, T, 1 + N] log-probabilities over [none, every token] (what the
         decoders read), and with ``factorized`` also ``singing`` logits [B, T] and ``token`` log-probs
         [B, T, N] (normalised over that voice's tokens only).
         """
@@ -316,7 +326,9 @@ class TextAligner(nn.Module):
         line=None,
         position=None,
     ):
-        """(lead, backing) log-probabilities [B, T, 1 + N] over [none, every token of the song]; a voice's
+        """Lead and backing log-probabilities over the song's tokens.
+
+        (lead, backing) log-probabilities [B, T, 1 + N] over [none, every token of the song]; a voice's
         column j + 1 is ~IMPOSSIBLE unless token j belongs to that voice (and is not padding).
         """
         parts = self.forward_parts(
@@ -326,7 +338,9 @@ class TextAligner(nn.Module):
 
 
 def forward_sum_loss(log_probs, sequences, lengths, frames):
-    """CTC over token columns (blank = column 0, "none"), mean over windows with targets (RAD-TTS
+    """Forward-sum CTC loss over token columns.
+
+    CTC over token columns (blank = column 0, "none"), mean over windows with targets (RAD-TTS
     forward-sum). ``sequences`` [B, S] padded token columns, ``lengths`` [B].
     """
     rows = (lengths > 0).nonzero(as_tuple=True)[0]
@@ -355,7 +369,9 @@ def voice_loss(
     regions=None,
     region_loss=None,
 ):
-    """One voice's loss: factorized = BCE(singing) + CE(token | singing frames) + fs_weight x forward-sum;
+    """The loss of one voice.
+
+    One voice's loss: factorized = BCE(singing) + CE(token | singing frames) + fs_weight x forward-sum;
     otherwise CE over [none, tokens] + fs_weight x forward-sum. ``targets`` [B, T]: -100 ignore, 0 none,
     1 + j token column. Returns (loss, parts dict of floats).
 
@@ -481,7 +497,9 @@ def decode_voice(
     minimum_frames: list[int] | None = None,
     in_line_gap_cost: float = 0.0,
 ):
-    """Token spans of one voice from its output [T, 1 + N] (one song): the existing monotonic Viterbi
+    """Token spans of one voice from the text head's output.
+
+    Token spans of one voice from its output [T, 1 + N] (one song): the existing monotonic Viterbi
     (``ctc_segmentation.align_with_minimum_durations``) with one "letter" per token, the token's own
     column as its emission and column 0 ("none") as the blank. ``columns`` are the voice's token columns
     (1 + text index) in text order; ``line_ranges`` index into ``columns`` (for the in-line gap cost).

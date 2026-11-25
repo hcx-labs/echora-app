@@ -1,3 +1,5 @@
+"""Downloads the pinned models analysis needs (``python -m worker.models.download``)."""
+
 import argparse
 import hashlib
 import json

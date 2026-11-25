@@ -1,3 +1,5 @@
+"""SQLAlchemy models of the tables the backend reads and writes through the ORM."""
+
 from __future__ import annotations
 
 import uuid
@@ -11,6 +13,8 @@ from core.db.session import Base
 
 
 class User(Base):
+    """An Echora user account."""
+
     __tablename__ = "users"
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
@@ -29,6 +33,8 @@ class User(Base):
 
 
 class UserPreference(Base):
+    """A user's stored preferences."""
+
     __tablename__ = "user_preferences"
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
@@ -45,6 +51,8 @@ class UserPreference(Base):
 
 
 class UserSession(Base):
+    """A signed-in session, stored by the hash of its token."""
+
     __tablename__ = "user_sessions"
     token_hash: Mapped[str] = mapped_column(Text, primary_key=True)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -58,6 +66,8 @@ class UserSession(Base):
 
 
 class OidcSetting(Base):
+    """The single row of OpenID Connect sign-in settings."""
+
     __tablename__ = "oidc_settings"
     singleton: Mapped[bool] = mapped_column(Boolean, primary_key=True, default=True)
     auto_provision: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -65,6 +75,8 @@ class OidcSetting(Base):
 
 
 class OidcAllowedEmail(Base):
+    """An email address allowed to sign in with OpenID Connect."""
+
     __tablename__ = "oidc_allowed_emails"
     email: Mapped[str] = mapped_column(Text, primary_key=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
@@ -74,6 +86,8 @@ class OidcAllowedEmail(Base):
 
 
 class NavidromeConnection(Base):
+    """A user's connection to a Navidrome server."""
+
     __tablename__ = "navidrome_connections"
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
@@ -92,6 +106,8 @@ class NavidromeConnection(Base):
 
 
 class Track(Base):
+    """A canonical track, identified by the hash of its audio."""
+
     __tablename__ = "tracks"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     audio_hash: Mapped[str] = mapped_column(Text, unique=True)
@@ -108,6 +124,8 @@ class Track(Base):
 
 
 class Curation(Base):
+    """A saved curation: its recipe, track limits and refresh schedule."""
+
     __tablename__ = "curations"
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()

@@ -1,3 +1,5 @@
+"""Predefined curation concepts, prompt expansion and text-concept scoring."""
+
 from __future__ import annotations
 
 import threading

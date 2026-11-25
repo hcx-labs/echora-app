@@ -33,11 +33,11 @@ _PUBLIC = (
 
 
 class CalibrationDisabled(ValueError):
-    pass
+    """Recording calibration is switched off."""
 
 
 class TrackUnavailable(ValueError):
-    pass
+    """A calibration song cannot be read."""
 
 
 def enabled() -> bool:

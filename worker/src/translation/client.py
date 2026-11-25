@@ -88,7 +88,9 @@ def translate(
     transport=None,
     mixed: bool = False,
 ) -> list[dict]:
-    """``mixed``: ``lines`` are a song in ``pair.target`` with some lines in other languages; any
+    """Translate a song's lines for a language pair through the external AI.
+
+    ``mixed``: ``lines`` are a song in ``pair.target`` with some lines in other languages; any
     configured pair into that target allows it.
     """
     if not settings.enabled:

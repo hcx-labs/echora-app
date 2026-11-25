@@ -34,6 +34,8 @@ def get_check():
 
 
 class AudioArtifactCache:
+    """Decoded and separated audio on disk, keyed by source bytes and recipe, size- and age-bounded."""
+
     def __init__(self, directory=None, *, max_bytes=None, ttl_seconds=None, check=None):
         self.directory = Path(directory or PreprocessConfig.load().dir)
         self.max_bytes = int(

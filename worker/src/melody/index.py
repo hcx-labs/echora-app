@@ -1,4 +1,6 @@
 # ruff: noqa: E402 - NUMBA_CACHE_DIR must be set before librosa is imported.
+"""Melody contours of songs and the hum search over them."""
+
 from __future__ import annotations
 
 import hashlib

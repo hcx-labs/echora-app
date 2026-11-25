@@ -46,6 +46,8 @@ class SoundProfile(BaseModel):
 
 
 class CurationRecipe(BaseModel):
+    """What a curation asks for: its type, prompts, examples, weights and sound profile."""
+
     curation_type: str = Field(
         default="combined", pattern="^(combined|language|examples|time_of_day|sonic_journey)$"
     )

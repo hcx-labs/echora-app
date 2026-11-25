@@ -1,3 +1,5 @@
+"""Audio profiles: a song's sections and recurring modes from its embedding windows."""
+
 from __future__ import annotations
 
 import hashlib
@@ -30,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class WindowVector:
+    """One embedding window of a song and its time range."""
+
     index: int
     start_seconds: float
     end_seconds: float
@@ -46,6 +50,8 @@ class WindowVector:
 
 @dataclass(frozen=True)
 class TemporalSegment:
+    """A run of consecutive windows that sound alike: a section of the song."""
+
     index: int
     start_seconds: float
     end_seconds: float
@@ -56,12 +62,16 @@ class TemporalSegment:
 
 @dataclass(frozen=True)
 class ModeInterval:
+    """A time range in which a musical mode plays."""
+
     start_seconds: float
     end_seconds: float
 
 
 @dataclass(frozen=True)
 class MusicalMode:
+    """A sound the song returns to, with the intervals where it plays."""
+
     index: int
     vector: np.ndarray
     duration_weight: float
@@ -72,6 +82,8 @@ class MusicalMode:
 
 @dataclass(frozen=True)
 class TrackAudioProfile:
+    """A song's audio profile: its overall vectors, how it changes, its sections and modes."""
+
     global_overlap: np.ndarray
     global_decorrelated: np.ndarray
     resultant_length: float

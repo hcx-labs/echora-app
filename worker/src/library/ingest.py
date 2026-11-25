@@ -1,3 +1,5 @@
+"""Navidrome ingest: resolves songs to tracks, then runs the analysis phases they need."""
+
 from __future__ import annotations
 
 import hashlib
@@ -44,6 +46,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class IngestSummary:
+    """What an ingest batch did, counted per phase."""
+
     requested: int = 0
     discovered: int = 0
     downloaded: int = 0
@@ -352,8 +356,9 @@ class _SongPhase(Processor[None, SongItem, Any]):
 
 
 class IdentityPhase(_SongPhase):
-    """Resolves each song to a canonical track from its bytes (or, without hash checks, from its
-    known source), and binds later phases to those bytes.
+    """Resolves each song to a canonical track and binds later phases to its bytes.
+
+    The track comes from the song's bytes or, without hash checks, from its known source.
     """
 
     name = "identity"
@@ -490,6 +495,8 @@ def _prepare_audio(context: ProcessingContext, batch: IngestBatch, plan) -> None
 
 
 class WaveformPhase(_SongPhase):
+    """Stores the waveform peaks the player draws for each selected song."""
+
     name = "waveform"
     summary_key = "waveform"
     counters = ("waveforms_generated",)
@@ -504,6 +511,8 @@ class WaveformPhase(_SongPhase):
 
 
 class VisualFeaturePhase(_SongPhase):
+    """Stores the visualizer's features for each selected song."""
+
     name = "visual_features"
     summary_key = "visual_features"
     counters = ("visual_features_generated",)
@@ -657,8 +666,9 @@ class EmbeddingPhase(_SongPhase):
 
 
 class MelodyPhase(_SongPhase):
-    """Extracts melody contours for the hum search (on Modal in one separation and one
-    extraction call).
+    """Extracts melody contours for the hum search.
+
+    On Modal: one separation call and one extraction call for the whole phase.
     """
 
     name = "melody"
@@ -809,8 +819,9 @@ class RecordingIndexPhase(_SongPhase):
 
 
 class DescriptorPhase(_SongPhase):
-    """Measures the selected songs' sound descriptors. A partial measurement is stored and
-    counted as failed.
+    """Measures the selected songs' sound descriptors.
+
+    A partial measurement is stored and counted as failed.
     """
 
     name = "audio_descriptors"

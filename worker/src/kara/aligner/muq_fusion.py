@@ -57,7 +57,9 @@ DEFAULT_LAYER = 11
 
 
 class _Captured(Exception):
-    """Raised by the deepest wanted hook so the conformer stops there (blocks past the fused
+    """Stops the MuQ conformer at the deepest hooked block.
+
+    Raised by the deepest wanted hook so the conformer stops there (blocks past the fused
     layer are never run).
     """
 
@@ -69,7 +71,9 @@ LORA_PREFIX = "fusion_lora."
 
 
 def muq_frame_count(samples_24k: int) -> int:
-    """MuQ frames for ``samples_24k`` input samples: floor(N / 240) mel frames (centred STFT
+    """The number of MuQ frames for an input length at 24 kHz.
+
+    MuQ frames for ``samples_24k`` input samples: floor(N / 240) mel frames (centred STFT
     minus the dropped last frame), then ceil(n / 2) twice.
     """
     mel = samples_24k // MUQ_HOP
@@ -117,7 +121,9 @@ LORA_TARGETS = {"qv": ("self_attn.linear_q", "self_attn.linear_v"), "qv_ffn": tu
 def lora_config(
     rank: int, alpha: float, layers: int, fused_layer: int, targets: str = "qv"
 ) -> dict:
-    """LoRA record: blocks ``fused_layer - layers + 1 .. fused_layer`` (1-based conformer blocks; the
+    """The LoRA adapters' placement in MuQ's conformer.
+
+    LoRA record: blocks ``fused_layer - layers + 1 .. fused_layer`` (1-based conformer blocks; the
     final-norm layer 13 counts as block 12), ``targets`` "qv" or "qv_ffn".
     """
     top = min(int(fused_layer), MUQ_BLOCKS)
@@ -153,7 +159,9 @@ class LoRALinear(torch.nn.Module):
 
 
 class MuQLoRA(torch.nn.Module):
-    """All LoRA adapters of one fusion checkpoint (saved as ``fusion_lora.*``). ``attach`` hooks them
+    """The LoRA adapters of one fusion checkpoint.
+
+    All LoRA adapters of one fusion checkpoint (saved as ``fusion_lora.*``). ``attach`` hooks them
     onto a ``MuQBranch``; the branch then runs with gradients through them while training.
     """
 
@@ -211,7 +219,9 @@ def to_frame_clock(
     source_stride_seconds: float = MUQ_STRIDE_SECONDS,
     source_offset_seconds: float = MUQ_OFFSET_SECONDS,
 ) -> torch.Tensor:
-    """Sample ``features`` (B, T, D) on ``source`` frame centres at the ``frames`` centres of the
+    """Features resampled onto another frame clock.
+
+    Sample ``features`` (B, T, D) on ``source`` frame centres at the ``frames`` centres of the
     target clock (``offset + k * stride``) by linear interpolation, clamped at both ends.
     """
     count = features.shape[1]
@@ -227,7 +237,9 @@ def to_frame_clock(
 
 
 class FusionAdapter(torch.nn.Module):
-    """The trained part of the fusion: projection of the MuQ layer plus a zero-initialised gate
+    """The MuQ fusion adapter: a projection and a zero-initialised gate.
+
+    The trained part of the fusion: projection of the MuQ layer plus a zero-initialised gate
     (one scalar, or one value per hidden channel). Saved in the checkpoint as ``fusion.*``.
     """
 
@@ -252,7 +264,9 @@ class FusionAdapter(torch.nn.Module):
 
 
 class MuQBranch:
-    """The frozen MuQ encoder with hooks on its conformer blocks. Not an ``nn.Module`` on purpose:
+    """The frozen MuQ encoder, hooked on its conformer blocks.
+
+    The frozen MuQ encoder with hooks on its conformer blocks. Not an ``nn.Module`` on purpose:
     attached to the aligner outside its module tree so it is never trained, saved or moved by
     the Trainer (``AlignerMixin.attach_fusion_backbone``).
     """
@@ -319,7 +333,9 @@ class MuQBranch:
         layers: tuple[int, ...] | list[int] = (MUQ_FINAL_LAYER,),
         sample_rate: int = 16_000,
     ) -> dict[int, torch.Tensor]:
-        """MuQ hidden states (float32, B x T x 1024) of ``layers`` for a batch of raw 16 kHz
+        """MuQ hidden states of the given layers for a batch of 16 kHz audio.
+
+        MuQ hidden states (float32, B x T x 1024) of ``layers`` for a batch of raw 16 kHz
         mono waveforms (B x L, zero-padded; ``lengths_16k`` marks the valid samples). The
         aligner path always passes 16 kHz audio; ``sample_rate`` exists for the layer probe's
         native-24 kHz comparison only.
@@ -371,7 +387,9 @@ class MuQBranch:
             self.wanted = set()
 
     def _encode(self, wave: torch.Tensor, sample_rate: int) -> dict[int, torch.Tensor]:
-        """``MuQModel.get_predictions`` without its ``hidden_states`` return (transformers >= 5
+        """MuQ's predictions without the hidden states it no longer returns.
+
+        ``MuQModel.get_predictions`` without its ``hidden_states`` return (transformers >= 5
         no longer hands them back from the bare conformer encoder; the hooks collect them).
         """
         import torchaudio
@@ -439,7 +457,9 @@ def fusion_term(
     stride_seconds: float,
     offset_seconds: float,
 ) -> torch.Tensor | None:
-    """What is added to the aligner's hidden state (B x frames x hidden), or None when the
+    """The fusion term added to the aligner's hidden state.
+
+    What is added to the aligner's hidden state (B x frames x hidden), or None when the
     adapter is forced to zero (ablation) and the plain model is wanted bit for bit.
     """
     if adapter.force_zero:

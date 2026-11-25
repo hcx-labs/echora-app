@@ -43,6 +43,8 @@ def stalled_segments(text):
 
 
 class WindowDecodeError(ValueError):
+    """A window's transcript could not be decoded; ``tokens`` counts what was generated."""
+
     def __init__(self, message, tokens=0):
         super().__init__(message)
         self.tokens = tokens

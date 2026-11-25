@@ -1,3 +1,8 @@
+"""Listening history.
+
+Last.fm listens and top tracks, Navidrome play counts, and matching them to the library.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -17,6 +22,8 @@ from core.integrations.config import LastfmConfig
 
 @dataclass(frozen=True)
 class Listen:
+    """One scrobbled play from Last.fm."""
+
     artist: str
     title: str
     played_at: datetime
@@ -130,6 +137,8 @@ def track_listen_counts(
 
 @dataclass(frozen=True)
 class TopTrack:
+    """A track of a Last.fm top-tracks chart, with its play count for the period."""
+
     artist: str
     title: str
     play_count: int

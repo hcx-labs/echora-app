@@ -44,6 +44,8 @@ FIELDS = (
 
 
 class MotionArtworkSettings(BaseModel):
+    """Motion artwork settings as stored, with their defaults."""
+
     enabled: bool = False
     # Blank starts the worker's embedded ComfyUI (or ECHORA_COMFYUI_URL when set).
     comfyui_url: str = Field("", max_length=500)

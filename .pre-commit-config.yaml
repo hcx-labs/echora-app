@@ -15,4 +15,5 @@ repos:
     rev: v0.15.6
     hooks:
       # Each file takes its nearest Ruff config: ruff.toml at the root.
+      - id: ruff-check
       - id: ruff-format
