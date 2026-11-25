@@ -95,8 +95,10 @@ worker/src/
   curation/        curation refresh (scheduled worker)
 ```
 
-Each domain package has `README.md` (algorithm and design), `config.py`, `errors.py`,
-`processor.py` and the implementation modules it needs.
+Each domain package has `README.md` (algorithm and design), and as it needs them `config.py`,
+`errors.py` (its exceptions, under `core.errors`), its processors (in `pipeline.py`, or a module
+named for the work, such as `library/ingest.py` and `melody/corpus.py`) and the implementation
+modules. `worker/README.md` indexes the domains.
 
 ### backend (`backend`)
 
