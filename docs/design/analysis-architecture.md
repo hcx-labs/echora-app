@@ -368,8 +368,9 @@ what it removed. Found so far:
 - the per-router `require_user`/`admin` factories and the duplicate request and redacting route
   classes of the settings routers.
 
-Kept for a decision: the `*_backfill` routes (`lyrics`, `voice`, `karaoke`, `recordings`) have no
-caller in the web app. They may be operator tools.
+Kept as operator tools: the backfill routes (`lyrics`, `voice`, `karaoke`, `recordings`) have no
+caller in the web app and are restricted to administrators
+(`backend/src/api/v1/sync/README.md`).
 
 ## Non-goals
 

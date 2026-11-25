@@ -90,6 +90,7 @@ def test_sync_validates_its_body(client, owned, enqueue, body):
     ],
 )
 def test_backfills_queue_one_job_per_connection(client, user, enqueue, owned, name, kind):
+    user["is_admin"] = True
     connection_id = str(uuid4())
     response = client.post(f"/api/v1/sync/connections/{connection_id}/backfills/{name}")
     assert response.status_code == 202
@@ -99,6 +100,14 @@ def test_backfills_queue_one_job_per_connection(client, user, enqueue, owned, na
         "payload": {},
         "dedupe_key": f"{kind}:{user['id']}:{connection_id}",
     }
+
+
+@pytest.mark.parametrize("name", ["recordings", "lyrics", "voice", "karaoke"])
+def test_backfills_are_for_administrators_only(client, enqueue, owned, name):
+    response = client.post(f"/api/v1/sync/connections/{uuid4()}/backfills/{name}")
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Administrator access is required"}
+    enqueue.assert_not_called()
 
 
 def test_import_dedupes_the_same_selection(client, user, enqueue, owned):

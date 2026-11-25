@@ -68,6 +68,8 @@ redirect URI change with the release (`…/api/v1/auth/oidc/callback`).
 
 Connections, imports, full syncs and the library-wide rebuilds a user starts.
 
+The four backfills are now for administrators only (any signed-in user before).
+
 | Old | New | File |
 | --- | --- | --- |
 | `POST /navidrome/discover` | `POST /api/v1/sync/discover` | `sync/discover.py` |

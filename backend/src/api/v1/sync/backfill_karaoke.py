@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import Depends
 
-from backend.api.deps import SessionUser, current_user
+from backend.api.deps import SessionUser, admin_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import JobSnapshot
 from backend.sync.connections import enqueue_connection_job
@@ -18,5 +18,5 @@ class KaraokeBackfill(Endpoint):
     response = JobSnapshot
     status_code = 202
 
-    def handle(self, connection_id: str, user: SessionUser = Depends(current_user)) -> dict:
+    def handle(self, connection_id: str, user: SessionUser = Depends(admin_user)) -> dict:
         return enqueue_connection_job("karaoke_backfill", connection_id, user)
