@@ -1,23 +1,18 @@
-"""w2v-BERT (Sylla-600M) support in the vendored FA-Kara aligner: the exact frame clock per
+"""w2v-BERT (Sylla-600M) support in the karaoke aligner: the exact frame clock per
 backbone, the auxiliary heads and the activity source, with the wav2vec2 path unchanged."""
 
 import json
-import sys
-from pathlib import Path
 
 import pytest
 
 torch = pytest.importorskip("torch")
 
-VENDOR = Path(__file__).resolve().parents[2] / "src" / "kara" / "vendor" / "fa_kara"
-sys.path.insert(0, str(VENDOR))
-
-from ctc_segmentation import (
+from worker.kara.aligner.ctc import (  # noqa: E402 - after the torch skip
     conv_frame_count,
     frame_count,
     stitched_frame_times,
     w2v_bert_frame_count,
-)  # noqa: E402
+)
 
 SR = 16000
 
@@ -55,7 +50,7 @@ def test_exact_clock_per_backbone_keeps_the_stride_and_moves_the_centre():
 
 
 def test_pitch_from_f0_logits_decodes_voicing_and_the_best_bin():
-    from align_yohane import F0_BINS, pitch_from_f0_logits
+    from worker.kara.aligner.decoder import F0_BINS, pitch_from_f0_logits
 
     logits = torch.full((3, 1 + F0_BINS), -5.0)
     logits[0, 0] = 5.0  # voiced
@@ -71,7 +66,7 @@ def test_pitch_from_f0_logits_decodes_voicing_and_the_best_bin():
 def test_aux_heads_load_from_the_checkpoint_directory(tmp_path):
     from safetensors.torch import save_file
 
-    from align_yohane import AUX_HEADS_FILE, _load_aux_heads
+    from worker.kara.aligner.decoder import AUX_HEADS_FILE, _load_aux_heads
 
     assert _load_aux_heads(str(tmp_path), 8) is None  # no file: no heads, no error
     state = {
@@ -92,7 +87,7 @@ def test_aux_heads_load_from_the_checkpoint_directory(tmp_path):
 
 
 def test_vad_activity_is_scaled_like_the_energy_activity():
-    from align_yohane import Wav2Vec2ForcedAligner
+    from worker.kara.aligner.decoder import Wav2Vec2ForcedAligner
 
     aligner = Wav2Vec2ForcedAligner.__new__(Wav2Vec2ForcedAligner)
     aligner.last_vad_logits = None
@@ -107,7 +102,7 @@ def test_vad_activity_is_scaled_like_the_energy_activity():
 
 
 def test_activity_source_is_validated():
-    from align_yohane import VOCAL_ACTIVITY_SOURCES, align_audio_with_timeline
+    from worker.kara.aligner.decoder import VOCAL_ACTIVITY_SOURCES, align_audio_with_timeline
 
     assert VOCAL_ACTIVITY_SOURCES == ("energy", "vad", "external")
     with pytest.raises(ValueError):

@@ -83,7 +83,7 @@ worker/src/
   embedding/       audio embeddings, descriptors, visual features
   lyrics/          retrieval and lyrics embeddings
   transcription/   AI lyrics (MOSS), timing repair, External AI refinement
-  kara/            karaoke alignment (FA-Kara, vendored aligner under kara/vendor/)
+  kara/            karaoke alignment; the aligner itself under kara/aligner/ (began as FA-Kara)
   translation/     lyric translation
   themes/          lyric theme descriptions
   voice/           voice classification

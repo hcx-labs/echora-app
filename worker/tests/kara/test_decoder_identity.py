@@ -3,15 +3,14 @@
 import ast
 import os
 from pathlib import Path
-import sys
 from types import SimpleNamespace
 import unittest
 
 import torch
 
-VENDOR = Path(__file__).resolve().parents[2] / "src" / "kara" / "vendor" / "fa_kara"
-sys.path.insert(0, str(VENDOR))
-import ctc_segmentation as ctc
+from worker.kara.aligner import ctc
+
+ALIGNER = Path(__file__).resolve().parents[2] / "src" / "kara" / "aligner"
 
 
 class DecoderIdentityTests(unittest.TestCase):
@@ -51,7 +50,7 @@ class DecoderIdentityTests(unittest.TestCase):
 
     def decode_lead(self, **overrides):
         # Execute the production closure without loading model/audio dependencies.
-        tree = ast.parse((VENDOR / "align_yohane.py").read_text())
+        tree = ast.parse((ALIGNER / "decoder.py").read_text())
         node = next(
             n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_decode_lead"
         )
@@ -82,7 +81,7 @@ class DecoderIdentityTests(unittest.TestCase):
         env.update(overrides)
         exec(
             compile(
-                ast.Module(body=[node], type_ignores=[]), str(VENDOR / "align_yohane.py"), "exec"
+                ast.Module(body=[node], type_ignores=[]), str(ALIGNER / "decoder.py"), "exec"
             ),
             env,
         )

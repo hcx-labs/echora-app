@@ -30,11 +30,11 @@ dependencies = [
   "nltk==3.9.1",
   "numba==0.67.0",
   "numpy==2.5.2",
-  # Shared lyric normalizer (vendor/fa_kara/script_romanization.py): Mandarin, Cantonese, Thai.
+  # Shared lyric normalizer (worker/src/kara/aligner/romanization.py): Mandarin, Cantonese, Thai.
   "OpenCC==1.4.2",
   "ToJyutping==3.2.0",
   "pythainlp==5.4.0",
-  # Label rules v2 and later (vendor/fa_kara/label_rules.py; v3-sung is the default): en/de/fr
+  # Label rules v2 and later (worker/src/kara/aligner/label_rules.py; v3-sung is the default): en/de/fr
   # pronunciation labels via espeak-ng (apt package in docker/Dockerfile.*; GPL-3.0, phonemizer GPL-3.0)
   # and number words (num2words, LGPL-2.1). Imported lazily: v1 never loads them.
   "num2words==0.5.14",

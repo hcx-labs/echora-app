@@ -1,7 +1,6 @@
 from core.config import reset_config_cache
 
 import io
-import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,14 +11,16 @@ import pytest
 import soundfile as sf
 
 import worker.kara.pipeline as pipeline
+from worker.kara.aligner.request import AlignRequest
 
 from worker.kara.pipeline import (
     _stored_model_revision,
     apply_adaptive_line_padding,
     build_lines_from_alignment_document,
     _validate_alignment_document,
-    parse_ass_karaoke,
 )
+
+REQUEST = AlignRequest(audio_path="i.audio", text="Hello", model_path="model")
 
 
 def test_stored_model_revision_tracks_the_audio_input(monkeypatch):
@@ -38,23 +39,6 @@ def test_stored_model_revision_tracks_the_audio_input(monkeypatch):
     )
 
 
-def test_parse_ass_karaoke_preserves_line_and_syllable_timing():
-    ass = (
-        "[Events]\n"
-        "Dialogue: 0,0:00:01.00,0:00:03.20,Default,,0,0,0,karaoke,{\\k20}{\\k50}Hel{\\k70}lo{\\k80}\n"
-    )
-
-    assert parse_ass_karaoke(ass) == [
-        {
-            "start_ms": 1000,
-            "end_ms": 3200,
-            "text": "Hello",
-            "syllables": [
-                {"start_ms": 1200, "end_ms": 1700, "text": "Hel"},
-                {"start_ms": 1700, "end_ms": 2400, "text": "lo"},
-            ],
-        }
-    ]
 
 
 def test_alignment_document_restores_punctuation_and_spaces_to_display_syllables():
@@ -122,8 +106,6 @@ def test_adaptive_padding_uses_real_silence_and_syllable_duration():
     assert result[1]["start_ms"] == 1900
 
 
-def test_parse_ass_karaoke_ignores_headers():
-    assert parse_ass_karaoke("[Script Info]\nTitle: example\n") == []
 
 
 def test_validate_alignment_document_accepts_monotonic_structured_output():
@@ -212,11 +194,8 @@ def test_worker_aligns_the_configured_audio_without_line_times(
 
     monkeypatch.setattr(pipeline, "_fa_kara_worker", lambda *args: object())
 
-    def job(worker, argv):
-        assert "--separate_vocals" not in argv
-        work = Path(argv[argv.index("--path_io") + 1])
-        input_path = Path(argv[argv.index("--input_audio") + 1])
-        assert "--reference_audio" not in argv
+    def job(worker, request):
+        input_path = Path(request.audio_path)
         if not separated:
             assert events == []
             assert input_path.read_bytes() == original
@@ -226,42 +205,34 @@ def test_worker_aligns_the_configured_audio_without_line_times(
             assert (info.samplerate, info.channels, info.subtype) == (16000, 1, "FLOAT")
             np.testing.assert_array_equal(sf.read(input_path)[0], -waveform)
         # Synced lines give the line text; their start times never reach the aligner.
-        assert (work / "i.txt").read_text() == "Hello\n"
-        assert "--timeline_json" not in argv and not (work / "timeline.json").exists()
+        assert request.text == "Hello"
         # The Echora Kara decoder defaults reach the aligner.
-        assert {"--exact_frame_clock", "--blank_free_tokens", "--background_decoding"} <= set(argv)
-        assert argv[argv.index("--label_rules") + 1] == "v3-sung"
-        assert argv[argv.index("--fusion") + 1] == "on"
+        assert request.exact_frame_clock and request.blank_free_tokens
+        assert request.background_decoding
+        assert (request.label_rules, request.fusion) == ("v3-sung", "on")
         # The mix recipe: onset-true timing, no loudness-based gap pull, inline backing placement.
-        assert argv[argv.index("--timing_offset_ms") + 1] == "0"
-        assert "--gap_onset_pull" not in argv and "--inline_backing" in argv
-        assert "--optional_brackets" not in argv
-        (work / "o.ass").write_text("")
-        (work / "o_ruby.lrc").write_text("")
-        (work / "o.alignment.json").write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "alignment": {
-                        "lines": [
+        assert request.timing_offset_ms == 0
+        assert not request.gap_onset_pull and request.inline_backing
+        assert not request.optional_brackets
+        return {"ok": True, "document": {
+            "schema_version": 1,
+            "alignment": {
+                "lines": [
+                    {
+                        "source_index": 0,
+                        "text": "Hello",
+                        "tokens": [
                             {
-                                "source_index": 0,
                                 "text": "Hello",
-                                "tokens": [
-                                    {
-                                        "text": "Hello",
-                                        "start_ms": 100,
-                                        "end_ms": 200,
-                                        "ctc_score": 0.9,
-                                    }
-                                ],
+                                "start_ms": 100,
+                                "end_ms": 200,
+                                "ctc_score": 0.9,
                             }
-                        ]
-                    },
-                }
-            )
-        )
-        return {"ok": True}
+                        ],
+                    }
+                ]
+            },
+        }}
 
     monkeypatch.setattr(pipeline, "_run_worker_job", job)
     result = pipeline._run_fa_kara(
@@ -319,8 +290,6 @@ def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch,
             },
             "model": "model",
             "model_revision": "revision",
-            "ass": "",
-            "lrc": "",
             "alignment_document": {},
         }
 
@@ -384,8 +353,6 @@ def test_backfill_aligns_the_original_mix_without_separating(monkeypatch):
             "diagnostics": {"audio_source": "original_mix", "separator_revision": None},
             "model": "model",
             "model_revision": "revision",
-            "ass": "",
-            "lrc": "",
             "alignment_document": {},
         }
 
@@ -423,18 +390,18 @@ def test_worker_response_checks_cancellation_and_reaps(monkeypatch, mode):
     try:
         if mode == "complete":
             os.write(writer, b'{"ok":true}\n')
-            assert pipeline._run_worker_job(worker, []) == {"ok": True}
+            assert pipeline._run_worker_job(worker, REQUEST) == {"ok": True}
             assert checks >= 2
             worker.kill.assert_not_called()
         elif mode == "partial_cancel":
             os.write(writer, b'{"ok":')
             with pytest.raises(Cancelled):
-                pipeline._run_worker_job(worker, [])
+                pipeline._run_worker_job(worker, REQUEST)
             worker.kill.assert_called_once()
             worker.wait.assert_called_once_with(timeout=5)
         else:
             with pytest.raises(TimeoutError):
-                pipeline._run_worker_job(worker, [], timeout=0)
+                pipeline._run_worker_job(worker, REQUEST, timeout=0)
             worker.kill.assert_called_once()
             worker.wait.assert_called_once_with(timeout=5)
     finally:
@@ -471,35 +438,27 @@ def test_local_model_path_overrides_snapshot(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline, "_fa_kara_worker", lambda *args: object())
     seen = {}
 
-    def job(worker, argv):
-        seen["model"] = argv[argv.index("--hf_model_path") + 1]
-        work = Path(argv[argv.index("--path_io") + 1])
-        (work / "o.ass").write_text("")
-        (work / "o_ruby.lrc").write_text("")
-        (work / "o.alignment.json").write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "alignment": {
-                        "lines": [
+    def job(worker, request):
+        seen["model"] = request.model_path
+        return {"ok": True, "document": {
+            "schema_version": 1,
+            "alignment": {
+                "lines": [
+                    {
+                        "source_index": 0,
+                        "text": "Hello",
+                        "tokens": [
                             {
-                                "source_index": 0,
                                 "text": "Hello",
-                                "tokens": [
-                                    {
-                                        "text": "Hello",
-                                        "start_ms": 100,
-                                        "end_ms": 200,
-                                        "ctc_score": 0.9,
-                                    }
-                                ],
+                                "start_ms": 100,
+                                "end_ms": 200,
+                                "ctc_score": 0.9,
                             }
-                        ]
-                    },
-                }
-            )
-        )
-        return {"ok": True}
+                        ],
+                    }
+                ]
+            },
+        }}
 
     monkeypatch.setattr(pipeline, "_run_worker_job", job)
     try:
@@ -686,13 +645,13 @@ def test_worker_environment_carries_the_decoder_weights(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline.subprocess, "Popen", popen)
     monkeypatch.setattr(pipeline, "_FA_KARA_WORKER", None)
     monkeypatch.setattr(pipeline, "_FA_KARA_WORKER_KEY", None)
-    worker = pipeline._fa_kara_worker(tmp_path, "revision")
+    worker = pipeline._fa_kara_worker("revision")
     assert (seen[0]["FA_KARA_TEXT_BONUS"], seen[0]["FA_KARA_IN_LINE_GAP_COST"]) == ("0.4", "0.2")
-    assert pipeline._fa_kara_worker(tmp_path, "revision") is worker and len(seen) == 1
+    assert pipeline._fa_kara_worker("revision") is worker and len(seen) == 1
     # A changed weight is a different decoder: the worker is replaced.
     monkeypatch.setenv("FA_KARA_TEXT_BONUS", "0.1")
     reset_config_cache()
-    assert pipeline._fa_kara_worker(tmp_path, "revision") is not worker
+    assert pipeline._fa_kara_worker("revision") is not worker
     assert seen[-1]["FA_KARA_TEXT_BONUS"] == "0.1" and "terminated" in seen
     reset_config_cache()
 
@@ -718,27 +677,20 @@ def test_lyrics_without_a_language_ask_the_aligner_to_identify_them(
     monkeypatch.setattr(pipeline, "_fa_kara_worker", lambda *args: object())
     seen = []
 
-    def job(worker, argv):
-        seen.append(argv)
-        work = Path(argv[argv.index("--path_io") + 1])
-        (work / "o.ass").write_text("")
-        (work / "o_ruby.lrc").write_text("")
+    def job(worker, request):
+        seen.append(request)
         line = {
             "source_index": 0,
             "text": "Hello",
             "tokens": [{"text": "Hello", "start_ms": 100, "end_ms": 200, "ctc_score": 0.9}],
         }
-        (work / "o.alignment.json").write_text(
-            json.dumps({"schema_version": 1, "alignment": {"lines": [line]}})
-        )
-        return {"ok": True}
+        return {"ok": True, "document": {"schema_version": 1, "alignment": {"lines": [line]}}}
 
     monkeypatch.setattr(pipeline, "_run_worker_job", job)
     pipeline._run_fa_kara(b"audio", "Hello", language, [], False)
-    argv = seen[0]
-    assert ("--detect_language" in argv) is detects
+    request = seen[0]
+    assert bool(request.detect_language) is detects
     if detects:
-        assert argv[argv.index("--lang") + 1] == "auto"
-        allowed = argv[argv.index("--detect_language") + 1].split(",")
-        assert {"en", "ja", "ko"} <= set(allowed)
+        assert request.language == "auto"
+        assert {"en", "ja", "ko"} <= set(request.detect_language)
     reset_config_cache()

@@ -478,7 +478,7 @@ def decode_voice(
     column as its emission and column 0 ("none") as the blank. ``columns`` are the voice's token columns
     (1 + text index) in text order; ``line_ranges`` index into ``columns`` (for the in-line gap cost).
     Returns one TokenSpan per token (start/end frames, mean probability)."""
-    from ctc_segmentation import align_with_minimum_durations
+    from worker.kara.aligner.ctc import align_with_minimum_durations
 
     groups = [[int(column)] for column in columns]
     spans = align_with_minimum_durations(

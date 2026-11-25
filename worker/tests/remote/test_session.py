@@ -562,8 +562,6 @@ def test_modal_batch_aligns_karaoke_remotely(monkeypatch, audio_input):
     monkeypatch.setattr(karaoke_pipeline.psycopg, "connect", Mock(return_value=connection))
     aligned = {
         "lines": [],
-        "ass": "",
-        "lrc": "",
         "alignment_document": {},
         "model": "m",
         "model_revision": "r",

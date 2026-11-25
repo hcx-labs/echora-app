@@ -7,16 +7,12 @@ an analysis image built before the v2 rollout).
 """
 
 import importlib.util
-import sys
-from pathlib import Path
 
 import pytest
 
-VENDOR = Path(__file__).resolve().parents[2] / "src" / "kara" / "vendor" / "fa_kara"
-sys.path.insert(0, str(VENDOR))
-import haruraw2norm as norm  # noqa: E402
-import korean_pronunciation  # noqa: E402
-import label_rules  # noqa: E402
+from worker.kara.aligner import normalize as norm  # noqa: E402
+from worker.kara.aligner import korean as korean_pronunciation  # noqa: E402
+from worker.kara.aligner import label_rules  # noqa: E402
 
 V2_READY = all(importlib.util.find_spec(name) for name in ("phonemizer", "num2words"))
 needs_v2 = pytest.mark.skipif(
@@ -91,17 +87,9 @@ def test_v2_pronunciation_labels():
 
 @needs_v2
 def test_main_normalize_source_lines_uses_the_rules():
-    import ast
-    import unicodedata
+    from worker.kara.aligner import align
 
-    path = VENDOR / "main.py"
-    node = next(
-        n
-        for n in ast.parse(path.read_text()).body
-        if isinstance(n, ast.FunctionDef) and n.name == "normalize_source_lines"
-    )
-    scope = {"hn": norm, "unicodedata": unicodedata, "korean_pronunciation": korean_pronunciation}
-    exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), scope)
+    scope = {"normalize_source_lines": align.normalize_source_lines}
     for language, line in [
         ("en", "In 1999 we were 21, ooh yeah"),
         ("fr", "J'avais ton âge"),
@@ -178,17 +166,9 @@ def test_v3_fixes():
 def test_v3_training_and_inference_units_identical():
     """main.py --label_rules v3 (FA_KARA_LABEL_RULES=v3 forwards en/de/fr) gives the units the v3
     manifest is built with: the manifest calls process_haruhi_line(line, hint, rules="v3") per line."""
-    import ast
-    import unicodedata
+    from worker.kara.aligner import align
 
-    path = VENDOR / "main.py"
-    node = next(
-        n
-        for n in ast.parse(path.read_text()).body
-        if isinstance(n, ast.FunctionDef) and n.name == "normalize_source_lines"
-    )
-    scope = {"hn": norm, "unicodedata": unicodedata, "korean_pronunciation": korean_pronunciation}
-    exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), scope)
+    scope = {"normalize_source_lines": align.normalize_source_lines}
     lines = {
         "en": [
             "I'm tryna get it, gettin' closer, close my eyes",

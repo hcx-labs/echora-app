@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import functools
-import importlib.util
 import logging
 import re
 import uuid
-from pathlib import Path
 
 import psycopg
 from psycopg.rows import dict_row
@@ -23,6 +20,7 @@ from core.lyrics.translations import (
     source_checksum,
 )
 from core.errors import ProcessingError
+from worker.kara.aligner import label_rules
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
 from worker.translation.client import translate
 
@@ -46,21 +44,11 @@ MIXED_MIN_LINES = 2
 MIXED_LID_CONFIDENCE = 0.7
 
 
-@functools.lru_cache(maxsize=1)
-def _label_rules():
-    """The aligner's per-line language rule (vendor/fa_kara/label_rules.py), loaded on first use."""
-    path = Path(__file__).resolve().parents[1] / "kara" / "vendor" / "fa_kara" / "label_rules.py"
-    spec = importlib.util.spec_from_file_location("echora_fa_kara_label_rules", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def foreign_lines(lines: list[str], language: str, sources: set[str]) -> list[int]:
     """Indexes of lines not in the song's language: the karaoke aligner's per-line rule
     (romanised Urdu, Hindi, Korean, ... that fastText cannot name), or fastText confident in a
     language that is translated from (Spanish lines it names but the rule reads as English)."""
-    rules = _label_rules()
+    rules = label_rules
     found = []
     for index, line in enumerate(lines):
         if not line.strip():

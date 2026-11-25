@@ -204,7 +204,7 @@ def test_foreign_lines_uses_the_rule_and_confident_lid(monkeypatch):
             "my broken pieces": ("pt", 0.85),
         }.get(text, ("en", 0.9)),
     )
-    monkeypatch.setattr(pipeline, "_label_rules", lambda: rules)
+    monkeypatch.setattr(pipeline, "label_rules", rules)
     lines = ["Mera bhi usse", "Y me cansé de luchar", "My broken pieces", "Hello there you", ""]
     # Portuguese is not translated from, so that guess is ignored.
     assert pipeline.foreign_lines(lines, "en", {"es", "ur"}) == [0, 1]

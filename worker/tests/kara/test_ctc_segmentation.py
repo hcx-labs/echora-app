@@ -1,13 +1,9 @@
-import sys
-from pathlib import Path
 
 import torch
 
-VENDOR = Path(__file__).resolve().parents[2] / "src" / "kara" / "vendor" / "fa_kara"
-sys.path.insert(0, str(VENDOR))
 
-from ctc_segmentation import align_ctc  # noqa: E402
-from align_yohane import _assign_ctc_blank_holds, _inference_chunk_starts  # noqa: E402
+from worker.kara.aligner.ctc import align_ctc  # noqa: E402
+from worker.kara.aligner.decoder import _assign_ctc_blank_holds, _inference_chunk_starts  # noqa: E402
 
 
 def test_ctc_blank_frames_extend_the_preceding_acoustic_token():
@@ -78,7 +74,7 @@ def test_impossible_alignment_fails_instead_of_returning_partial_output():
 
 
 def test_minimum_frames_counts_repeats_across_group_boundaries():
-    from ctc_segmentation import minimum_ctc_frames
+    from worker.kara.aligner.ctc import minimum_ctc_frames
 
     assert minimum_ctc_frames([]) == 0
     assert minimum_ctc_frames([[1, 2], [3]]) == 3
@@ -96,7 +92,7 @@ def test_repeated_targets_reject_windows_without_room_for_blanks():
 
 
 def test_minimum_durations_match_plain_ctc_at_one_frame_and_stop_cramming():
-    from ctc_segmentation import align_with_minimum_durations, token_minimum_frames
+    from worker.kara.aligner.ctc import align_with_minimum_durations
 
     blank, a, b, c = 0, 1, 2, 3
     # "a" is heard for frames 0-5; "b" and "c" only weakly at frames 6 and 7, then silence.
@@ -120,7 +116,7 @@ def test_minimum_durations_match_plain_ctc_at_one_frame_and_stop_cramming():
 
 
 def test_token_minimum_frames_give_extra_frames_to_vowels():
-    from ctc_segmentation import token_minimum_frames
+    from worker.kara.aligner.ctc import token_minimum_frames
 
     vowels = {1}
     # One group of three letters with a vowel in the middle; floor of 2 per letter, 9 per group.
@@ -130,7 +126,7 @@ def test_token_minimum_frames_give_extra_frames_to_vowels():
 
 
 def test_paced_minimum_frames_follow_each_lines_pace():
-    from ctc_segmentation import paced_minimum_frames
+    from worker.kara.aligner.ctc import paced_minimum_frames
     from torchaudio.functional import TokenSpan
 
     def spans(starts, length):
@@ -170,7 +166,7 @@ def test_paced_minimum_frames_follow_each_lines_pace():
 
 
 def test_vocal_activity_costs_only_letters_in_quiet_frames():
-    from ctc_segmentation import vocal_activity, with_vocal_activity
+    from worker.kara.aligner.ctc import vocal_activity, with_vocal_activity
 
     loud = torch.sin(torch.arange(320 * 10, dtype=torch.float32))  # 10 frames of signal
     waveform = torch.cat((torch.zeros(320 * 10), loud))
@@ -185,7 +181,7 @@ def test_vocal_activity_costs_only_letters_in_quiet_frames():
 
 
 def test_vocal_activity_reads_loudness_at_the_true_frame_times():
-    from ctc_segmentation import vocal_activity
+    from worker.kara.aligner.ctc import vocal_activity
 
     # Silence, then signal from 0.5 s. Stitched chunks drop a frame at each seam, so a late frame's
     # true time runs ahead of index x 20 ms: here every frame is 100 ms (5 frames) further on.
@@ -200,7 +196,7 @@ def test_vocal_activity_reads_loudness_at_the_true_frame_times():
 
 
 def test_optional_groups_leave_the_lead_path_only_when_they_cost_it_time():
-    from ctc_segmentation import align_with_minimum_durations
+    from worker.kara.aligner.ctc import align_with_minimum_durations
 
     blank, a, b, c, d = 0, 1, 2, 3, 4
     # Lead "a b" then "d" straight after; "(c)" is an echo sung over "d" (no frame hears c).
@@ -224,7 +220,7 @@ def test_optional_groups_leave_the_lead_path_only_when_they_cost_it_time():
 
 
 def test_optional_runs_at_the_song_edges_and_without_options_change_nothing():
-    from ctc_segmentation import align_with_minimum_durations
+    from worker.kara.aligner.ctc import align_with_minimum_durations
 
     blank, a, b, c = 0, 1, 2, 3
     emission = _emission([0, 2, 2, 0, 0, 0], vocabulary=4)

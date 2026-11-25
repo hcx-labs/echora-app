@@ -117,7 +117,7 @@ def test_generated_session_secret_is_stable_per_process():
         ("FusionConfig", {"weight_audio": float("nan")}),
         ("KaraConfig", {"audio_speed": 0}),
         ("KaraConfig", {"audio_speed": 1.51}),
-        ("KaraConfig", {"aligner": "unknown"}),
+        ("KaraConfig", {"label_rules": "unknown"}),
         ("KaraConfig", {"job_timeout_seconds": 0}),
         ("PreprocessConfig", {"max_bytes": -1}),
         ("PreprocessConfig", {"ttl_seconds": 0}),

@@ -25,7 +25,6 @@ class KaraConfig(EchoraConfig, env_prefix="ECHORA_KARA_"):
         description="A local checkpoint directory; overrides the model ID snapshot.",
     )
     audio_speed: float = compute(1.0, ge=0.5, le=1.5, legacy="FA_KARA_AUDIO_SPEED")
-    aligner: Literal["yohane", "mms"] = compute("yohane", legacy="FA_KARA_ALIGNER")
     min_letter_ms: int = compute(
         40,
         ge=0,
@@ -62,7 +61,7 @@ class KaraConfig(EchoraConfig, env_prefix="ECHORA_KARA_"):
     label_rules: LabelRules = compute(
         "v3-sung",
         legacy="FA_KARA_LABEL_RULES",
-        description="Label rules the model was trained with (vendor/fa_kara/label_rules.py).",
+        description="Label rules the model was trained with (worker/src/kara/aligner/label_rules.py).",
     )
     exact_frame_clock: bool = compute(True, legacy="FA_KARA_EXACT_FRAME_CLOCK")
     blank_free_tokens: bool = compute(True, legacy="FA_KARA_BLANK_FREE_TOKENS")

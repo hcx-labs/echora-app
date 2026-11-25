@@ -25,7 +25,7 @@ from transformers import (
     Wav2Vec2Processor,
 )
 
-from ctc_segmentation import (
+from worker.kara.aligner.ctc import (
     align_ctc,
     align_with_minimum_durations,
     onset_class,
@@ -168,7 +168,7 @@ class Wav2Vec2ForcedAligner(ForcedAligner):
         self._fusion_layer = 0
         fusion_record = getattr(self.model.config, "fusion", None)
         if fusion_record:
-            from muq_fusion import FUSION_MODES, MuQBranch, load_fusion_adapter, load_fusion_lora
+            from worker.kara.aligner.muq_fusion import FUSION_MODES, MuQBranch, load_fusion_adapter, load_fusion_lora
 
             if fusion not in FUSION_MODES:
                 raise ValueError(f"fusion must be one of {FUSION_MODES}")
@@ -380,13 +380,13 @@ class Wav2Vec2ForcedAligner(ForcedAligner):
 
         ``backing``: indexes of backing tokens; then returns ``(lead share, backing share)``, the second
         being the backing voice's log P(token | singing) of those tokens [frames, len(backing)]."""
-        from text_aligner import (
+        from worker.kara.aligner.text_aligner import (
             TRAINING_WINDOW_FRAMES,
             WINDOW_OVERLAP_FRAMES,
             collate_text,
             frame_windows,
         )
-        from song_text import lyric_tokens, text_features
+        from worker.kara.aligner.song_text import lyric_tokens, text_features
 
         window = TRAINING_WINDOW_FRAMES if window is None else window
         overlap = WINDOW_OVERLAP_FRAMES if overlap is None else overlap
@@ -455,8 +455,8 @@ class Wav2Vec2ForcedAligner(ForcedAligner):
     def _fused_hidden(self, hidden: torch.Tensor, chunk: torch.Tensor) -> torch.Tensor:
         """The encoder's last hidden state of one chunk plus the gated MuQ projection, sampled
         on this backbone's frame clock (the same arithmetic as the trainer's ``fusion_hidden``)."""
-        from ctc_segmentation import receptive_field_centre_samples
-        from muq_fusion import fusion_term
+        from worker.kara.aligner.ctc import receptive_field_centre_samples
+        from worker.kara.aligner.muq_fusion import fusion_term
 
         assert self.fusion_adapter is not None
         rate = self.processor.feature_extractor.sampling_rate  # pyright: ignore[reportAttributeAccessIssue]
@@ -530,7 +530,7 @@ def pitch_from_f0_logits(logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tens
 def _load_text_aligner(model_dir: str, record: dict):
     """§5j text-conditioned head (``text_aligner.*`` in model.safetensors, config ``text_aligner``)."""
     from safetensors import safe_open
-    from text_aligner import TextAligner, TextAlignerConfig
+    from worker.kara.aligner.text_aligner import TextAligner, TextAlignerConfig
 
     head = TextAligner(TextAlignerConfig(**record))
     with safe_open(

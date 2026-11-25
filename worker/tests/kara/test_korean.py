@@ -1,10 +1,6 @@
-import sys
-from pathlib import Path
 
-VENDOR = Path(__file__).resolve().parents[2] / "src" / "kara" / "vendor" / "fa_kara"
-sys.path.insert(0, str(VENDOR))
 
-from haruraw2norm import process_haruhi_line  # noqa: E402
+from worker.kara.aligner.normalize import process_haruhi_line  # noqa: E402
 
 
 def test_japanese_auto_detection_pronounces_kanji_and_kana():
@@ -56,7 +52,7 @@ def test_korean_mixed_english_keeps_both_display_scripts():
 
 
 def test_inference_labels_hangul_by_pronunciation_like_training():
-    import main as vendor
+    from worker.kara.aligner import align as vendor
 
     records, _ = vendor.normalize_source_lines(["같이 먹어요"], "auto", 0, 1)
     assert [item["pron"] for item in records if item.get("pron")] == [

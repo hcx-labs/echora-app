@@ -2,20 +2,19 @@
 
 import importlib.util
 import io
-import json
 import os
 from pathlib import Path
-import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "services/analysis/vendor/fa_kara"))
-import main as vendor
-from align_yohane import _display_span_results, _assign_ctc_blank_holds
 from torchaudio.functional import TokenSpan
+
 import worker.kara.pipeline as pipeline
+from worker.kara.aligner import align as vendor
+from worker.kara.aligner.decoder import _assign_ctc_blank_holds, _display_span_results
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class InferenceRegression(unittest.TestCase):

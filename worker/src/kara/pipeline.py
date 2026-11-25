@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from core.db.config import DatabaseConfig
+from worker.kara.aligner import label_rules
+from worker.kara.aligner.request import AlignRequest
 from worker.kara.config import KaraConfig
 
 from collections.abc import Callable
@@ -18,7 +20,6 @@ import tempfile
 import threading
 import time
 import unicodedata
-import uuid
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -46,9 +47,6 @@ from core.revisions import KARAOKE_PIPELINE_REVISION
 
 DEFAULT_MODEL_ID = "hcxlabs/echora-kara-700m-muq"
 DEFAULT_MODEL_REVISION = "7c0cda150c8be886ed5ff2f903460f112cf4c7a2"
-_DIALOGUE = re.compile(r"^Dialogue: [^,]*,([^,]+),([^,]+),(?:[^,]*,){6}(.*)$")
-_KARAOKE_TAG = re.compile(r"\{\\k(\d+)\}")
-_ASS_TAG = re.compile(r"\{[^}]*\}")
 _KARAOKE_LOCK = threading.Lock()
 _FA_KARA_WORKER: subprocess.Popen[str] | None = None
 _FA_KARA_WORKER_KEY: tuple[str, ...] | None = None
@@ -91,40 +89,6 @@ def _stored_model_revision(model_revision: str) -> str:
     if _separates_vocals():
         return f"{FA_KARA_REVISION}:{model_revision}:roformer:{SEPARATION_REVISION}"
     return f"{FA_KARA_REVISION}:{model_revision}:mix"
-
-
-def _ass_time_ms(value: str) -> int:
-    hours, minutes, seconds = value.split(":")
-    return round((int(hours) * 3600 + int(minutes) * 60 + float(seconds)) * 1000)
-
-
-def parse_ass_karaoke(ass: str) -> list[dict[str, object]]:
-    """Convert FA-Kara ASS dialogue into line and syllable timing for the API."""
-    lines: list[dict[str, object]] = []
-    for raw_line in ass.splitlines():
-        match = _DIALOGUE.match(raw_line)
-        if not match:
-            continue
-        start_ms = _ass_time_ms(match.group(1))
-        end_ms = _ass_time_ms(match.group(2))
-        body = match.group(3)
-        cursor_ms = start_ms
-        syllables: list[dict[str, object]] = []
-        parts = _KARAOKE_TAG.split(body)
-        prefix = _ASS_TAG.sub("", parts[0])
-        text_parts = [prefix] if prefix else []
-        for index in range(1, len(parts), 2):
-            duration_ms = int(parts[index]) * 10
-            text = _ASS_TAG.sub("", parts[index + 1] if index + 1 < len(parts) else "")
-            if text:
-                syllables.append(
-                    {"start_ms": cursor_ms, "end_ms": cursor_ms + duration_ms, "text": text}
-                )
-                text_parts.append(text)
-            cursor_ms += duration_ms
-        text = "".join(text_parts).replace("#|", "").replace("|<", "")
-        lines.append({"start_ms": start_ms, "end_ms": end_ms, "text": text, "syllables": syllables})
-    return lines
 
 
 def _restore_display_text(
@@ -401,15 +365,15 @@ def _validate_alignment_document(document: object) -> dict[str, object]:
     return document
 
 
-def _fa_kara_worker(vendor: Path, model_revision: str) -> subprocess.Popen[str]:
+def _fa_kara_worker(model_revision: str) -> subprocess.Popen[str]:
     global _FA_KARA_WORKER, _FA_KARA_WORKER_KEY
-    # The vendored decoder reads these two from its environment (the text head is loaded only
-    # when the bonus is on), so they belong to the worker's identity.
+    # The decoder reads these two from its environment (the text head is loaded only when the
+    # bonus is on), so they belong to the worker's identity.
     decoder_environment = {
         "FA_KARA_TEXT_BONUS": str(KaraConfig.load().text_bonus),
         "FA_KARA_IN_LINE_GAP_COST": str(KaraConfig.load().in_line_gap_cost),
     }
-    key = (str(vendor), model_revision, *decoder_environment.values())
+    key = (model_revision, *decoder_environment.values())
     if (
         _FA_KARA_WORKER is not None
         and _FA_KARA_WORKER.poll() is None
@@ -423,11 +387,12 @@ def _fa_kara_worker(vendor: Path, model_revision: str) -> subprocess.Popen[str]:
     environment = {
         **os.environ,
         "NUMBA_CACHE_DIR": str(numba_cache),
-        "PYTHONPATH": f"{vendor}{os.pathsep}{os.environ.get('PYTHONPATH', '')}",
+        # The worker imports this package as the parent process does.
+        "PYTHONPATH": os.pathsep.join(filter(None, [*sys.path, os.environ.get("PYTHONPATH")])),
         **decoder_environment,
     }
     _FA_KARA_WORKER = subprocess.Popen(
-        [sys.executable, str(vendor / "worker.py")],
+        [sys.executable, "-m", "worker.kara.aligner.worker"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -455,11 +420,11 @@ def _stop_fa_kara_worker() -> None:
 
 
 def _run_worker_job(
-    worker: subprocess.Popen[str], argv: list[str], timeout: float | None = None
+    worker: subprocess.Popen[str], request: AlignRequest, timeout: float | None = None
 ) -> dict[str, object]:
     if worker.stdin is None or worker.stdout is None:
         raise RuntimeError("FA-Kara worker pipes are unavailable")
-    worker.stdin.write(json.dumps({"argv": argv}, ensure_ascii=False) + "\n")
+    worker.stdin.write(request.model_dump_json() + "\n")
     worker.stdin.flush()
     selector = selectors.DefaultSelector()
     selector.register(worker.stdout, selectors.EVENT_READ)
@@ -508,46 +473,11 @@ def _source_line_texts(source: list[dict[str, object]]) -> list[str]:
 # fa_kara_label_rules). v1: the allowlist every shipped model was trained with (en/es/fr/zh reach
 # the normalizer as auto). v2 (2026-10-18 label round) also forwards en/de/fr (pronunciation labels),
 # tr (Turkish rules), yue and zh; a v2 model mislabels Latin lines without it, a v1 model with it.
-# data/finetune-curation/echora_normalization.py mirrors both sets (test_alignment_fixes checks).
 FA_KARA_LANGUAGES_V1 = frozenset({"auto", "ja", "jaen", "zhen", "ko", "ur", "hi", "pa", "indic"})
 FA_KARA_LANGUAGES_V2 = FA_KARA_LANGUAGES_V1 | frozenset({"en", "de", "fr", "tr", "yue", "zh"})
 
-# Keep in sync with label_rules.NON_LATIN_SCRIPT_LANGUAGES (vendor runs in a subprocess).
-FA_KARA_LANGUAGES_V3 = FA_KARA_LANGUAGES_V2 | frozenset(
-    {
-        "ko",
-        "ja",
-        "zh",
-        "yue",
-        "th",
-        "ar",
-        "fa",
-        "ur",
-        "he",
-        "hi",
-        "bn",
-        "ta",
-        "te",
-        "mr",
-        "gu",
-        "kn",
-        "ml",
-        "pa",
-        "ru",
-        "uk",
-        "bg",
-        "sr",
-        "mk",
-        "be",
-        "kk",
-        "el",
-        "ka",
-        "hy",
-        "km",
-        "lo",
-        "my",
-    }
-)
+# v3 also forwards every language whose own script is not Latin.
+FA_KARA_LANGUAGES_V3 = FA_KARA_LANGUAGES_V2 | label_rules.NON_LATIN_SCRIPT_LANGUAGES
 
 
 # Stored lyric languages that mean "not identified" (ISO 639 und; fastText's placeholder xxx).
@@ -571,7 +501,6 @@ def _run_fa_kara(
     source_lines: list[dict[str, object]] | None = None,
     separate_vocals: bool | None = None,
 ) -> dict[str, object]:
-    vendor = Path(__file__).resolve().parent / "vendor" / "fa_kara"
     model_id = KaraConfig.load().model_id
     model_revision = current_model_revision()
     snapshot = (
@@ -605,79 +534,46 @@ def _run_fa_kara(
             audio_path.write_bytes(audio)
         line_texts = _source_line_texts(source_lines or [])
         input_text = "\n".join(line_texts) if line_texts else lyrics_text.rstrip("\r\n")
-        (work / "i.txt").write_text(input_text + "\n", encoding="utf-8")
-        aligner = KaraConfig.load().aligner.lower()
-        if aligner not in {"yohane", "mms"}:
-            raise ValueError("FA_KARA_ALIGNER must be 'yohane' or 'mms'")
-        command = [
-            "--path_io",
-            str(work),
-            "--input_audio",
-            str(audio_path),
-            "--input_text",
-            "i.txt",
-            "--model",
-            aligner,
-            "--lang",
-            language if language in fa_kara_languages(KaraConfig.load().label_rules) else "auto",
-        ]
-        if not language or language in UNKNOWN_LANGUAGES:
+        config = KaraConfig.load()
+        languages = fa_kara_languages(config.label_rules)
+        external_activity = os.environ.get("FA_KARA_VOCAL_ACTIVITY_FILE")
+        request = AlignRequest(
+            audio_path=str(audio_path),
+            text=input_text,
+            model_path=str(snapshot),
+            language=language if language in languages else "auto",
             # Lyrics stored without a language (ingest-time detection failed or was unsure): the
             # aligner identifies them itself rather than spell every word letter by letter.
-            command.extend(
-                [
-                    "--detect_language",
-                    ",".join(sorted(fa_kara_languages(KaraConfig.load().label_rules))),
-                ]
-            )
-        if KaraConfig.load().label_rules != "v1":
-            command.extend(["--label_rules", KaraConfig.load().label_rules])
-        if aligner == "yohane":
-            command.extend(["--hf_model_path", str(snapshot)])
-        command.extend(["--head_correct", "0", "--tail_correct", "0"])
-        command.extend(["--min_letter_ms", str(KaraConfig.load().min_letter_ms)])
-        command.extend(["--min_token_ms", str(KaraConfig.load().min_token_ms)])
-        command.extend(["--timing_offset_ms", str(KaraConfig.load().timing_offset_ms)])
-        command.extend(["--duration_pace_ratio", str(KaraConfig.load().duration_pace_ratio)])
-        command.extend(["--vocal_activity_weight", str(KaraConfig.load().vocal_activity_weight)])
-        if KaraConfig.load().exact_frame_clock:
-            command.append("--exact_frame_clock")
-        if KaraConfig.load().background_decoding:
-            command.append("--background_decoding")
-        if KaraConfig.load().blank_free_tokens:
-            command.append("--blank_free_tokens")
-        if KaraConfig.load().inline_backing:
-            command.append("--inline_backing")
-        if KaraConfig.load().gap_onset_pull:
-            command.append("--gap_onset_pull")
-        if os.environ.get("FA_KARA_OPTIONAL_BRACKETS") == "1":
+            detect_language=tuple(sorted(languages))
+            if not language or language in UNKNOWN_LANGUAGES
+            else (),
+            label_rules=config.label_rules,
+            min_letter_ms=config.min_letter_ms,
+            min_token_ms=config.min_token_ms,
+            timing_offset_ms=config.timing_offset_ms,
+            duration_pace_ratio=config.duration_pace_ratio,
+            vocal_activity_weight=config.vocal_activity_weight,
+            exact_frame_clock=config.exact_frame_clock,
+            background_decoding=config.background_decoding,
+            blank_free_tokens=config.blank_free_tokens,
+            inline_backing=config.inline_backing,
+            gap_onset_pull=config.gap_onset_pull,
             # Experiment, off: inline bracketed words may leave the lead path. It did not help.
-            command.append("--optional_brackets")
-        external_activity = os.environ.get("FA_KARA_VOCAL_ACTIVITY_FILE")
-        if external_activity:
-            # Listening tests: activity from another model on the same mix (see listen_align_mix.py).
-            command.extend(
-                ["--vocal_activity_source", "external", "--vocal_activity_file", external_activity]
-            )
-        if KaraConfig.load().fusion != "off":
-            command.extend(["--fusion", KaraConfig.load().fusion])
-        audio_speed = float(KaraConfig.load().audio_speed)
-        if not 0.5 <= audio_speed <= 1.5:
-            raise ValueError("FA_KARA_AUDIO_SPEED must be between 0.5 and 1.5")
-        if audio_speed != 1.0:
-            command.extend(["--audio_speedx", str(audio_speed)])
-        worker = _fa_kara_worker(vendor, model_revision)
-        response = _run_worker_job(worker, command)
+            optional_brackets=os.environ.get("FA_KARA_OPTIONAL_BRACKETS") == "1",
+            # Listening tests: activity from another model on the same mix (listen_align_mix.py).
+            vocal_activity_source="external" if external_activity else "energy",
+            vocal_activity_file=external_activity or None,
+            fusion=config.fusion,
+            audio_speed=config.audio_speed,
+        )
+        worker = _fa_kara_worker(model_revision)
+        response = _run_worker_job(worker, request)
         if not response.get("ok"):
             detail = str(
                 response.get("traceback") or response.get("error") or "unknown worker error"
             )
             raise RuntimeError(f"FA-Kara failed: {detail[-4000:]}")
-        ass = (work / "o.ass").read_text(encoding="utf-8")
-        lrc = (work / "o_ruby.lrc").read_text(encoding="utf-8")
-        alignment_document = _validate_alignment_document(
-            json.loads((work / "o.alignment.json").read_text(encoding="utf-8"))
-        )
+        alignment_document = _validate_alignment_document(response["document"])
         diagnostics = alignment_document.setdefault("diagnostics", {})
         diagnostics["audio_source"] = (
             "roformer_vocals"
@@ -689,16 +585,12 @@ def _run_fa_kara(
         diagnostics["separator"] = "roformer" if separate_vocals else None
         diagnostics["separator_revision"] = SEPARATION_REVISION if separate_vocals else None
         lines = build_lines_from_alignment_document(alignment_document)
-        if not lines:
-            lines = parse_ass_karaoke(ass)
         # Keep the model's token-derived line boundaries. The former display
         # padding expanded every line into nearby silence, which moved otherwise
         # correct starts and ends away from the timed-lyrics reference.
         if not lines:
             raise RuntimeError("FA-Kara produced no aligned lyric lines")
     return {
-        "ass": ass,
-        "lrc": lrc,
         "lines": lines,
         "alignment_document": alignment_document,
         "diagnostics": alignment_document.get("diagnostics", {}),
@@ -937,7 +829,7 @@ def _backfill_karaoke(
                         """INSERT INTO karaoke_lyrics_variants
                              (track_id, bounded, lines, ass, lrc, model, model_revision, provenance,
                               alignment_document, diagnostics, created_at)
-                           VALUES (%s,%s,%s,%s,%s,'fa_kara',%s,%s,%s,%s,now())
+                           VALUES (%s,%s,%s,NULL,NULL,'fa_kara',%s,%s,%s,%s,now())
                            ON CONFLICT (track_id, bounded) DO UPDATE SET lines=EXCLUDED.lines,
                              ass=EXCLUDED.ass, lrc=EXCLUDED.lrc, model=EXCLUDED.model,
                              model_revision=EXCLUDED.model_revision, provenance=EXCLUDED.provenance,
@@ -947,8 +839,6 @@ def _backfill_karaoke(
                             track_id,
                             False,
                             Jsonb(result["lines"]),
-                            result["ass"],
-                            result["lrc"],
                             _stored_model_revision(str(result["model_revision"])),
                             Jsonb(karaoke_provenance),
                             Jsonb(result["alignment_document"]),
@@ -956,15 +846,13 @@ def _backfill_karaoke(
                         ),
                     )
                     cursor.execute(
-                        """UPDATE lyrics SET karaoke_lines=%s, karaoke_ass=%s, karaoke_lrc=%s,
+                        """UPDATE lyrics SET karaoke_lines=%s, karaoke_ass=NULL, karaoke_lrc=NULL,
                                   karaoke_model='fa_kara', karaoke_model_revision=%s, karaoke_bounded=%s,
                                   karaoke_created_at=now(),
                                   provenance=provenance || %s
                            WHERE track_id=%s""",
                         (
                             Jsonb(result["lines"]),
-                            result["ass"],
-                            result["lrc"],
                             _stored_model_revision(str(result["model_revision"])),
                             False,
                             Jsonb({"karaoke": karaoke_provenance}),
