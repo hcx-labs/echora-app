@@ -19,17 +19,30 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  // Runtime, not build-time: the media base path depends on the deployment's
+  // Runtime, not build-time: the media origin depends on the deployment's
   // reverse proxy shape, which must not require an image rebuild.
-  const mediaBase = process.env.ECHORA_MEDIA_BASE ?? "/analysis";
+  const mediaBase = process.env.ECHORA_MEDIA_BASE ?? "";
   return (
     <html lang="en" className="dark">
       <head>
         <script
-          dangerouslySetInnerHTML={{ __html: `window.__ECHORA_MEDIA_BASE__=${JSON.stringify(mediaBase)};` }}
+          dangerouslySetInnerHTML={{
+            __html: `window.__ECHORA_MEDIA_BASE__=${JSON.stringify(mediaBase)};`,
+          }}
         />
       </head>
-      <body><div className="app-viewport"><RuntimeConfigBootstrap /><MotionPreferences /><Backdrop /><PlayerProvider><SessionRenewal />{children}</PlayerProvider><Toaster /></div></body>
+      <body>
+        <div className="app-viewport">
+          <RuntimeConfigBootstrap />
+          <MotionPreferences />
+          <Backdrop />
+          <PlayerProvider>
+            <SessionRenewal />
+            {children}
+          </PlayerProvider>
+          <Toaster />
+        </div>
+      </body>
     </html>
   );
 }

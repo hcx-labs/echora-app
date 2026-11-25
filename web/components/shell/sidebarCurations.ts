@@ -20,11 +20,12 @@ export function useSidebarCurations(onboarding: boolean) {
       setCurations((event as CustomEvent<SidebarCuration[]>).detail);
     };
     window.addEventListener(changedEvent, changed);
-    fetch("/analysis/library/curations", { signal: abort.signal })
-      .then(response => response.ok ? response.json() : null)
-      .then(body => {
+    fetch("/api/v1/curations", { signal: abort.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
         if (body && !abort.signal.aborted && !updated) setCurations(body.curations || []);
-      }).catch(() => {});
+      })
+      .catch(() => {});
     return () => {
       abort.abort();
       window.removeEventListener(changedEvent, changed);

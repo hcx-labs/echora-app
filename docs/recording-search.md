@@ -201,9 +201,8 @@ These results compare the export with the reference in float32, not the upstream
 Repeat the opt-in graph tests without changing production environment variables:
 
 ```bash
-PYTHONPATH=services/analysis/src \
 ECHORA_TEST_RECORDING_MANIFEST="$PWD/data/models/recording/nmfp-triplet-v1/manifest.json" \
-python -m pytest services/analysis/tests/test_recording_encoder_real.py
+python -m pytest worker/tests/recordings/test_encoder_real.py
 ```
 
 The deployment now sets `ECHORA_RECORDING_MODEL_MANIFEST=/data/models/recording/nmfp-triplet-v1/manifest.json` on the existing mounted volume and enables calibration collection. The recognition-policy path now points to `recording-quality-policy.json`. No library-wide backfill was started during deployment.

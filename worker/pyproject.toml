@@ -5,6 +5,39 @@ description = "Echora's sync processing: library ingest, lyrics, karaoke, embedd
 requires-python = ">=3.12"
 dependencies = [
   "echora-core",
+  "beartype==0.22.9",
+  "einops==0.8.2",
+  "essentia==2.1b6.dev1389",
+  "onnxruntime==1.23.2",
+  "openai==3.19.2",
+  "huggingface-hub==1.28.0",
+  "jaconv==0.4.0",
+  "Janome==0.5.0",
+  "librosa==0.11.0",
+  # Optional offload of model computation (docs/modal-compute.md).
+  "modal==1.6.0",
+  "nltk==3.9.1",
+  "numba==0.67.0",
+  # Shared lyric normalizer (worker/src/kara/aligner/romanization.py): Mandarin, Cantonese, Thai.
+  "OpenCC==1.4.2",
+  "ToJyutping==3.2.0",
+  "pythainlp==5.4.0",
+  # Label rules v2 and later (worker/src/kara/aligner/label_rules.py; v3-sung is the default): en/de/fr
+  # pronunciation labels via espeak-ng (apt package in docker/Dockerfile.*; GPL-3.0, phonemizer GPL-3.0)
+  # and number words (num2words, LGPL-2.1). Imported lazily: v1 never loads them.
+  "num2words==0.5.14",
+  "phonemizer==3.4.0",
+  "pykakasi==2.3.0",
+  "pyphen==0.17.2",
+  "pypinyin==0.55.0",
+  "pyyaml==6.0.3",
+  # Roformer checkpoint's original rotary implementation; avoid silently changing its math.
+  "rotary-embedding-torch==0.3.5",
+  "scikit-learn==1.9.0",
+  "soundfile==0.13.1",
+  "soxr==1.1.0",
+  "torchaudio==2.11.0",
+  "uroman==1.3.1.1",
 ]
 
 [project.optional-dependencies]

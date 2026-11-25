@@ -17,7 +17,7 @@ test('discovery scopes the connection, excludes curation and children, then fall
   const urls = [];
   t.mock.method(globalThis, 'fetch', async url => { urls.push(url); return response({ jobs: urls.length === 1 ? [{ ...job('running'), kind: 'curation_refresh' }, { ...job('running'), parent_id: 'parent' }] : [job('partial')] }); });
   assert.equal((await discoverJob('connection', new AbortController().signal)).status, 'partial');
-  assert.deepEqual(urls, ['/analysis/jobs?connection_id=connection&library_only=true&active_only=true', '/analysis/jobs?connection_id=connection&library_only=true&active_only=false']);
+  assert.deepEqual(urls, ['/api/v1/jobs?connection_id=connection&library_only=true&active_only=true', '/api/v1/jobs?connection_id=connection&library_only=true&active_only=false']);
 });
 test('active discovery does not request history', async t => {
   let calls = 0;

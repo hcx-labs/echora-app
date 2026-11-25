@@ -103,7 +103,7 @@ export default function Onboarding({ initialStep }: { initialStep?: string }) {
   useEffect(() => {
     let active = true;
     (async () => {
-      const response = await fetch("/analysis/auth/me");
+      const response = await fetch("/api/v1/auth/me");
       if (response.status === 401) return window.location.replace("/login");
       if (!response.ok) throw new Error("Could not read your account");
       const user = await response.json();
@@ -168,11 +168,7 @@ export default function Onboarding({ initialStep }: { initialStep?: string }) {
   async function finish() {
     try {
       if (connection) await selectConnection(connection.id, true);
-      else
-        await api(
-          "/users/me/preferences/onboarding",
-          json("PUT", { complete: true, connection_id: null }),
-        );
+      else await api("/settings/onboarding", json("PUT", { complete: true, connection_id: null }));
       try {
         localStorage.removeItem(progressKey(email));
       } catch {}
@@ -189,7 +185,7 @@ export default function Onboarding({ initialStep }: { initialStep?: string }) {
 
   async function signOut() {
     try {
-      await fetch("/analysis/auth/logout", { method: "POST" });
+      await fetch("/api/v1/auth/logout", { method: "POST" });
     } finally {
       window.location.assign(new URL("/login", window.location.origin));
     }

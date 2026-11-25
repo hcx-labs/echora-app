@@ -2,7 +2,7 @@
 """Print the settings catalog: every environment variable, its default and its meaning.
 
 Reads no environment. Run with the packages importable, for example:
-PYTHONPATH=services/analysis/src python scripts/export-runtime-settings.py [--ui]
+python scripts/export-runtime-settings.py [--ui]   (with core, worker and backend installed)
 """
 
 import importlib
@@ -30,7 +30,7 @@ CONFIG_MODULES = (
     "worker.transcription.config",
     "worker.kara.config",
     "worker.recordings.config",
-    "echora_analysis.config",
+    "backend.config",
 )
 
 
@@ -71,7 +71,7 @@ def template() -> str:
 
 def ui_defaults() -> dict[str, int]:
     """The browser's defaults in web/components/runtime/runtimeConfig.defaults.json."""
-    from echora_analysis.config import UiConfig
+    from backend.config import UiConfig
 
     return UiConfig.model_construct().public_ui()
 

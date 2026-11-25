@@ -38,7 +38,7 @@ type Configuration = {
   setup: Setup | null;
 };
 
-const endpoint = "/analysis/settings/external-processing";
+const endpoint = "/api/v1/settings/external-processing";
 // The fields an admin edits on this page; everything else is status from the server.
 const editable = ["enabled", "token_id", "gpu", "default_compute", "allow_users"] as const;
 type Editable = Pick<Configuration, (typeof editable)[number]>;

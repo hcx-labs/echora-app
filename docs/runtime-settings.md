@@ -9,16 +9,16 @@ The application does not load dotenv files implicitly. Docker Compose passes the
 Start with `configs/env.example`. The complete, commented catalog is `configs/runtime.env.example`. Copy only the overrides you need into `.env` and uncomment them. Regenerate the catalog without reading environment values:
 
 ```sh
-PYTHONPATH=services/analysis/src python scripts/export-runtime-settings.py  # with core and worker installed (pip install -e core -e worker) > configs/runtime.env.example
+python scripts/export-runtime-settings.py  # with core, worker and backend installed (pip install -e core -e worker -e backend) > configs/runtime.env.example
 ```
 
 Browser polling uses the same defaults, exported to `web/components/runtime/runtimeConfig.defaults.json`. The browser loads overrides from the API once after mount. During an API outage it keeps the generated defaults. Regenerate the fallback after changing those settings:
 
 ```sh
-PYTHONPATH=services/analysis/src python scripts/export-runtime-settings.py  # with core and worker installed (pip install -e core -e worker) --ui > web/components/runtime/runtimeConfig.defaults.json
+python scripts/export-runtime-settings.py  # with core, worker and backend installed (pip install -e core -e worker -e backend) --ui > web/components/runtime/runtimeConfig.defaults.json
 ```
 
-Secrets are blank in that catalog and excluded from config representations and serialization. Do not log a config object or publish its complete contents. `/settings/runtime` returns only an explicit allowlist of browser polling intervals and request timeouts.
+Secrets are blank in that catalog and excluded from config representations and serialization. Do not log a config object or publish its complete contents. `/api/v1/settings/runtime` returns only an explicit allowlist of browser polling intervals and request timeouts.
 
 ## Sessions
 

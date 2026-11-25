@@ -2,9 +2,9 @@
 services:
   analysis:
     build:
-      dockerfile: services/analysis/docker/Dockerfile.cpu
+      dockerfile: docker/Dockerfile.cpu
     gpus: !reset []
   analysis-worker:
     build:
-      dockerfile: services/analysis/docker/Dockerfile.cpu
+      dockerfile: docker/Dockerfile.cpu
     gpus: !reset []

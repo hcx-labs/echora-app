@@ -11,7 +11,7 @@ export function resolveArtworkStyle(stored: string | null, reducedMotion: boolea
 }
 
 export function motionArtworkPath(trackId: string) {
-  return `/analysis/library/tracks/${encodeURIComponent(trackId)}/motion-artwork`;
+  return `/api/v1/library/tracks/${encodeURIComponent(trackId)}/motion-artwork`;
 }
 
 /** The video path from the lookup response, or null. Only Echora's own video route is accepted. */
@@ -19,5 +19,5 @@ export function motionVideoPath(body: unknown): string | null {
   if (!body || typeof body !== "object") return null;
   const { available, url } = body as { available?: unknown; url?: unknown };
   if (available !== true || typeof url !== "string") return null;
-  return /^\/motion-artwork\/[0-9a-f-]{36}\.mp4$/.test(url) ? url : null;
+  return /^\/media\/motion-artwork\/[0-9a-f-]{36}\.mp4$/.test(url) ? url : null;
 }

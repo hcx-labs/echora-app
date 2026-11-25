@@ -53,7 +53,7 @@ key to rotate it. Removing the owning account/connection removes its credentials
    `dist/echora.ndp` using the instructions below), copy it into Navidrome's
    plugins folder (normally `<DataFolder>/plugins`), rescan, and enable Echora.
 4. Set plugin `apiUrl` to the copied URL, such as
-   `https://echora.example/analysis/integrations/navidrome/v1`, and `apiKey` to the
+   `https://echora.example/api/v1/plugin`, and `apiKey` to the
    generated key. This is the browser-facing proxy URL, not just the site origin.
 5. Put `echora` first in metadata agent order and lyric source priority. Preserve
    the other providers you already use, for example:
@@ -148,8 +148,7 @@ already overwritten before the guard existed.
 
 ## API contracts
 
-All routes are POST under `/analysis/integrations/navidrome/v1` through Echora's
-web proxy (analysis service path: `/integrations/navidrome/v1`). They require
+All routes are POST under Echora's `/api/v1/plugin`. They require
 `Authorization: Bearer <key>` and JSON bodies. Unknown metadata fields supplied by
 the SDK are tolerated; numeric limits are validated.
 
@@ -164,7 +163,7 @@ the SDK are tolerated; numeric limits are validated.
 `SongRef` contains Navidrome's source `id`, `name`, `artist`, `album` and
 `durationMs`. Similar-songs-by-track maps the sonic response to the metadata
 `{songs: [...]}` envelope inside the adapter. The Settings management API is
-`/analysis/settings/integrations/navidrome` with GET/PUT, POST `/keys` and DELETE
+`/api/v1/settings/integrations/navidrome` with GET/PUT, POST `/keys` and DELETE
 `/keys/{id}`; it requires the normal Echora user session.
 
 ## Build and validation
@@ -199,7 +198,7 @@ go test ./...
 
 The package contains exactly `manifest.json` and `plugin.wasm`. Generated packages
 are ignored by Git. Backend tests in
-`services/analysis/tests/test_navidrome_plugin.py` validate the exporter against
+`backend/tests/api/v1/plugin/` validate the exporter against
 the checked-in parser fixtures and exercise the actual credential migration on
 an isolated PostgreSQL schema when `TEST_DATABASE_URL` is set. Without that
 variable, database tests skip; use a disposable test database, never production.

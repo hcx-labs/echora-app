@@ -15,15 +15,15 @@ test('a saved artwork style wins; otherwise reduced motion picks the still cover
 });
 
 test('looks up motion artwork per track', () => {
-  assert.equal(motionArtworkPath('a/b'), '/analysis/library/tracks/a%2Fb/motion-artwork');
+  assert.equal(motionArtworkPath('a/b'), '/api/v1/library/tracks/a%2Fb/motion-artwork');
 });
 
 test('accepts only an available loop on the motion artwork route', () => {
-  const url = '/motion-artwork/0f8fad5b-d9cb-469f-a165-70867728950e.mp4';
+  const url = '/media/motion-artwork/0f8fad5b-d9cb-469f-a165-70867728950e.mp4';
   assert.equal(motionVideoPath({ available: true, url }), url);
   assert.equal(motionVideoPath({ available: false, url }), null);
   assert.equal(motionVideoPath({ available: true }), null);
   assert.equal(motionVideoPath({ available: true, url: 'https://elsewhere.example/x.mp4' }), null);
-  assert.equal(motionVideoPath({ available: true, url: '/motion-artwork/../secret.mp4' }), null);
+  assert.equal(motionVideoPath({ available: true, url: '/media/motion-artwork/../secret.mp4' }), null);
   assert.equal(motionVideoPath(null), null);
 });

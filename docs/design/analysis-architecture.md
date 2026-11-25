@@ -151,7 +151,9 @@ class HumSearch(Endpoint):
 - `Endpoint` holds method, path, request and response models, dependencies, status code and OpenAPI
   metadata. A category's `__init__.py` lists its endpoint classes and the v1 router mounts every
   category. Nothing registers routes with decorators on a global `app`.
-- Request bodies derive from `RequestModel` (Pydantic, unknown fields rejected, strings stripped):
+- Request bodies derive from `RequestModel` (Pydantic, unknown fields rejected; strings are kept
+  as sent, since stripping would also trim passwords and lyrics, and a field opts in with
+  `StrippedStr`):
   - `PostRequest` creates or performs something;
   - `PutRequest` replaces a resource completely, so every field is required unless it has a
     default;
@@ -361,9 +363,14 @@ what it removed. Found so far:
 - `hum_search.match_contour`;
 - the karaoke vocal-stem input (`FA_KARA_AUDIO_INPUT=vocals`, superseded by the full mix);
 - the MMS aligner path (`FA_KARA_ALIGNER=mms`).
+- `main._curation_scheduler` (an empty compatibility hook);
+- the `karaoke_ass` and `karaoke_lrc` columns in the track lyrics response (no reader);
+- the per-router `require_user`/`admin` factories and the duplicate request and redacting route
+  classes of the settings routers.
 
-Kept for a decision: the `*_backfill` routes (`lyrics`, `voice`, `karaoke`, `recordings`) have no
-caller in the web app. They may be operator tools.
+Kept as operator tools: the backfill routes (`lyrics`, `voice`, `karaoke`, `recordings`) have no
+caller in the web app and are restricted to administrators
+(`backend/src/api/v1/sync/README.md`).
 
 ## Non-goals
 

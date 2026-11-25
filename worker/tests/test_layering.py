@@ -22,8 +22,8 @@ def imported_modules(package: Path):
 @pytest.mark.parametrize(
     ("package", "forbidden"),
     [
-        ("core/src", ("fastapi", "starlette", "worker", "echora_analysis", "backend")),
-        ("worker/src", ("fastapi", "starlette", "echora_analysis", "backend")),
+        ("core/src", ("fastapi", "starlette", "worker", "backend")),
+        ("worker/src", ("fastapi", "starlette", "backend")),
     ],
 )
 def test_no_forbidden_imports(package, forbidden):

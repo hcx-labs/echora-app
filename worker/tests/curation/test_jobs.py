@@ -1,8 +1,6 @@
 """No live services: transactional fake DB and a fault-injectable remote client."""
 
-import ast
 from copy import deepcopy
-from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -316,24 +314,6 @@ def test_manual_enqueue_returns_contract_and_closes_draft_window(env, monkeypatc
         "curation_id": env.job["payload"]["curation_id"],
     }
     assert env.db.curation["status"] == "pending"
-
-
-def test_routes_share_lock_and_refresh_is_202():
-    tree = ast.parse(
-        (
-            Path(__file__).resolve().parents[3] / "services/analysis/src/echora_analysis/main.py"
-        ).read_text()
-    )
-    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
-    for name in ["update_curation", "delete_curation"]:
-        assert any(
-            isinstance(n, ast.With)
-            and any("curation_jobs.locked" in ast.unparse(i.context_expr) for i in n.items)
-            for n in ast.walk(functions[name])
-        )
-    decorator = ast.unparse(functions["refresh_curation"].decorator_list[0])
-    assert "status_code=202" in decorator
-    assert "enqueue" in ast.unparse(functions["_refresh_curation"])
 
 
 def test_due_poll_skips_locked_curation_without_blocking(env, monkeypatch):

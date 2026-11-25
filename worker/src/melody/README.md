@@ -28,8 +28,10 @@ Contours are computed in two places:
 Its counters sit at the top level of the batch summary: `tracks` (songs added), `contours`
 (contours stored), `failed`.
 
-`index.py` holds the extraction, the stores, and the query side, `search_corpus`: contour
-extraction for the hum, coarse motif matching, then DTW over the user's contours.
+`index.py` holds the extraction, the stores, and the query side: `contour_index_key` and
+`load_contours` (the user's index, which the backend's hum search service keeps in memory until
+the key changes) and `match_hum` (contour extraction for the hum, coarse motif matching, then DTW
+over the contours).
 
 ## What it stores
 

@@ -9,7 +9,7 @@ export async function loadLibraryFacets(
   finish: () => void,
 ): Promise<void> {
   try {
-    const response = await fetch(`/analysis/library/facets?${params}`, { signal });
+    const response = await fetch(`/api/v1/library/facets?${params}`, { signal });
     const body: Facets | null = response.ok ? await response.json() : null;
     if (!signal.aborted && body) publish(body);
   } catch {

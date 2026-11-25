@@ -2,7 +2,7 @@
 
 ## Scope and migration
 
-`services/analysis/src/echora_analysis/visual_features.py` produces measured, non-learned DSP features from the shared decoded mono source. This replaces revision 1's invalid multi-octave CQT hop, 10 Hz timeline, power-spectrum onset input, arbitrary mel-index bass groups, and browser-generated sine waveform.
+`worker/src/library/visual_features.py` produces measured, non-learned DSP features from the shared decoded mono source. This replaces revision 1's invalid multi-octave CQT hop, 10 Hz timeline, power-spectrum onset input, arbitrary mel-index bass groups, and browser-generated sine waveform.
 
 Fresh schemas include migration 037's `track_visual_features` JSONB cache. Existing Alembic installations must apply `0042_track_visual_features` before the planner or API queries that table. No new dependency is required. The cache stores a revision, processing status, source duration and hop. `VISUAL_FEATURE_REVISION = "2"` is imported by the API and `processing_plan.plan_audio`; revision-1 rows are pending, never served as revision 2. Normal audio processing regenerates only the visual cache when other analysis contracts are current. Sources longer than 600 seconds are recorded as terminally unsupported so later processing runs do not repeatedly download and decode them. The existing 22050 Hz mono prerequisite is reused. A successful upsert atomically replaces the old cache; failed extraction rolls back. Processing does not delete model results.
 

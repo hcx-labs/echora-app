@@ -4,7 +4,21 @@ version = "0.1.0"
 description = "Configuration, errors, storage and algorithms shared by the Echora backend and worker"
 requires-python = ">=3.12"
 dependencies = [
+  "alembic==1.19.1",
+  "cryptography==50.0.0",
+  "fasttext-wheel==0.9.2",
+  "httpx==0.28.1",
+  # Claude as an External AI provider (claude_client.py). Built on httpx2, which it imports.
+  "anthropic==2.9.0",
+  "httpx2==2.16.2",
+  "muq==0.1.0",
+  "numpy==2.5.2",
+  "psycopg[binary]==3.3.4",
   "pydantic-settings==2.15.0",
+  "sentence-transformers==6.0.0",
+  "SQLAlchemy==2.0.52",
+  "torch==2.13.0",
+  "transformers==5.15.1",
 ]
 
 [project.optional-dependencies]

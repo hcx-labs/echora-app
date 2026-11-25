@@ -168,7 +168,7 @@ Store `CREDENTIAL_ENCRYPTION_KEY` somewhere safe. Saved Navidrome and Last.fm cr
 **3. Register Echora with your sign-in provider.** Create a client in your OIDC provider with this redirect URL (adjust the host later if you serve Echora elsewhere):
 
 ```text
-http://localhost:3000/analysis/auth/oidc/callback
+http://localhost:3000/api/v1/auth/oidc/callback
 ```
 
 Then complete these entries in `.env`:
@@ -223,7 +223,7 @@ Optional settings and their defaults are listed in [runtime settings](docs/runti
 
 ## Development
 
-The web app is Next.js and React (in `web`). The analysis service is Python 3.12 and FastAPI (in `services/analysis`). They share a PostgreSQL 17 database with pgvector. The Navidrome plugin is in Go (in `navidrome`).
+The web app is Next.js and React (in `web`). The Python 3.12 side has three packages: `core` (configuration, storage and shared algorithms), `worker` (sync processing) and `backend` (the FastAPI app, serving `/api/v1`). They share a PostgreSQL 17 database with pgvector. The Navidrome plugin is in Go (in `navidrome`).
 
 You need Node.js 22 or later for the web app. To work on the web app against a running backend:
 
@@ -233,7 +233,7 @@ docker compose stop web   # frees port 3000
 npm run dev
 ```
 
-The development server proxies analysis requests to `http://localhost:8000`.
+The development server proxies `/api/v1` to the backend at `http://localhost:8000`.
 
 Formatting runs as a pre-commit hook, with Prettier for TypeScript and Ruff for Python. Set it up once per clone:
 
@@ -248,7 +248,7 @@ If the hook reformats a file, the commit stops. Stage the formatting changes and
 | Task | Command |
 | --- | --- |
 | Web tests, type check, lint, build | `npm run test:web` · `npm run typecheck` · `npm run lint` · `npm run build` |
-| Python tests | `PYTHONPATH=services/analysis/src pytest services/analysis/tests` (with the analysis dependencies and pytest installed) |
+| Python tests | `pip install -e core -e worker -e backend`, then `pytest` in `core`, `worker` or `backend` |
 | Rebuild one container | `npm run rebuild:web` · `npm run rebuild:analysis` |
 
 Tests that need a database read `TEST_DATABASE_URL`. Point it at a throwaway, migrated database, never at your real one.

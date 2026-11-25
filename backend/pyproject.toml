@@ -1,0 +1,27 @@
+[project]
+name = "echora-backend"
+version = "0.1.0"
+description = "Echora's HTTP API: library, search, settings, jobs and the Navidrome plugin"
+requires-python = ">=3.12"
+dependencies = [
+  "echora-core",
+  "echora-worker",
+  "Authlib==1.7.2",
+  "fastapi==0.141.1",
+  "huggingface-hub==1.28.0",
+  "igraph==1.0.0",
+  "itsdangerous==2.2.0",
+  "redis==7.1.0",
+  "scikit-learn==1.9.0",
+  "uvicorn[standard]==0.52.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.0.2", "ruff==0.15.6"]
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

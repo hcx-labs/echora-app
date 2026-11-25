@@ -103,13 +103,13 @@ export default function HomeGrid() {
       try {
         const user =
           getCachedUser() ||
-          (await fetch("/analysis/auth/me", { signal: abort.signal }).then((response) =>
+          (await fetch("/api/v1/auth/me", { signal: abort.signal }).then((response) =>
             response.ok ? response.json() : null,
           ));
         if (abort.signal.aborted) return;
         setConnection(user?.navidrome_connection_id || "");
         const response = await fetch(
-          "/analysis/library/tracks?limit=10&offset=0&sort_by=date_added&sort_direction=desc",
+          "/api/v1/library/tracks?limit=10&offset=0&sort_by=date_added&sort_direction=desc",
           { signal: abort.signal },
         );
         if (!response.ok)
@@ -129,7 +129,7 @@ export default function HomeGrid() {
       }
     };
     load();
-    fetch("/analysis/library/curations", { signal: abort.signal })
+    fetch("/api/v1/curations", { signal: abort.signal })
       .then((response) => (response.ok ? response.json() : null))
       .then((body) => {
         if (!abort.signal.aborted) setCurations(body?.curations || []);
@@ -145,7 +145,7 @@ export default function HomeGrid() {
     const timer = window.setTimeout(() => {
       setTopLoading(true);
       setTopError("");
-      fetch(`/analysis/library/top-tracks?limit=10&period=${period}`, { signal: abort.signal })
+      fetch(`/api/v1/library/top-tracks?limit=10&period=${period}`, { signal: abort.signal })
         .then(async (response) => {
           const body = await response.json().catch(() => null);
           if (!response.ok)
@@ -184,7 +184,7 @@ export default function HomeGrid() {
           album: track.album,
           durationSeconds: track.duration_seconds,
           streamUrl: mediaUrl(
-            `/navidrome/connections/${connection}/stream/${encodeURIComponent(track.source_id)}`,
+            `/media/connections/${connection}/stream/${encodeURIComponent(track.source_id)}`,
           ),
           connectionId: connection,
           sourceId: track.source_id,

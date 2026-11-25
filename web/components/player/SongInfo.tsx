@@ -117,7 +117,7 @@ export default function SongInfo({ track, artwork }: { track: Track; artwork: Re
   const [loaded, setLoaded] = useState<{ id: string; info: Info | null } | null>(null);
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`/analysis/library/tracks/${encodeURIComponent(track.id)}/info`, {
+    fetch(`/api/v1/library/tracks/${encodeURIComponent(track.id)}/info`, {
       signal: controller.signal,
       credentials: "same-origin",
     })

@@ -32,7 +32,7 @@ export type PlayerTrack = {
 
 function scrobble(track: PlayerTrack | null, submission: boolean) {
   if (!track?.connectionId || !track.sourceId) return;
-  fetch(mediaUrl("/navidrome/scrobble"), {
+  fetch(mediaUrl("/media/scrobble"), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -229,7 +229,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController();
     visualRequest.current = controller;
     resetVisuals();
-    fetch(`/analysis/library/tracks/${encodeURIComponent(trackId)}/visual-features`, {
+    fetch(`/api/v1/library/tracks/${encodeURIComponent(trackId)}/visual-features`, {
       signal: controller.signal,
     })
       .then((response) => (response.ok ? response.json() : null))
@@ -258,7 +258,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         resetVisuals();
       })
       .catch(() => {});
-    fetch(`/analysis/library/tracks/${encodeURIComponent(trackId)}/waveform`, {
+    fetch(`/api/v1/library/tracks/${encodeURIComponent(trackId)}/waveform`, {
       signal: controller.signal,
     })
       .then((response) => (response.ok ? response.json() : null))
@@ -590,7 +590,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setLyricsLoading(false);
       }
     };
-    fetch(`/analysis/library/tracks/${next.id}/lyrics`)
+    fetch(`/api/v1/library/tracks/${next.id}/lyrics`)
       .then((response) => (response.ok ? response.json() : null))
       .then(resolve)
       .catch(() => resolve(null));
@@ -631,7 +631,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         .catch(() => {});
     const streamQuality = readPlaybackPreferences().quality;
     setAudioQuality(null);
-    fetch(`/analysis/library/tracks/${next.id}/audio-quality`)
+    fetch(`/api/v1/library/tracks/${next.id}/audio-quality`)
       .then((response) => (response.ok ? response.json() : null))
       .then((value) => {
         if (playbackSessionRef.current === session && value && trackRef.current?.id === next.id)

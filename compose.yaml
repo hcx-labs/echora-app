@@ -31,7 +31,7 @@ services:
     restart: unless-stopped
     build:
       context: .
-      dockerfile: services/analysis/docker/Dockerfile.gpu
+      dockerfile: docker/Dockerfile.gpu
     # Pass optional runtime overrides to Pydantic Settings, not just Compose interpolation.
     env_file: &analysis-env-files
       - path: .env
@@ -46,7 +46,7 @@ services:
       OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
-      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:3000/analysis/auth/oidc/callback}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:3000/api/v1/auth/oidc/callback}
       OIDC_POST_LOGIN_REDIRECT: ${OIDC_POST_LOGIN_REDIRECT:-http://localhost:3000/home}
       OIDC_BOOTSTRAP_ADMIN_EMAIL: ${OIDC_BOOTSTRAP_ADMIN_EMAIL:-}
       OIDC_REQUIRE_VERIFIED_EMAIL: ${OIDC_REQUIRE_VERIFIED_EMAIL:-false}
@@ -100,7 +100,7 @@ services:
       - "host.docker.internal:host-gateway"
     ports: ["8000:8000"]
     healthcheck: &analysis-healthcheck
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/system/health')"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -109,7 +109,7 @@ services:
     env_file: *analysis-env-files
     build:
       context: .
-      dockerfile: services/analysis/docker/Dockerfile.gpu
+      dockerfile: docker/Dockerfile.gpu
     environment:
       <<: *analysis-environment
       ECHORA_BATCH_SIZE: ${ECHORA_BATCH_SIZE:-128}
@@ -129,7 +129,7 @@ services:
     env_file: *analysis-env-files
     build:
       context: .
-      dockerfile: services/analysis/docker/Dockerfile.cpu
+      dockerfile: docker/Dockerfile.cpu
     environment: *analysis-environment
     volumes: *analysis-volumes
     user: "1001"
@@ -152,9 +152,10 @@ services:
       NAVIDROME_URL: ${NAVIDROME_URL:-}
       NAVIDROME_USERNAME: ${NAVIDROME_USERNAME:-}
       NAVIDROME_PASSWORD: ${NAVIDROME_PASSWORD:-}
-      # Browser media (covers, streams) targets this path prefix; nginx routes
-      # it straight to analysis, keeping Node out of the media hot path.
-      ECHORA_MEDIA_BASE: ${ECHORA_MEDIA_BASE:-/api}
+      # Browser media (covers, streams) is fetched from this origin's /api/v1
+      # (empty: the same origin, where nginx routes /api/v1/ straight to the
+      # backend, keeping Node out of the media hot path).
+      ECHORA_MEDIA_BASE: ${ECHORA_MEDIA_BASE:-}
     depends_on:
       postgres: { condition: service_healthy }
       analysis: { condition: service_started }

@@ -1,0 +1,53 @@
+FROM pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+WORKDIR /service
+# ffmpeg follows the pinned Ubuntu base image security repository.
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y ffmpeg libchromaprint-tools python3.12-venv espeak-ng \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 1001 echora
+# Dependencies first, from the three packages' manifests only, so code changes keep this layer.
+# The stub packages installed with them are removed again: the code comes from PYTHONPATH.
+COPY core/pyproject.toml core/setup.py ./build/core/
+COPY worker/pyproject.toml worker/setup.py ./build/worker/
+COPY backend/pyproject.toml backend/setup.py ./build/backend/
+RUN for package in core worker backend; do mkdir -p build/$package/src && touch build/$package/src/__init__.py; done \
+    && python -m venv --system-site-packages /opt/venv \
+    && /opt/venv/bin/pip install ./build/core ./build/worker ./build/backend \
+    && /opt/venv/bin/pip uninstall -y echora-core echora-worker echora-backend \
+    && /opt/venv/bin/python -m nltk.downloader -d /usr/local/share/nltk_data cmudict \
+    && rm -rf build
+# Label rules v3 (worker/src/kara/aligner/label_rules.py, FA_KARA_LABEL_RULES=v3 only): per-line language with
+# fastText lid.176.ftz (CC BY-SA 3.0), pinned by hash to the model the v3 manifest was built with.
+RUN mkdir -p /opt/fa_kara_models \
+    && /opt/venv/bin/python -c "import hashlib, urllib.request; data = urllib.request.urlopen('https://huggingface.co/julien-c/fasttext-language-id/resolve/9f2e94d2fd6b2615d26f5ec5b34cf7e2f38cb86e/lid.176.ftz').read(); assert hashlib.sha256(data).hexdigest() == '8f3472cfe8738a7b6099e8e999c3cbfae0dcd15696aac7d7738a8039db603e83', 'lid.176.ftz hash'; open('/opt/fa_kara_models/lid.176.ftz', 'wb').write(data)"
+# ComfyUI for optional motion artwork. The worker starts it only while a batch renders loops.
+# Its own venv keeps its pins (transformers, SQLAlchemy, alembic) apart from Echora's; torch is shared.
+ARG COMFYUI_COMMIT=d43a5fa20c8547ff42d13232f589a06536c42b97
+ADD https://github.com/comfyanonymous/ComfyUI/archive/${COMFYUI_COMMIT}.tar.gz /tmp/comfyui.tar.gz
+RUN mkdir -p /opt/comfyui \
+    && tar -xzf /tmp/comfyui.tar.gz -C /opt/comfyui --strip-components=1 \
+    && rm /tmp/comfyui.tar.gz \
+    && grep -vE '^(torch|torchvision|torchaudio)$' /opt/comfyui/requirements.txt > /tmp/comfyui-requirements.txt \
+    && python -m venv --system-site-packages /opt/comfyui-venv \
+    && /opt/comfyui-venv/bin/pip install -r /tmp/comfyui-requirements.txt \
+    && rm /tmp/comfyui-requirements.txt
+# core, worker and backend import under their project names.
+COPY core/src ./packages/core
+COPY worker/src ./packages/worker
+COPY backend/src ./packages/backend
+COPY core/alembic.ini ./alembic.ini
+# The GPU analysis image of this same build, which Modal runs (docs/modal-compute.md).
+ARG ECHORA_MODAL_IMAGE=""
+ENV ECHORA_MODAL_IMAGE="${ECHORA_MODAL_IMAGE:-ghcr.io/hackslashx/echora-analysis-gpu:latest}"
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONPATH="/service/packages" \
+    HF_HOME="/models/huggingface" \
+    TORCH_HOME="/models/torch" \
+    LID_MODEL_PATH="/models/lid.176.bin" \
+    NLTK_DATA="/usr/local/share/nltk_data"
+RUN mkdir -p /models/huggingface /home/echora \
+    && chown -R echora /models /home/echora
+EXPOSE 8000
+CMD ["sh", "-c", "mkdir -p /data/preprocessed /data/recording-calibration \"${ECHORA_MOTION_ARTWORK_DIR:-/data/motion-artwork}\" && chown echora /data/preprocessed /data/recording-calibration \"${ECHORA_MOTION_ARTWORK_DIR:-/data/motion-artwork}\" && chmod 700 /data/recording-calibration && chown -R echora /models && runuser -u echora -- python -m worker.models.download --prune-only && runuser -u echora -- alembic upgrade head && exec runuser -u echora -- uvicorn backend.app:create_app --factory --host 0.0.0.0 --port 8000"]

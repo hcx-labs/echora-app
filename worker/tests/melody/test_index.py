@@ -212,11 +212,14 @@ def test_search_loads_only_current_recipe_and_owned_tracks(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     cursor.fetchone.return_value = (0, "")
     cursor.fetchall.return_value = []
-    monkeypatch.setattr(h, "_CONTOUR_CACHE", {"key": None, "contours": ()})
-    assert h._load_contours(connection, "owner") == []
+    assert h.contour_index_key(connection, "owner") == (
+        f"owner:{h.MELODY_CONTOUR_REVISION}",
+        0,
+        "",
+    )
+    assert h.load_contours(connection, "owner") == []
     for call in cursor.execute.call_args_list:
         sql, params = call.args
         assert "ar.model_revision=%s" in sql
         assert "utl.user_id=%s" in sql
         assert params == (h.MELODY_CONTOUR_REVISION, "owner")
-    assert h.MELODY_CONTOUR_REVISION in h._CONTOUR_CACHE["key"][0]

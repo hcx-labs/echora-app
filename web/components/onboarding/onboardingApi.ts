@@ -1,5 +1,5 @@
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`/analysis${path}`, options);
+  const response = await fetch(`/api/v1${path}`, options);
   const text = response.status === 204 ? "" : await response.text();
   let body: Record<string, unknown> = {};
   try {
@@ -40,8 +40,5 @@ export type Track = {
 
 /** Makes the user's current server connection the one their library uses. */
 export function selectConnection(connectionId: string, complete = false) {
-  return api(
-    "/users/me/preferences/onboarding",
-    json("PUT", { complete, connection_id: connectionId }),
-  );
+  return api("/settings/onboarding", json("PUT", { complete, connection_id: connectionId }));
 }
