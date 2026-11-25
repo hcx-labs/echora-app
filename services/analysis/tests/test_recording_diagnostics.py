@@ -2,9 +2,8 @@
 
 from uuid import uuid4
 
-import pytest
-
 import core.jobs.queue as jobs
+import pytest
 import worker.recordings.search as search
 
 

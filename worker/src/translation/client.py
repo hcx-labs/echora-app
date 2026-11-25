@@ -1,14 +1,14 @@
 """Bounded, non-agentic translation client; no network calls until explicitly invoked."""
 
-import hashlib
 import json
 import time
 
 import httpx
-from openai import OpenAI, APIConnectionError, APIStatusError, APIError, omit
+from openai import APIConnectionError, APIError, APIStatusError, OpenAI, omit
 
 from core.integrations.claude import ClaudeError, complete_json
 from core.integrations.external_ai import ExternalAISettings, LanguagePair
+from core.lyrics.translations import TranslationError, validate_lines
 
 MAX_LINES = 500
 MAX_INPUT_BYTES = 64000
@@ -37,37 +37,6 @@ SCHEMA = {
     "required": ["lines"],
     "additionalProperties": False,
 }
-
-
-class TranslationError(ValueError):
-    """Safe error code only: never expose remote bodies, lyrics or keys."""
-
-
-def source_checksum(lines: list[str]) -> str:
-    return hashlib.sha256(
-        json.dumps(lines, ensure_ascii=False, separators=(",", ":")).encode()
-    ).hexdigest()
-
-
-def validate_lines(value, count: int) -> list[dict]:
-    if not isinstance(value, list) or len(value) != count:
-        raise TranslationError("invalid_line_mapping")
-    mapped = {}
-    for line in value:
-        if (
-            not isinstance(line, dict)
-            or set(line) != {"id", "text"}
-            or type(line["id"]) is not int
-            or not 0 <= line["id"] < count
-            or line["id"] in mapped
-            or not isinstance(line["text"], str)
-            or len(line["text"].encode()) > 16000
-            or "\n" in line["text"]
-            or "\r" in line["text"]
-        ):
-            raise TranslationError("invalid_line_mapping")
-        mapped[line["id"]] = line
-    return [mapped[i] for i in range(count)]
 
 
 def _unique_object(pairs):

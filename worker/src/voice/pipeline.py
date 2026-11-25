@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-from core.db.config import DatabaseConfig
-from worker.models.config import ModelsConfig
-
-from collections.abc import Callable
 import hashlib
 import json
+import logging
 import os
 import platform
 import threading
 import uuid
-import logging
+from collections.abc import Callable
 
 import essentia.standard as es
 import numpy as np
@@ -19,11 +16,13 @@ import psycopg
 import torch
 from psycopg.types.json import Jsonb
 
-from core.media.audio import decode_audio
+from core.db.config import DatabaseConfig
+from core.embeddings.representations import configure_representations, voice_config
 from core.integrations.navidrome import NavidromeClient
+from worker.media.audio import decode_audio
+from worker.models.config import ModelsConfig
+from worker.planning.audio import _id_filter, resolve_library_id
 from worker.remote.session import current as current_remote
-from worker.planning.audio import resolve_library_id, _id_filter
-from core.embeddings.representations import voice_config, configure_representations
 
 logger = logging.getLogger(__name__)
 

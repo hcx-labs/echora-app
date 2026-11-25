@@ -1,24 +1,21 @@
 """Recording API boundaries and isolated-schema lifecycle integration tests."""
 
-from worker.recordings.config import RecordingConfig
-from core.config import reset_config_cache
-
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import Mock, patch
-from uuid import uuid4
 import io
 import json
-import runpy
 import wave
-
-import numpy as np
-import pytest
-from fastapi import FastAPI, HTTPException
-from fastapi.testclient import TestClient
+from types import SimpleNamespace
+from unittest.mock import Mock
+from uuid import uuid4
 
 import core.jobs.queue as jobs
+import numpy as np
+import pytest
 import worker.recordings.search as search
+from core.config import reset_config_cache
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+from worker.recordings.config import RecordingConfig
+
 from echora_analysis.recording_routes import create_router
 
 
@@ -276,8 +273,8 @@ def test_cancel_api_is_owner_and_kind_scoped(api, monkeypatch):
 
 
 def test_sync_index_status_scopes_catalog_owner_and_representation(recording_db, monkeypatch):
-    from psycopg.rows import tuple_row
     import worker.recordings.encoder as recording_encoder
+    from psycopg.rows import tuple_row
 
     owner, other, library, elsewhere, namespace = [uuid4() for _ in range(5)]
     monkeypatch.setattr(
@@ -321,6 +318,7 @@ def test_sync_index_status_scopes_catalog_owner_and_representation(recording_db,
 
 def test_sync_index_status_disabled_and_invalid_model(monkeypatch):
     from unittest.mock import MagicMock
+
     import worker.recordings.encoder as recording_encoder
 
     connection = MagicMock()
@@ -336,7 +334,7 @@ def test_sync_index_status_disabled_and_invalid_model(monkeypatch):
 
 
 def test_query_and_library_decoders_agree_on_stereo_resampling():
-    from core.media.audio import decode_audio
+    from worker.media.audio import decode_audio
 
     rate = 48000
     t = np.arange(rate * 2) / rate
@@ -357,7 +355,8 @@ def test_query_and_library_decoders_agree_on_stereo_resampling():
 def test_store_fingerprints_full_track_reuse_and_source_identity(monkeypatch):
     import hashlib
     from unittest.mock import MagicMock
-    import core.media.audio as audio
+
+    import worker.media.audio as audio
     import worker.recordings.encoder as recording_encoder
 
     connection = MagicMock()
@@ -440,8 +439,8 @@ def test_match_prefers_selected_connection_when_track_exists_on_both_servers(rec
 
 
 def test_decoder_cancellation_kills_child_and_drains_pipes(monkeypatch):
-    from unittest.mock import MagicMock
     import subprocess
+    from unittest.mock import MagicMock
 
     process = MagicMock()
     process.__enter__.return_value = process
@@ -455,8 +454,8 @@ def test_decoder_cancellation_kills_child_and_drains_pipes(monkeypatch):
 
 
 def test_decoder_resumes_communication_without_resending_input(monkeypatch):
-    from unittest.mock import MagicMock
     import subprocess
+    from unittest.mock import MagicMock
 
     process = MagicMock()
     process.__enter__.return_value = process

@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from core.db.config import require_database_url
-
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
 import hashlib
 import json
 import logging
 import math
 import platform
 import uuid
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 
 import numpy as np
 import psycopg
@@ -17,27 +15,15 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from sklearn.metrics import adjusted_rand_score
 
-
+from core.db.config import require_database_url
+from core.embeddings.representations import (
+    DEFAULT_PARAMETERS,
+    AudioProfileParameters,
+    profile_config,
+)
 from core.revisions import AUDIO_PROFILE_REVISION, SUPPORTED_PROFILE_MODELS
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class AudioProfileParameters:
-    minimum_segment_seconds: float = 20.0
-    maximum_segments: int = 30
-    segment_penalty: float = 0.16
-    maximum_modes: int = 4
-    minimum_mode_seconds: float = 15.0
-    minimum_mode_share: float = 0.10
-    mode_penalty: float = 0.055
-    mode_merge_similarity: float = 0.92
-    minimum_mode_stability: float = 0.70
-    clustering_seeds: int = 6
-
-
-DEFAULT_PARAMETERS = AudioProfileParameters()
 
 
 @dataclass(frozen=True)
@@ -401,35 +387,6 @@ def _vector_literal(vector: np.ndarray) -> str:
     return "[" + ",".join(f"{float(value):.9g}" for value in vector) + "]"
 
 
-def _profile_config(
-    model_name: str,
-    parameters: AudioProfileParameters,
-) -> dict[str, object]:
-    return {
-        "algorithm": "echora_audio_profile",
-        "revision": AUDIO_PROFILE_REVISION,
-        "source_model": model_name,
-        "global_methods": ["normalized_overlap_mean", "normalized_decorrelated_mean"],
-        "decorrelation": "greedy_nonoverlapping_windows",
-        "temporal_segmentation": {
-            "method": "penalized_spherical_change_points",
-            "minimum_segment_seconds": parameters.minimum_segment_seconds,
-            "maximum_segments": parameters.maximum_segments,
-            "penalty": parameters.segment_penalty,
-        },
-        "modes": {
-            "method": "spherical_kmeans_decorrelated_windows",
-            "maximum": parameters.maximum_modes,
-            "minimum_seconds": parameters.minimum_mode_seconds,
-            "minimum_share": parameters.minimum_mode_share,
-            "penalty": parameters.mode_penalty,
-            "merge_similarity": parameters.mode_merge_similarity,
-            "minimum_stability": parameters.minimum_mode_stability,
-            "clustering_seeds": parameters.clustering_seeds,
-        },
-    }
-
-
 def _create_profile_run(
     connection: psycopg.Connection,
     model_name: str,
@@ -437,7 +394,7 @@ def _create_profile_run(
 ) -> uuid.UUID:
     if model_name not in SUPPORTED_PROFILE_MODELS:
         raise ValueError(f"Unsupported audio-profile source model: {model_name}")
-    config = _profile_config(model_name, parameters)
+    config = profile_config(model_name, parameters)
     environment = {"python": platform.python_version(), "numpy": np.__version__}
     config_hash = hashlib.sha256(
         json.dumps(config, sort_keys=True, separators=(",", ":")).encode()

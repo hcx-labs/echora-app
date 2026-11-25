@@ -1,82 +1,32 @@
 from __future__ import annotations
 
-from core.db.config import DatabaseConfig
-from core.integrations.config import LastfmConfig
-from echora_analysis.config import ApiConfig, OidcConfig, SessionConfig, UiConfig
-from collections import Counter
-from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
 import random
 import threading
 import time
 import uuid
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from urllib.parse import urlparse
-
+import core.jobs.queue as jobs
 import httpx
-from authlib.integrations.starlette_client import OAuth, OAuthError
 import igraph as ig
 import numpy as np
 import psycopg
-from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
-from sklearn.metrics import adjusted_rand_score, silhouette_score
-from sqlalchemy import delete, func, select, text
-from sqlalchemy.exc import IntegrityError
-
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel, Field, HttpUrl, SecretStr
-from starlette.concurrency import run_in_threadpool
-from starlette.middleware.sessions import SessionMiddleware
-from starlette.responses import RedirectResponse, StreamingResponse
-
-from .artists import (
-    fit_artist_profile,
-    representative_indices,
-    soft_chamfer_similarity,
-    weighted_center,
-)
-from worker.library.descriptors import DESCRIPTOR_REVISION
-from worker.library.waveforms import WAVEFORM_REVISION
-from worker.library.visual_features import VISUAL_FEATURE_REVISION
-from .melody_preview import melody_preview
-from worker.profiles.pipeline import AUDIO_PROFILE_REVISION, SUPPORTED_PROFILE_MODELS
+from authlib.integrations.starlette_client import OAuth, OAuthError
 from core.curation.concepts import (
     combine_concept_percentiles,
     empirical_percentiles,
     predefined_concepts,
     score_concept,
 )
-from core.db.session import session_scope
-from core.curation.preview import CurationRecipe, preview_curation as preview_recipe
-from core.errors import (
-    ConflictError,
-    EchoraError,
-    IntegrationError,
-    InvalidQueryError,
-    NotFoundError,
-)
-from core.library.connections import credential_cipher, load_connection
-from core.library.membership import attach_user_library, relink_renumbered_sources
-from . import sessions
-import core.jobs.queue as jobs
-from core.db.models import (
-    Curation,
-    NavidromeConnection,
-    OidcAllowedEmail,
-    OidcSetting,
-    User,
-    UserPreference,
-    UserSession,
-)
-from worker.melody.index import DEFAULT_CORPUS_SIZE, search_corpus
 from core.curation.journeys import (
     normalize_rows as normalize_journey_rows,
+)
+from core.curation.journeys import (
     select_journey,
     spherical_targets,
 )
@@ -87,20 +37,71 @@ from core.curation.listening import (
     navidrome_play_counts,
     top_tracks,
 )
-from worker.kara.pipeline import KARAOKE_PIPELINE_REVISION
-from core.revisions import MELODY_CONTOUR_REVISION
-from .media_cache import cache_key, media_cache
-from core.embeddings.text import shared_lyrics_model
-from worker.themes.pipeline import PROMPT_REVISION as LYRIC_THEMES_REVISION
-from core.integrations.navidrome import NavidromeClient, media_navidrome_client
+from core.curation.preview import CurationRecipe
+from core.curation.preview import preview_curation as preview_recipe
+from core.db.config import DatabaseConfig
+from core.db.models import (
+    Curation,
+    NavidromeConnection,
+    OidcAllowedEmail,
+    OidcSetting,
+    User,
+    UserPreference,
+    UserSession,
+)
+from core.db.session import session_scope
 from core.embeddings.representations import configure_representations
+from core.embeddings.text import shared_lyrics_model
+from core.errors import (
+    ConflictError,
+    EchoraError,
+    IntegrationError,
+    InvalidQueryError,
+    NotFoundError,
+)
+from core.integrations.config import LastfmConfig
+from core.integrations.navidrome import NavidromeClient, media_navidrome_client
+from core.library.connections import credential_cipher, load_connection
+from core.library.membership import attach_user_library, relink_renumbered_sources
+from core.revisions import AUDIO_PROFILE_REVISION, MELODY_CONTOUR_REVISION, SUPPORTED_PROFILE_MODELS
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
+from pydantic import BaseModel, Field, HttpUrl, SecretStr
+from sklearn.metrics import adjusted_rand_score, silhouette_score
+from sqlalchemy import delete, func, select, text
+from sqlalchemy.exc import IntegrityError
+from starlette.concurrency import run_in_threadpool
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import RedirectResponse, StreamingResponse
+from worker.kara.pipeline import KARAOKE_PIPELINE_REVISION
+from worker.library.descriptors import DESCRIPTOR_REVISION
+from worker.library.visual_features import VISUAL_FEATURE_REVISION
+from worker.library.waveforms import WAVEFORM_REVISION
+from worker.melody.index import DEFAULT_CORPUS_SIZE, search_corpus
+from worker.remote.settings import compute_for
+from worker.themes.pipeline import PROMPT_REVISION as LYRIC_THEMES_REVISION
 
-from .recording_routes import create_router as recording_router
-from core.integrations.external_ai import router as external_ai_router
-from worker.remote.settings import compute_for, router as external_processing_router
-from worker.artwork.settings import router as motion_artwork_router
+from echora_analysis.config import ApiConfig, OidcConfig, SessionConfig, UiConfig
+
+from . import sessions
+from .artists import (
+    fit_artist_profile,
+    representative_indices,
+    soft_chamfer_similarity,
+    weighted_center,
+)
+from .media_cache import cache_key, media_cache
+from .melody_preview import melody_preview
 from .navidrome_integration import settings_router as navidrome_integration_router
 from .plugin_routes import router as navidrome_plugin_router
+from .recording_routes import create_router as recording_router
+from .routes.external_ai import router as external_ai_router
+from .routes.external_processing import router as external_processing_router
+from .routes.motion_artwork import router as motion_artwork_router
 
 app = FastAPI(title="Echora analysis", version="0.3.0")
 
@@ -1627,8 +1628,8 @@ def track_lyrics(
     provenance = row.get("provenance") or {}
     source_lines = provenance.get("lines") or []
     karaoke_lines = row.get("karaoke_lines") or []
-    from worker.translation.pipeline import source_lines as translation_source_lines
     from core.lyrics.translations import load_translations
+    from worker.translation.pipeline import source_lines as translation_source_lines
 
     original_lines = translation_source_lines(row)
     translations = [

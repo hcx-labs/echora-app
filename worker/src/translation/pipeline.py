@@ -1,6 +1,5 @@
 """Fill missing translations during sync; source lyrics remain authoritative."""
 
-from core.library.connections import credential_cipher
 import functools
 import importlib.util
 import logging
@@ -11,10 +10,17 @@ from pathlib import Path
 import psycopg
 from psycopg.rows import dict_row
 
-from core.integrations.external_ai import LanguagePair
 from core.db.config import require_database_url
-from core.lyrics.translations import load_settings, load_translations, save_translation
-from worker.translation.client import translate, TranslationError, source_checksum
+from core.integrations.external_ai import LanguagePair
+from core.library.connections import credential_cipher
+from core.lyrics.translations import (
+    TranslationError,
+    load_settings,
+    load_translations,
+    save_translation,
+    source_checksum,
+)
+from worker.translation.client import translate
 
 logger = logging.getLogger(__name__)
 

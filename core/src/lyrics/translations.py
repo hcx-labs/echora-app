@@ -1,14 +1,50 @@
-"""PostgreSQL persistence. Original lyrics are never written by this module."""
+"""Stored lyric translations and External AI settings. Original lyrics are never written here.
+
+The line contract (one translated line per source line, keyed by index) and the source checksum
+that ties a translation to the lyrics it was made from are shared by the worker, which writes
+translations, and the API, which serves them.
+"""
 
 import hashlib
+import json
 
 import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from core.integrations.external_ai import ExternalAISettings, LanguagePair
-from worker.translation.client import source_checksum, validate_lines
 from core.db.config import require_database_url
+from core.integrations.external_ai import ExternalAISettings, LanguagePair
+
+
+class TranslationError(ValueError):
+    """Safe error code only: never expose remote bodies, lyrics or keys."""
+
+
+def source_checksum(lines: list[str]) -> str:
+    return hashlib.sha256(
+        json.dumps(lines, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def validate_lines(value, count: int) -> list[dict]:
+    if not isinstance(value, list) or len(value) != count:
+        raise TranslationError("invalid_line_mapping")
+    mapped = {}
+    for line in value:
+        if (
+            not isinstance(line, dict)
+            or set(line) != {"id", "text"}
+            or type(line["id"]) is not int
+            or not 0 <= line["id"] < count
+            or line["id"] in mapped
+            or not isinstance(line["text"], str)
+            or len(line["text"].encode()) > 16000
+            or "\n" in line["text"]
+            or "\r" in line["text"]
+        ):
+            raise TranslationError("invalid_line_mapping")
+        mapped[line["id"]] = line
+    return [mapped[i] for i in range(count)]
 
 
 def load_settings():
@@ -110,6 +146,7 @@ def load_translations(track_id, source_lines: list[str]):
 def save_section(values, encrypted_key=None, *, replace_key=False):
     """Update only submitted section columns, inside one transaction."""
     from psycopg import sql
+
     from core.integrations.external_ai import DEFAULT_PROMPT
 
     allowed = {

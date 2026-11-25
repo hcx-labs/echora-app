@@ -1,6 +1,6 @@
 import numpy as np
 
-from core.media.audio import (
+from worker.media.audio import (
     deterministic_windows,
     full_coverage_window_ranges,
     full_coverage_windows,

@@ -6,11 +6,10 @@ import runpy
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
-
 from core.config import reset_config_cache
 from core.db.config import DatabaseConfig, require_database_url
 from core.errors import ConfigurationError
+from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[3]
 EXPORTER = runpy.run_path(str(ROOT / "scripts/export-runtime-settings.py"))

@@ -1,18 +1,18 @@
 """Independent session policy, HTTP contract, and PostgreSQL concurrency checks."""
 
-from core.config import reset_config_cache
+import os
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-import os
-from uuid import uuid4
 from unittest.mock import Mock
+from uuid import uuid4
 
 import psycopg
-from psycopg import sql
 import pytest
+from core.config import reset_config_cache
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from psycopg import sql
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -37,7 +37,7 @@ def database(auth, monkeypatch):
     url = os.getenv("TEST_DATABASE_URL")
     if not url:
         pytest.skip("TEST_DATABASE_URL is required for isolated PostgreSQL session tests")
-    from core.db.models import User, UserPreference, UserSession, NavidromeConnection
+    from core.db.models import NavidromeConnection, User, UserPreference, UserSession
 
     schema = "test_sessions_" + uuid4().hex
     with psycopg.connect(url, autocommit=True) as db:
@@ -272,6 +272,7 @@ def test_legacy_migration_on_postgresql(auth, database):
     import runpy
     from pathlib import Path
     from unittest.mock import patch
+
     from sqlalchemy import text
 
     now = datetime.now(timezone.utc)

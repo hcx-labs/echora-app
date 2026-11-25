@@ -7,21 +7,21 @@ process lock. Consumers receive independent arrays, never mutable shared buffers
 
 from __future__ import annotations
 
-from worker.media.config import PreprocessConfig
-
-from contextlib import contextmanager
-from contextvars import ContextVar
 import fcntl
 import hashlib
 import io
 import json
 import os
-from pathlib import Path
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+from pathlib import Path
 
 import numpy as np
+
+from worker.media.config import PreprocessConfig
 
 CACHE_SCHEMA = "audio-prerequisites-v1"
 DECODE_REVISION = "ffmpeg-f32le-v1"
@@ -256,7 +256,7 @@ def _vocal_recipe():
 
 
 def vocal_stereo(data: bytes, check=lambda: None, *, before_separate=None):
-    from core.media.audio import decode_audio_channels
+    from worker.media.audio import decode_audio_channels
     from worker.media.roformer import separate_vocals
 
     cache = _cache(check)
@@ -298,7 +298,8 @@ def vocal_waveform(data: bytes, sample_rate=16000, check=lambda: None, *, before
 def vocal_reference_waveform(data: bytes, check=lambda: None):
     """Original mix on exactly the same sample grid as mono16k Roformer vocals."""
     import soxr
-    from core.media.audio import decode_audio_channels
+
+    from worker.media.audio import decode_audio_channels
 
     recipe = {
         "kind": "vocal-reference-mono",
@@ -328,7 +329,7 @@ def vocal_audio_bytes(data: bytes, check=lambda: None, *, before_separate=None) 
 
 def melody_waveforms(data: bytes, check=lambda: None):
     """Mono 44.1 kHz vocals and mix-minus-vocals, from the same cached stereo input."""
-    from core.media.audio import decode_audio_channels
+    from worker.media.audio import decode_audio_channels
 
     cache = _cache(check)
     vocals = vocal_waveform(data, 44100, check)
@@ -363,7 +364,7 @@ def prepare_audio(
     reference=False,
     check=lambda: None,
 ):
-    from core.media.audio import decode_audio, decode_audio_channels
+    from worker.media.audio import decode_audio, decode_audio_channels
 
     check()
     for sample_rate in sorted(set(mono_rates)):

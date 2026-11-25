@@ -1,21 +1,19 @@
-from core.curation.preview import curation_corpus
-from core.library.membership import reconcile_user_tracks
-from core.config import reset_config_cache
-
 import os
 import uuid
 
 import psycopg
 import pytest
-from psycopg.types.json import Jsonb
-
-from worker.library.attempts import start_attempt, record_track, finish_attempt
+from core.config import reset_config_cache
+from core.curation.preview import curation_corpus
 from core.embeddings.representations import (
     config_hash,
     configure_representations,
     embedding_config,
     model_settings,
 )
+from core.library.membership import reconcile_user_tracks
+from psycopg.types.json import Jsonb
+from worker.library.attempts import finish_attempt, record_track, start_attempt
 
 
 def test_default_contract_preserves_existing_audio_configuration():
@@ -126,6 +124,7 @@ def test_revision_switch_reduces_coverage_instead_of_mixing_spaces(db, monkeypat
 @pytest.fixture()
 def visible_track(db, monkeypatch):
     from contextlib import contextmanager
+
     import echora_analysis.main as main
 
     run = add_run(db)
@@ -185,8 +184,8 @@ def test_descriptor_endpoint_enforces_visibility_and_reports_pending(visible_tra
 
 
 def test_planner_retries_partial_descriptors_and_keeps_current_audio(db, visible_track):
-    from worker.planning.audio import plan_audio
     from worker.library.descriptors import DESCRIPTOR_REVISION
+    from worker.planning.audio import plan_audio
 
     _, _, library, _, track, _ = visible_track
     plan = plan_audio(db, library, ["song"])
@@ -220,8 +219,8 @@ def test_waveform_endpoint_visibility_and_pending(visible_track, db):
 
 
 def test_waveform_planner_skips_current_and_retries_old_revision(db, visible_track):
-    from worker.planning.audio import plan_audio
     from worker.library.waveforms import WAVEFORM_REVISION
+    from worker.planning.audio import plan_audio
 
     _, _, library, _, track, _ = visible_track
     assert plan_audio(db, library, ["song"]).waveform_external_ids == frozenset({"song"})
@@ -236,9 +235,10 @@ def test_waveform_planner_skips_current_and_retries_old_revision(db, visible_tra
 
 def test_visual_feature_endpoint_visibility_and_planner(db, visible_track):
     from fastapi import HTTPException
-    from echora_analysis.main import track_visual_features
-    from worker.planning.audio import plan_audio
     from worker.library.visual_features import VISUAL_FEATURE_REVISION
+    from worker.planning.audio import plan_audio
+
+    from echora_analysis.main import track_visual_features
 
     _, _, library, _, track, _ = visible_track
     assert plan_audio(db, library, ["song"]).visual_feature_external_ids == frozenset({"song"})

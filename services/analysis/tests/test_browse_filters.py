@@ -1,5 +1,6 @@
 import pytest
 from fastapi import HTTPException
+
 from echora_analysis.browse_filters import predicates
 
 

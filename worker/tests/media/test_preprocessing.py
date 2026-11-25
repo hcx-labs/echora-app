@@ -1,16 +1,15 @@
-from core.config import reset_config_cache
-
-from concurrent.futures import ThreadPoolExecutor
 import io
 import json
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock
 
 import numpy as np
 import pytest
 
 import worker.media.preprocessing as p
+from core.config import reset_config_cache
 
 
 def cache(tmp_path, **kwargs):
@@ -120,7 +119,7 @@ def test_oversized_result_is_returned_without_retention(tmp_path):
 
 
 def test_decode_contracts_cached_only_in_session(monkeypatch, tmp_path):
-    import core.media.audio as audio
+    import worker.media.audio as audio
 
     monkeypatch.setenv("ECHORA_PREPROCESS_DIR", str(tmp_path))
     reset_config_cache()
@@ -142,9 +141,10 @@ def test_decode_contracts_cached_only_in_session(monkeypatch, tmp_path):
 
 
 def test_shared_vocals_for_transcription_and_karaoke(monkeypatch, tmp_path):
-    import core.media.audio as audio
-    import worker.media.roformer as roformer
     import soundfile as sf
+
+    import worker.media.audio as audio
+    import worker.media.roformer as roformer
 
     monkeypatch.setenv("ECHORA_PREPROCESS_DIR", str(tmp_path))
     reset_config_cache()
@@ -213,7 +213,7 @@ def test_audio_plan_prepares_only_pending_formats():
 
 
 def test_melody_reuses_shared_vocals_and_caches_residual(monkeypatch, tmp_path):
-    import core.media.audio as audio
+    import worker.media.audio as audio
     import worker.media.roformer as roformer
 
     monkeypatch.setenv("ECHORA_PREPROCESS_DIR", str(tmp_path))
@@ -257,7 +257,7 @@ def test_prune_stops_checking_once_remaining_entries_are_retained(tmp_path):
 
 @pytest.mark.parametrize("frames", [44099, 44100, 44101, 100003])
 def test_karaoke_reference_matches_vocal_resampling_grid(monkeypatch, tmp_path, frames):
-    import core.media.audio as audio
+    import worker.media.audio as audio
     import worker.media.roformer as roformer
 
     monkeypatch.setenv("ECHORA_PREPROCESS_DIR", str(tmp_path))

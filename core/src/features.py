@@ -8,7 +8,7 @@ Core analysis (audio and lyric embeddings, voice) has no switch.
 
 from __future__ import annotations
 
-from worker.remote.session import location as current_location
+from core.compute import location as current_location
 
 # Feature: (local column, Modal column, default before settings are saved).
 FEATURES = {

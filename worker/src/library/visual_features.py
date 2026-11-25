@@ -6,9 +6,8 @@ import librosa
 import numpy as np
 from psycopg.types.json import Jsonb
 
-from core.media.audio import decode_audio
-
 from core.revisions import VISUAL_FEATURE_REVISION
+from worker.media.audio import decode_audio
 
 SAMPLE_RATE = 22_050
 HOP_LENGTH = 512  # Divisible by 2**6 for the seven-octave CQT.

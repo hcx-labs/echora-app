@@ -2,8 +2,8 @@
 
 import ast
 import os
-from pathlib import Path
 import unittest
+from pathlib import Path
 from uuid import uuid4
 
 import psycopg

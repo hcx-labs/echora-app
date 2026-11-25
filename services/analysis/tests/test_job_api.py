@@ -1,8 +1,8 @@
 """API contract tests without inference, Navidrome, or live database access."""
 
 import os
-from uuid import uuid4
 from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
 
@@ -13,8 +13,9 @@ def api(monkeypatch):
     monkeypatch.setenv(
         "DATABASE_URL", os.getenv("TEST_DATABASE_URL", "postgresql://localhost/unused")
     )
-    import echora_analysis.main as main
     from fastapi.testclient import TestClient
+
+    import echora_analysis.main as main
 
     user_id = uuid4()
     monkeypatch.setattr(main, "_session_user", lambda _: {"id": user_id})

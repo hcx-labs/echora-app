@@ -12,19 +12,19 @@ worker's settings require. Anything stale is redeployed or downloaded first.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
-from contextvars import ContextVar
-from dataclasses import dataclass
 import hashlib
 import io
 import logging
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
+from pathlib import Path
 
 from worker.remote.constants import APP_NAME, AUDIO_VOLUME
 
@@ -50,25 +50,6 @@ COVER_FIELDS = (
     "prompt",
     "failed",
 )
-
-_location: ContextVar[str] = ContextVar("echora_compute_location", default="local")
-
-
-def location() -> str:
-    """Where the running job computes: "local" or "modal". Feature switches depend on it."""
-    return _location.get()
-
-
-@contextmanager
-def computing_on(where: str) -> Iterator[None]:
-    """Run a job's planning and stages for one location (the sync's choice)."""
-    if where not in {"local", "modal"}:
-        raise ValueError(f"Unknown compute location: {where}")
-    token = _location.set(where)
-    try:
-        yield
-    finally:
-        _location.reset(token)
 
 
 def current() -> ModalSession | None:

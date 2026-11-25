@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 import re
 from xml.etree import ElementTree as ET
 
 from core.lyrics.backing import BACKING_VOICE, separate_text, separate_voices, tag_bracketed_backing
+from core.lyrics.sources import lyrics_paused
+from core.lyrics.translations import source_checksum
+
 from .navidrome_integration import connect
 from .plugin_ranking import library_namespace
-from core.lyrics.sources import lyrics_paused
 
 TT = "http://www.w3.org/ns/ttml"
 TTM = "http://www.w3.org/ns/ttml#metadata"
@@ -27,12 +27,6 @@ def original_lines(row):
     ):
         return [line["text"] for line in timed]
     return (row.get("text") or "").splitlines()
-
-
-def source_checksum(lines):
-    return hashlib.sha256(
-        json.dumps(lines, ensure_ascii=False, separators=(",", ":")).encode()
-    ).hexdigest()
 
 
 def timing(value):

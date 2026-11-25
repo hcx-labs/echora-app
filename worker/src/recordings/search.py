@@ -7,19 +7,18 @@ The exact reader deliberately precedes ANN so recall has a testable baseline.
 
 from __future__ import annotations
 
-from worker.recordings.config import RecordingConfig
-
 import hashlib
 import json
-from pathlib import Path
 import subprocess
 import time
+from pathlib import Path
 from uuid import UUID
 
 import numpy as np
 from psycopg.types.json import Jsonb
 
 import core.jobs.queue as jobs
+from worker.recordings.config import RecordingConfig
 
 MAX_CLIP_SECONDS = 20
 SAMPLE_RATE = 8000
@@ -44,7 +43,7 @@ def search_configuration():
 
 def load_match_policy(config, path):
     """Validate a policy against a verified encoder without changing process env."""
-    from worker.recordings.matcher import MatchPolicy, MATCHER_REVISION
+    from worker.recordings.matcher import MATCHER_REVISION, MatchPolicy
 
     payload = Path(path).read_bytes()
     data = json.loads(payload)
@@ -66,8 +65,8 @@ def load_match_policy(config, path):
 
 
 def status(user_id):
-    from worker.recordings.encoder import config_from_env
     from worker.recordings.calibration import enabled as calibration_enabled
+    from worker.recordings.encoder import config_from_env
 
     calibration = calibration_enabled()
     unavailable = {
@@ -284,7 +283,7 @@ def decode_query(audio: bytes, check=lambda: None) -> np.ndarray:
 
 
 def store_fingerprints(connection, track_id, audio: bytes, config, check=lambda: None):
-    from core.media.audio import decode_audio
+    from worker.media.audio import decode_audio
     from worker.recordings.encoder import encode
 
     check()

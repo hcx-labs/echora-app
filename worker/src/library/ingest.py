@@ -1,26 +1,19 @@
 from __future__ import annotations
 
-from core.db.config import DatabaseConfig
-from core.embeddings.config import EmbeddingConfig
-
-from dataclasses import dataclass
 import hashlib
 import json
 import logging
 import platform
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
 import psycopg
-from psycopg.types.json import Jsonb
 import torch
+from psycopg.types.json import Jsonb
 
-from core.media.audio import decode_audio, full_coverage_window_ranges
-from worker.library.descriptors import store_audio_descriptors
-from worker.library.waveforms import store_waveform
-from worker.library.visual_features import store_visual_features
-from worker.melody.index import create_sync_run, store_track_contours
+from core.db.config import DatabaseConfig
 from core.embeddings.audio_models import (
     AudioEmbeddingModel,
     EmbeddingResult,
@@ -28,13 +21,19 @@ from core.embeddings.audio_models import (
     MuQMuLanModel,
     release_model,
 )
-from worker.remote.session import RemoteModel, current as current_remote
-from core.integrations.navidrome import NavidromeClient, NavidromeTrack
-from worker.planning.audio import plan_audio, audio_prerequisites
-from worker.media.preprocessing import active_cache, prepare_audio, get_check
+from core.embeddings.config import EmbeddingConfig
 from core.embeddings.representations import configure_representations, embedding_config
-from worker.library.attempts import start_attempt, record_track, finish_attempt
+from core.integrations.navidrome import NavidromeClient, NavidromeTrack
+from worker.library.attempts import finish_attempt, record_track, start_attempt
+from worker.library.descriptors import store_audio_descriptors
 from worker.library.fingerprints import store_and_match_fingerprint
+from worker.library.visual_features import store_visual_features
+from worker.library.waveforms import store_waveform
+from worker.media.audio import decode_audio, full_coverage_window_ranges
+from worker.media.preprocessing import active_cache, get_check, prepare_audio
+from worker.melody.index import create_sync_run, store_track_contours
+from worker.planning.audio import audio_prerequisites, plan_audio
+from worker.remote.session import RemoteModel, current as current_remote
 
 CONTENT_NAMESPACE = uuid.UUID("0c300f5d-99d1-48b8-b12a-a52b9556be86")
 logger = logging.getLogger(__name__)

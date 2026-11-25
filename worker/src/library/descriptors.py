@@ -8,9 +8,8 @@ import math
 import numpy as np
 from psycopg.types.json import Jsonb
 
-from core.media.audio import decode_audio_channels
-
 from core.revisions import DESCRIPTOR_REVISION
+from worker.media.audio import decode_audio_channels
 
 SAMPLE_RATE = 44_100
 logger = logging.getLogger(__name__)

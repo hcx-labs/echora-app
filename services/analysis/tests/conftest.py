@@ -1,7 +1,6 @@
 """Keep cached process settings from leaking between tests."""
 
 import pytest
-
 from core.config import reset_config_cache
 from core.testing import apply_migrations, database  # noqa: F401 - shared fixture
 

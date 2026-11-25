@@ -61,7 +61,8 @@ def test_catalog_rejects_repetition_and_incomplete_responses():
 def test_batch_audio_cache_reuses_bytes_and_cleans_up():
     from types import SimpleNamespace
     from unittest.mock import Mock
-    from core.integrations.navidrome import batch_audio_cache, _batch_state
+
+    from core.integrations.navidrome import _batch_state, batch_audio_cache
 
     client = object.__new__(NavidromeClient)
     client.base_url, client.username = "https://music/", "user"
@@ -94,6 +95,7 @@ def test_batch_audio_cache_reuses_bytes_and_cleans_up():
 def test_audio_bytes_rejects_a_subsonic_error_instead_of_returning_it_as_audio():
     from types import SimpleNamespace
     from unittest.mock import Mock
+
     import pytest
 
     client = object.__new__(NavidromeClient)

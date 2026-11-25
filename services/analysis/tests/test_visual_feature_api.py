@@ -4,16 +4,16 @@ Database-backed coverage also lives in test_representations.py.
 """
 
 import ast
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
-import uuid
 
 import pytest
+from worker.library.visual_features import VISUAL_FEATURE_REVISION
+from worker.planning.audio import audio_prerequisites, plan_audio
 
 from echora_analysis.melody_preview import melody_preview
-from worker.planning.audio import audio_prerequisites, plan_audio
-from worker.library.visual_features import VISUAL_FEATURE_REVISION
 
 
 class HttpError(Exception):

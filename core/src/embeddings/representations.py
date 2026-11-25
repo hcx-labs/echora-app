@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from core.embeddings.config import EmbeddingConfig
+from dataclasses import dataclass
 
 from psycopg.types.json import Jsonb
+
+from core.embeddings.config import EmbeddingConfig
+from core.revisions import AUDIO_PROFILE_REVISION
 
 MODELS = {
     "muq_mulan": (
@@ -66,14 +69,64 @@ def embedding_config(name: str, revision: str | None = None) -> dict[str, object
     return config
 
 
+@dataclass(frozen=True)
+class AudioProfileParameters:
+    """Segmentation and mode-finding parameters of an audio profile (part of its contract)."""
+
+    minimum_segment_seconds: float = 20.0
+    maximum_segments: int = 30
+    segment_penalty: float = 0.16
+    maximum_modes: int = 4
+    minimum_mode_seconds: float = 15.0
+    minimum_mode_share: float = 0.10
+    mode_penalty: float = 0.055
+    mode_merge_similarity: float = 0.92
+    minimum_mode_stability: float = 0.70
+    clustering_seeds: int = 6
+
+
+DEFAULT_PARAMETERS = AudioProfileParameters()
+
+
+DEFAULT_PARAMETERS = AudioProfileParameters()
+
+
+def profile_config(
+    model_name: str,
+    parameters: AudioProfileParameters,
+) -> dict[str, object]:
+    """The stored contract of audio profiles built from one embedding model."""
+    return {
+        "algorithm": "echora_audio_profile",
+        "revision": AUDIO_PROFILE_REVISION,
+        "source_model": model_name,
+        "global_methods": ["normalized_overlap_mean", "normalized_decorrelated_mean"],
+        "decorrelation": "greedy_nonoverlapping_windows",
+        "temporal_segmentation": {
+            "method": "penalized_spherical_change_points",
+            "minimum_segment_seconds": parameters.minimum_segment_seconds,
+            "maximum_segments": parameters.maximum_segments,
+            "penalty": parameters.segment_penalty,
+        },
+        "modes": {
+            "method": "spherical_kmeans_decorrelated_windows",
+            "maximum": parameters.maximum_modes,
+            "minimum_seconds": parameters.minimum_mode_seconds,
+            "minimum_share": parameters.minimum_mode_share,
+            "penalty": parameters.mode_penalty,
+            "merge_similarity": parameters.mode_merge_similarity,
+            "minimum_stability": parameters.minimum_mode_stability,
+            "clustering_seeds": parameters.clustering_seeds,
+        },
+    }
+
+
 def configure_representations(connection) -> None:
     """Publish the deployment's contracts, never a per-track 'latest' fallback.
 
     Call at startup and before standalone backfills. A changed configuration may
     temporarily reduce coverage; old and new vector spaces must never be mixed.
     """
-    from worker.profiles.pipeline import AUDIO_PROFILE_REVISION, DEFAULT_PARAMETERS, _profile_config
-
     specs = []
     for name, (_, _, _, dimension) in MODELS.items():
         _, revision = model_settings(name)
@@ -81,7 +134,7 @@ def configure_representations(connection) -> None:
         config = embedding_config(name)
         specs.append((kind, name, revision, config_hash(config), dimension, Jsonb(config)))
     for name in ("muq_mulan", "mert"):
-        config = _profile_config(name, DEFAULT_PARAMETERS)
+        config = profile_config(name, DEFAULT_PARAMETERS)
         specs.append(
             (
                 "audio_profile",

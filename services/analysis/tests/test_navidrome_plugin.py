@@ -1,25 +1,25 @@
 """Ranking behavior, native lyrics mapping, credential lifecycle and source isolation."""
 
-from contextlib import contextmanager, nullcontext
-from datetime import datetime, timezone
 import importlib.util
 import os
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 from xml.etree import ElementTree as ET
 
-from fastapi import FastAPI, HTTPException
-from fastapi.testclient import TestClient
 import numpy as np
 import psycopg
+import pytest
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from psycopg import sql
 from psycopg.rows import dict_row
-import pytest
 
 import echora_analysis.navidrome_integration as auth
-import echora_analysis.plugin_ranking as ranking
 import echora_analysis.plugin_lyrics as lyrics
+import echora_analysis.plugin_ranking as ranking
 from echora_analysis.plugin_routes import router
 
 
@@ -825,9 +825,9 @@ def test_original_snapshots_keep_full_structure_last_available_and_enriched_lyri
 def test_import_archives_provider_before_preserving_manual_lyrics_without_model_imports():
     """Execute the actual ingestion function with its GPU dependencies replaced."""
     import ast
+    from collections.abc import Callable
     from contextlib import nullcontext
     from unittest.mock import Mock
-    from collections.abc import Callable
 
     path = Path(__file__).parents[3] / "worker/src/lyrics/pipeline.py"
     tree = ast.parse(path.read_text())

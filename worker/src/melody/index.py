@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from core.db.config import DatabaseConfig
-from worker.melody.config import MelodyConfig
-
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
-from pathlib import Path
 import platform
 import threading
 import uuid
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+from core.db.config import DatabaseConfig
+from worker.melody.config import MelodyConfig
 
 # The service package is read-only for its unprivileged runtime user. Numba must
 # compile librosa's pitch helpers into a writable cache directory.
@@ -19,21 +19,21 @@ os.environ.setdefault("NUMBA_CACHE_DIR", "/models/torch/numba")
 os.makedirs(os.environ["NUMBA_CACHE_DIR"], exist_ok=True)
 
 import librosa
-from numba import njit, prange
 import numpy as np
 import psycopg
+from numba import njit, prange
 from psycopg.rows import dict_row, tuple_row
 from psycopg.types.json import Jsonb
 
-from core.media.audio import decode_audio
+from core.integrations.navidrome import NavidromeClient
 from core.revisions import (
     MELODY_CONTOUR_REVISION,
     MELODY_EXTRACTOR,
     SEPARATION_REVISION as MELODY_SEPARATOR_REVISION,
     SEPARATOR_MODEL_ID as MELODY_SEPARATOR_MODEL,
 )
-from worker.media.preprocessing import melody_waveforms, get_check, prepare_audio
-from core.integrations.navidrome import NavidromeClient
+from worker.media.audio import decode_audio
+from worker.media.preprocessing import get_check, melody_waveforms, prepare_audio
 
 CATALOG_SAMPLE_RATE = 44_100
 QUERY_SAMPLE_RATE = 24_000

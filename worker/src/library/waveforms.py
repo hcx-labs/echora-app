@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.media.audio import decode_audio_channels
-
 from core.revisions import WAVEFORM_REVISION
+from worker.media.audio import decode_audio_channels
 
 SAMPLE_RATE = 24_000
 PEAK_COUNT = 1024

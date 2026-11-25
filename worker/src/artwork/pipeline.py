@@ -7,10 +7,6 @@ per batch phase, then stops so GPU memory returns to analysis.
 
 from __future__ import annotations
 
-from worker.artwork.config import ComfyUIConfig
-from core.db.config import DatabaseConfig
-from core.media.config import MotionArtworkConfig
-from core.library.connections import credential_cipher
 import hashlib
 import logging
 import secrets
@@ -27,8 +23,11 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from core.db.config import DatabaseConfig
+from core.library.connections import credential_cipher
+from core.media.config import MotionArtworkConfig
 from worker.artwork.comfyui import ComfyUI, ComfyUIError, ComfyUIUnavailable, launch, output_items
-from worker.artwork.settings import MotionArtworkSettings, artwork_path, load_settings
+from worker.artwork.config import ComfyUIConfig
 from worker.artwork.prompts import CAMERA_RETRY
 from worker.artwork.render import (
     FPS,
@@ -42,6 +41,7 @@ from worker.artwork.render import (
     finish,
     zooms,
 )
+from worker.artwork.settings import MotionArtworkSettings, artwork_path, load_settings
 
 logger = logging.getLogger(__name__)
 # Covers are fetched at a fixed size so a cover's identity does not depend on render settings.
@@ -272,9 +272,9 @@ def render_batch(
     server or Modal). Loops made with other settings are kept unless the regenerate-outdated
     setting is on. `mode="all"` also replaces loops that already exist for the current settings.
     """
+    from core.compute import location
     from core.integrations.navidrome import NavidromeClient
     from worker.remote.session import current as current_remote
-    from worker.remote.session import location
 
     with _connect() as connection, connection.cursor() as cursor:
         settings = load_settings(cursor)
@@ -426,8 +426,8 @@ def prepare_prompts(
     Returns prompts keyed by (external ID, cover SHA-256, recipe hash) for render_batch, or None
     when motion artwork does not run here or writes no External AI prompts.
     """
+    from core.compute import location
     from core.integrations.navidrome import NavidromeClient
-    from worker.remote.session import location
 
     with _connect() as connection, connection.cursor() as cursor:
         settings = load_settings(cursor)
@@ -688,8 +688,8 @@ def _write_external_prompts(
     failed: Callable,
 ) -> None:
     """Ask the configured External AI model for each cover's prompt; no ComfyUI is needed."""
-    from worker.artwork.writer import WriterError, write_prompt
     from core.lyrics.translations import load_settings as load_external_ai
+    from worker.artwork.writer import WriterError, write_prompt
 
     external_ai, encrypted = load_external_ai()
     if not external_ai.ready():

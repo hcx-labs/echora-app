@@ -1,8 +1,10 @@
-from unittest.mock import MagicMock
 from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import pytest
-from core.integrations.external_ai import ExternalAISettings
+
 import worker.translation.pipeline as pipeline
+from core.integrations.external_ai import ExternalAISettings
 
 
 def test_line_selection():
@@ -69,7 +71,8 @@ def test_cancellation_and_reuse(monkeypatch, library_helpers):
 
 def test_declined_counted_apart_from_failed(monkeypatch, library_helpers):
     from contextlib import contextmanager
-    from worker.translation.client import TranslationError
+
+    from core.lyrics.translations import TranslationError
 
     settings = ExternalAISettings(
         enabled=True,

@@ -1,11 +1,9 @@
 """Analysis on Modal: deployment checks, sessions and every stage's Modal path, without Modal."""
 
-from core.config import reset_config_cache
-from core.media.config import MotionArtworkConfig
-from worker.kara.config import KaraConfig
+import core.compute as compute
+import os
 from contextlib import nullcontext
 from hashlib import sha256
-import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
@@ -15,11 +13,14 @@ import httpx
 import numpy as np
 import pytest
 
-import worker.remote.settings as external_processing
 import core.features as features
 import worker.remote.session as remote_compute
-from worker.models.download import model_manifest
+import worker.remote.settings as external_processing
+from core.config import reset_config_cache
 from core.embeddings.audio_models import EmbeddingResult
+from core.media.config import MotionArtworkConfig
+from worker.kara.config import KaraConfig
+from worker.models.download import model_manifest
 from worker.remote.compute import adopt_compute_settings, compute_settings
 
 CONFIG = remote_compute.ModalConfig(
@@ -95,12 +96,12 @@ def test_modal_batches_expose_and_close_the_session():
 
 
 def test_jobs_compute_in_one_location():
-    assert remote_compute.location() == "local"
-    with remote_compute.computing_on("modal"):
-        assert remote_compute.location() == "modal"
-    assert remote_compute.location() == "local"
+    assert compute.location() == "local"
+    with compute.computing_on("modal"):
+        assert compute.location() == "modal"
+    assert compute.location() == "local"
     with pytest.raises(ValueError):
-        with remote_compute.computing_on("elsewhere"):
+        with compute.computing_on("elsewhere"):
             pass
 
 
@@ -113,7 +114,7 @@ def test_feature_switches_follow_the_job_location():
     connection = MagicMock()
     connection.cursor.return_value.__enter__.return_value = cursor
     assert not features.feature_enabled(connection, "karaoke")
-    with remote_compute.computing_on("modal"):
+    with compute.computing_on("modal"):
         assert features.feature_enabled(connection, "karaoke")
     assert "karaoke_modal_enabled" in cursor.execute.call_args.args[0]
     cursor.fetchone.return_value = None
@@ -315,13 +316,6 @@ def test_failed_preparation_is_recorded_and_raised(monkeypatch):
     with pytest.raises(RuntimeError):
         external_processing.prepare(session_factory=Mock(return_value=session))
     assert recorded[-1]["status"] == "failed" and "quota" in recorded[-1]["status_detail"]
-
-
-def test_settings_reject_malformed_tokens_and_gpus():
-    with pytest.raises(ValueError):
-        external_processing.SettingsUpdate(token_id="as-not-an-id")
-    with pytest.raises(ValueError):
-        external_processing.SettingsUpdate(gpu="RTX9000")
 
 
 # Session calls

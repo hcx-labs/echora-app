@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import worker.remote.session as remote_compute
+from core.compute import computing_on
 from core.integrations.navidrome import NavidromeClient, batch_audio_cache
 from core.library.connections import load_connection
 from core.library.membership import (
@@ -130,7 +131,7 @@ def execute(job: dict, context) -> dict | None:
         preprocessing_session(context.check),
         ExitStack() as stack,
     ):
-        stack.enter_context(remote_compute.computing_on(compute))
+        stack.enter_context(computing_on(compute))
         if kind != "analysis_batch" and operation.batched:
             _expand(job, context, name, operation, batch, compute)
             return None

@@ -1,5 +1,6 @@
 """Motion artwork: recipe, graph, post-processing, settings, GPU handoff and album de-duplication."""
 
+import core.compute as compute
 import json
 import os
 import runpy
@@ -951,7 +952,7 @@ def test_modal_syncs_render_only_when_switched_on_for_modal(database, batch):
     _enable(database, generate_during_sync=True, generate_on_modal=False)
     remote = FakeModalSession()
     with (
-        remote_compute.computing_on("modal"),
+        compute.computing_on("modal"),
         remote_compute.session("modal", factory=lambda: remote),
     ):
         assert batch["run"]() is None
@@ -968,7 +969,7 @@ def test_modal_sync_renders_on_modal_and_stores_loops_here(database, batch, monk
     _enable(database, generate_during_sync=False, generate_on_modal=True)
     remote = FakeModalSession()
     with (
-        remote_compute.computing_on("modal"),
+        compute.computing_on("modal"),
         remote_compute.session("modal", factory=lambda: remote),
     ):
         with database() as db:
