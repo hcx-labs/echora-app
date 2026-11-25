@@ -85,8 +85,9 @@ class Processor[ConfigT: EchoraConfig | None, InputT: Item, OutputT](ABC):
     activity: ClassVar[str] = "Processing"
     """Progress message: "<activity> <item label>", or the activity alone for unlabeled items."""
 
-    current_message: ClassVar[str] = "Already current"
-    """Progress message when nothing needs this stage."""
+    current_message: ClassVar[str | None] = "Already current"
+    """Progress message when nothing needs this stage (``None``: no update, for a step inside
+    a larger stage)."""
 
     def __init__(self, config: ConfigT = None) -> None:
         self.config = config

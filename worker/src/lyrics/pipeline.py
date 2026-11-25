@@ -556,7 +556,7 @@ class TranscriptRefinementProcessor(Processor[None, RefinementItem, dict[str, ob
     summary_key = "lyrics"
     total_key = None
     activity = "Refining transcript for"
-    current_message = "Transcripts need no refinement"
+    current_message = None
 
     def __init__(self, transcripts: list[RefinementItem]) -> None:
         super().__init__()
@@ -663,6 +663,7 @@ class LyricsEmbeddingProcessor(Processor[None, EmbeddingItem, object]):
     summary_key = "lyrics"
     counters = ("embedded",)
     activity = "Embedding lyrics for"
+    current_message = None
 
     def __init__(self, songs: list[EmbeddingItem]) -> None:
         super().__init__()

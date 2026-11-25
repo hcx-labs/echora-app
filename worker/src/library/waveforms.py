@@ -32,16 +32,22 @@ def waveform_peaks(samples: np.ndarray, count: int = PEAK_COUNT) -> list[float]:
     return [round(float(value), 4) for value in envelope]
 
 
-def store_waveform(connection, track_id, audio: bytes) -> None:
+def analyze_waveform(audio: bytes) -> tuple[float, object]:
+    """A song's duration and the peaks its waveform is drawn from."""
+    samples = decode_audio_channels(audio, sample_rate=SAMPLE_RATE)
+    return len(samples) / SAMPLE_RATE, waveform_peaks(samples)
+
+
+def store_waveform(connection, track_id, waveform: tuple[float, object]) -> None:
+    """Store what ``analyze_waveform`` measured."""
     from psycopg.types.json import Jsonb
 
-    samples = decode_audio_channels(audio, sample_rate=SAMPLE_RATE)
-    peaks = waveform_peaks(samples)
+    duration, peaks = waveform
     with connection.cursor() as cursor:
         cursor.execute(
             """INSERT INTO track_waveforms (track_id, revision, duration_seconds, peaks)
                VALUES (%s, %s, %s, %s)
                ON CONFLICT (track_id) DO UPDATE SET revision=EXCLUDED.revision,
                  duration_seconds=EXCLUDED.duration_seconds, peaks=EXCLUDED.peaks, created_at=now()""",
-            (track_id, WAVEFORM_REVISION, len(samples) / SAMPLE_RATE, Jsonb(peaks)),
+            (track_id, WAVEFORM_REVISION, duration, Jsonb(peaks)),
         )

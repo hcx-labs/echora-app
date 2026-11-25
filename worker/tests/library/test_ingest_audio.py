@@ -33,6 +33,8 @@ def execution(monkeypatch):
     monkeypatch.setattr(ingest, "_upsert_track", upsert)
     waveform = Mock(return_value=True)
     monkeypatch.setattr(ingest, "store_waveform", waveform)
+    # The waveform measured from exactly the bytes the store receives.
+    monkeypatch.setattr(ingest, "analyze_waveform", lambda audio: ("peaks of", audio))
     planner = Mock()
     monkeypatch.setattr(ingest, "plan_audio", planner)
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
@@ -71,7 +73,7 @@ def test_artifact_and_plan_keep_resolved_id_after_alias_can_change(execution):
     result = ingest.ingest_navidrome("url", "user", "password", ["source"])
     assert result.failed == 0
     assert planner.call_args.kwargs["resolved_track_ids"] == {"source": track}
-    assert waveform.call_args.args[1:3] == (track, b"identity bytes")
+    assert waveform.call_args.args[1:3] == (track, ("peaks of", b"identity bytes"))
 
 
 def test_unavailable_source_does_not_starve_healthy_siblings_and_can_retry(execution):
@@ -133,3 +135,58 @@ def test_real_audio_plan_uses_bound_identity_after_source_remap(monkeypatch):
     finally:
         db.rollback()
         db.close()
+
+
+def test_failed_embedding_is_recorded_in_the_attempt(execution, monkeypatch):
+    _, client, upsert, _, planner = execution
+    good, bad = uuid4(), uuid4()
+    client.tracks.return_value = [song("good"), song("bad")]
+    client.audio_bytes.side_effect = lambda name: name.encode()
+    upsert.side_effect = [(good, False), (bad, False)]
+    planner.return_value = AudioProcessingPlan(
+        frozenset({"good", "bad"}), frozenset(), frozenset(), frozenset()
+    )
+    model = Mock()
+    model.name = ingest.MuQMuLanModel.name
+    monkeypatch.setattr(ingest, "MuQMuLanModel", Mock(return_value=model))
+    for name in ("_create_run", "start_attempt", "finish_attempt", "release_model"):
+        monkeypatch.setattr(ingest, name, Mock())
+    monkeypatch.setattr(ingest, "_model_has_embedding", lambda *a: False)
+    stored, recorded = [], []
+    monkeypatch.setattr(ingest, "_store_embedding", lambda conn, track, *a: stored.append(track))
+    monkeypatch.setattr(ingest, "record_track", lambda *a, **kw: recorded.append((a[2], kw)))
+
+    def embed(audio, model):
+        if audio == b"bad":
+            raise RuntimeError("out of memory")
+        return ("result", [(0.0, 10.0)])
+
+    monkeypatch.setattr(ingest, "embed_track", embed)
+    summary = ingest.ingest_navidrome("url", "user", "password", ["good", "bad"])
+    assert (summary.embedded_muq, summary.failed) == (1, 1)
+    assert stored == [good]
+    # The failure is recorded without the provider's message.
+    assert ("bad", {"error": "Audio embedding failed; see service logs"}) in recorded
+    ingest.release_model.assert_called_once_with(model)
+
+
+def test_partial_descriptors_are_stored_and_counted_failed(execution, monkeypatch):
+    _, client, upsert, _, planner = execution
+    track = uuid4()
+    client.tracks.return_value = [song("source")]
+    client.audio_bytes.return_value = b"bytes"
+    upsert.return_value = (track, False)
+    planner.return_value = AudioProcessingPlan(
+        frozenset(),
+        frozenset(),
+        frozenset(),
+        frozenset(),
+        descriptor_external_ids=frozenset({"source"}),
+    )
+    partial = {"failed_components": ["tempo"]}
+    monkeypatch.setattr(ingest, "analyze_audio_descriptors", lambda audio: partial)
+    store = Mock()
+    monkeypatch.setattr(ingest, "store_audio_descriptors", store)
+    summary = ingest.ingest_navidrome("url", "user", "password", ["source"])
+    assert (summary.described_audio, summary.failed) == (0, 1)
+    assert store.call_args.args[1:] == (track, partial)

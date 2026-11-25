@@ -75,7 +75,8 @@ def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -
     items = list(processor.plan(context))
     summary.total = len(items)
     if not items:
-        context.report(Progress("planning", processor.current_message, 0, 0, processor.unit))
+        if processor.current_message is not None:
+            context.report(Progress("planning", processor.current_message, 0, 0, processor.unit))
         summary.extra.update(processor.facts())
         return summary
 

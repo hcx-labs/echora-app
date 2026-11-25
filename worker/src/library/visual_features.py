@@ -243,10 +243,23 @@ def extract_visual_features(
     }
 
 
-def store_visual_features(connection, track_id, audio: bytes) -> dict[str, object]:
+def analyze_visual_features(audio: bytes) -> dict[str, object]:
+    """The visualizer's features of a song, or its duration when it is too long for them."""
     samples = decode_audio(audio, SAMPLE_RATE)
     duration = len(samples) / SAMPLE_RATE
     if duration > MAX_DURATION_SECONDS:
+        return {
+            "revision": VISUAL_FEATURE_REVISION,
+            "status": "unsupported",
+            "duration_seconds": duration,
+        }
+    return extract_visual_features(samples)
+
+
+def store_visual_features(connection, track_id, features: dict[str, object]) -> dict[str, object]:
+    """Store what ``analyze_visual_features`` measured."""
+    if features.get("status") == "unsupported":
+        duration = features["duration_seconds"]
         with connection.cursor() as cursor:
             cursor.execute(
                 """INSERT INTO track_visual_features
@@ -257,12 +270,7 @@ def store_visual_features(connection, track_id, audio: bytes) -> dict[str, objec
                      hop_seconds=EXCLUDED.hop_seconds, features=EXCLUDED.features, created_at=now()""",
                 (track_id, VISUAL_FEATURE_REVISION, duration, HOP_SECONDS),
             )
-        return {
-            "revision": VISUAL_FEATURE_REVISION,
-            "status": "unsupported",
-            "duration_seconds": duration,
-        }
-    features = extract_visual_features(samples)
+        return features
     with connection.cursor() as cursor:
         cursor.execute(
             """INSERT INTO track_visual_features (track_id, revision, status, duration_seconds, hop_seconds, features)

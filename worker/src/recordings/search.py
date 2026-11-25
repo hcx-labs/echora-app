@@ -282,11 +282,11 @@ def decode_query(audio: bytes, check=lambda: None) -> np.ndarray:
     return samples
 
 
-def store_fingerprints(connection, track_id, audio: bytes, config, check=lambda: None):
-    from worker.media.audio import decode_audio
-    from worker.recordings.encoder import encode
+def needs_fingerprints(connection, track_id, audio: bytes, config) -> bool:
+    """Whether a song lacks recording fingerprints for this encoder.
 
-    check()
+    Raises ``ValueError`` when the song's bytes are not those its identity was resolved from.
+    """
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT 1 FROM recording_fingerprints WHERE track_id=%s AND representation_id=%s",
@@ -300,6 +300,15 @@ def store_fingerprints(connection, track_id, audio: bytes, config, check=lambda:
             raise ValueError(
                 "Recording source bytes changed; track identity must be refreshed before indexing"
             )
+    return True
+
+
+def encode_fingerprints(audio: bytes, config, check=lambda: None) -> np.ndarray:
+    """The recording fingerprints of a song: one 128-dimensional vector per segment."""
+    from worker.media.audio import decode_audio
+    from worker.recordings.encoder import encode
+
+    check()
     samples = decode_audio(audio, SAMPLE_RATE)
     fingerprints = (
         encode(samples, config, check=check)
@@ -307,6 +316,11 @@ def store_fingerprints(connection, track_id, audio: bytes, config, check=lambda:
         else np.empty((0, 128), dtype=np.float32)
     )
     check()
+    return fingerprints
+
+
+def insert_fingerprints(connection, track_id, fingerprints: np.ndarray, config) -> bool:
+    """Store a song's recording fingerprints; ``False`` when another worker stored them first."""
     with connection.cursor() as cursor:
         cursor.execute(
             """INSERT INTO recording_fingerprints

@@ -544,6 +544,7 @@ class AudioProfileProcessor(Processor[None, ProfileItem, TrackAudioProfile]):
     name = "audio_profiles"
     summary_key = "audio_profiles"
     counters = ("profiled",)
+    current_message = None
 
     def __init__(
         self,

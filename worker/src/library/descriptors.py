@@ -167,8 +167,13 @@ def analyze_waveform(stereo: np.ndarray, sample_rate: int = SAMPLE_RATE) -> dict
     return result
 
 
-def store_audio_descriptors(connection, track_id, audio: bytes) -> dict[str, object]:
-    result = analyze_waveform(decode_audio_channels(audio, SAMPLE_RATE, 2))
+def analyze_audio_descriptors(audio: bytes) -> dict[str, object]:
+    """A song's sound descriptors; ``failed_components`` lists those that could not be measured."""
+    return analyze_waveform(decode_audio_channels(audio, SAMPLE_RATE, 2))
+
+
+def store_audio_descriptors(connection, track_id, result: dict[str, object]) -> dict[str, object]:
+    """Store what ``analyze_audio_descriptors`` measured (``partial`` with failed components)."""
     status = "partial" if result.get("failed_components") else "complete"
     with connection.cursor() as cursor:
         cursor.execute(

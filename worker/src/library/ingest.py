@@ -6,7 +6,8 @@ import logging
 import platform
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 import psycopg
@@ -14,6 +15,7 @@ import torch
 from psycopg.types.json import Jsonb
 
 from core.db.config import DatabaseConfig
+from core.errors import InputUnavailableError, ProcessingError
 from core.embeddings.audio_models import (
     AudioEmbeddingModel,
     EmbeddingResult,
@@ -25,14 +27,15 @@ from core.embeddings.config import EmbeddingConfig
 from core.embeddings.representations import configure_representations, embedding_config
 from core.integrations.navidrome import NavidromeClient, NavidromeTrack
 from worker.library.attempts import finish_attempt, record_track, start_attempt
-from worker.library.descriptors import store_audio_descriptors
-from worker.library.fingerprints import store_and_match_fingerprint
-from worker.library.visual_features import store_visual_features
-from worker.library.waveforms import store_waveform
+from worker.library.descriptors import analyze_audio_descriptors, store_audio_descriptors
+from worker.library.fingerprints import compute_chromaprint, store_fingerprint
+from worker.library.visual_features import analyze_visual_features, store_visual_features
+from worker.library.waveforms import analyze_waveform, store_waveform
 from worker.media.audio import decode_audio, full_coverage_window_ranges
 from worker.media.preprocessing import active_cache, get_check, prepare_audio
-from worker.melody.index import create_sync_run, store_track_contours
+from worker.melody.index import create_sync_run, store_track_contours, track_contours
 from worker.planning.audio import audio_prerequisites, plan_audio
+from worker.processing import Item, ItemResult, ProcessingContext, Processor, run_stage
 from worker.remote.session import RemoteModel, current as current_remote
 
 CONTENT_NAMESPACE = uuid.UUID("0c300f5d-99d1-48b8-b12a-a52b9556be86")
@@ -265,98 +268,608 @@ def _bound_source_audio(
     return audio, track_id
 
 
+@dataclass
+class IngestBatch:
+    """What every ingest phase shares: the connection, the library and the resolved songs.
+
+    ``bindings`` ties each song to the track and the exact bytes its identity was resolved
+    from; later phases read the song again and reject other bytes.
+    """
+
+    connection: psycopg.Connection
+    navidrome: NavidromeClient
+    library_id: uuid.UUID
+    verify_audio_hashes: bool = True
+    songs: list[NavidromeTrack] = field(default_factory=list)
+    bindings: dict[str, tuple[uuid.UUID, str]] = field(default_factory=dict)
+
+    def audio(self, song: NavidromeTrack) -> tuple[bytes, uuid.UUID]:
+        """The song's bytes, checked against its identity, and its track id."""
+        return _bound_source_audio(self.navidrome, song.id, self.bindings[song.id])
+
+    def commit(self, write: Callable[[], Any]) -> Any:
+        """Run one song's writes as one transaction."""
+        try:
+            result = write()
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+        return result
+
+
+class SongItem(Item):
+    """One Navidrome song of the batch."""
+
+    song: Any
+    """The ``NavidromeTrack``."""
+
+
+def _song_item(song: NavidromeTrack) -> SongItem:
+    return SongItem(key=song.id, label=song.title or "", song=song)
+
+
+def _failure(message: str, error: BaseException) -> ProcessingError:
+    return ProcessingError(message, stage=type(error).__name__)
+
+
+class _SongPhase(Processor[None, SongItem, Any]):
+    """One phase of ingest over the resolved songs it selects (by external id)."""
+
+    total_key = None
+    current_message = None
+    failure_message = "Analysis failed"
+
+    def __init__(self, batch: IngestBatch, external_ids: frozenset[str] = frozenset()) -> None:
+        super().__init__()
+        self.batch = batch
+        self.external_ids = external_ids
+
+    def plan(self, context: ProcessingContext) -> list[SongItem]:
+        return [_song_item(song) for song in self.batch.songs if song.id in self.external_ids]
+
+    def process(self, context, items):
+        for item in items:
+            context.check()
+            try:
+                audio, track_id = self.batch.audio(item.song)
+                result = self.analyze(context, audio)
+                del audio
+            except Exception as error:  # noqa: BLE001 - one song's audio or analysis
+                self.log_failure(item)
+                yield ItemResult.failed(item, _failure(self.failure_message, error))
+                continue
+            yield ItemResult(item=item, outcome=self.outcome(result), output=(track_id, result))
+
+    def analyze(self, context: ProcessingContext, audio: bytes) -> Any:
+        raise NotImplementedError
+
+    def outcome(self, result: Any) -> str:
+        return self.counters[0]
+
+    def log_failure(self, item: SongItem) -> None:
+        logger.exception("%s failed for Navidrome song %s", self.failure_message, item.key)
+
+
+class IdentityPhase(_SongPhase):
+    """Resolves each song to a canonical track from its bytes (or, without hash checks, from its
+    known source), and binds later phases to those bytes."""
+
+    name = "identity"
+    summary_key = "identity"
+    counters = ("downloaded", "inserted")
+    activity = "Resolving track identity"
+
+    def __init__(self, batch: IngestBatch, songs: list[NavidromeTrack]) -> None:
+        super().__init__(batch)
+        self.found = songs
+
+    def plan(self, context):
+        return [_song_item(song) for song in self.found]
+
+    def process(self, context, items):
+        connection = self.batch.connection
+        for item in items:
+            context.check()
+            song = item.song
+            try:
+                if not self.batch.verify_audio_hashes:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """SELECT ts.track_id, t.audio_hash FROM track_sources ts
+                            JOIN tracks t ON t.id=ts.track_id
+                            WHERE ts.library_id=%s AND ts.source_type='subsonic' AND ts.external_id=%s""",
+                            (self.batch.library_id, song.id),
+                        )
+                        known = cursor.fetchone()
+                    if known:
+                        # Reuse identity, but do not claim the bytes were verified.
+                        yield ItemResult(item=item, outcome=None, output=("known", *known))
+                        continue
+                audio = self.batch.navidrome.audio_bytes(song.id)
+                audio_hash = hashlib.sha256(audio).hexdigest()
+                del audio
+            except Exception:  # noqa: BLE001 - one unavailable source must not stop the batch
+                connection.rollback()
+                logger.warning("Could not resolve source identity for Navidrome song %s", song.id)
+                yield ItemResult.failed(item, InputUnavailableError("Source unavailable"))
+                continue
+            yield ItemResult(item=item, outcome="downloaded", output=("hashed", audio_hash))
+
+    def persist(self, context, item, output) -> tuple[str, ...]:
+        song, batch = item.song, self.batch
+        if output[0] == "known":
+            _, track_id, audio_hash = output
+            batch.commit(lambda: _refresh_known_source(batch, song, track_id))
+            inserted = False
+        else:
+            audio_hash = output[1]
+            track_id, inserted = batch.commit(lambda: _bind_source(batch, song, audio_hash))
+        batch.bindings[song.id] = (track_id, audio_hash)
+        batch.songs.append(song)
+        return ("inserted",) if inserted else ()
+
+    def log_failure(self, item):
+        logger.warning("Could not resolve source identity for Navidrome song %s", item.key)
+
+
+def _refresh_known_source(batch: IngestBatch, song: NavidromeTrack, track_id) -> None:
+    with batch.connection.cursor() as cursor:
+        cursor.execute(
+            """UPDATE track_sources SET source_data=%s
+            WHERE library_id=%s AND source_type='subsonic' AND external_id=%s""",
+            (Jsonb(song.raw), batch.library_id, song.id),
+        )
+        cursor.execute(
+            """UPDATE tracks SET title=%s, artist=%s, album=%s, year=%s,
+            duration_seconds=%s, genres=%s WHERE id=%s""",
+            (
+                song.title,
+                song.artist,
+                song.album,
+                song.year,
+                song.duration,
+                [song.genre] if song.genre else [],
+                track_id,
+            ),
+        )
+
+
+def _bind_source(batch: IngestBatch, song: NavidromeTrack, audio_hash: str):
+    track_id, inserted = _upsert_track(batch.connection, batch.library_id, song, audio_hash)
+    with batch.connection.cursor() as cursor:
+        cursor.execute(
+            """UPDATE track_sources SET audio_verified_at=now()
+            WHERE library_id=%s AND source_type='subsonic' AND external_id=%s
+                AND track_id=%s""",
+            (batch.library_id, song.id, track_id),
+        )
+    return track_id, inserted
+
+
+def _prepare_audio(context: ProcessingContext, batch: IngestBatch, plan) -> None:
+    """Prepare only the formats outstanding tasks need, before any GPU model loads.
+
+    Same-format consumers and later batches read the disk cache. A song that cannot be
+    prepared is left to its consumers, which count and retry it.
+    """
+    if active_cache() is None:
+        return
+    preparing = [(song, audio_prerequisites(plan, song.id)) for song in batch.songs]
+    preparing = [
+        (song, needs) for song, needs in preparing if needs.mono_rates or needs.stereo_rates
+    ]
+    from worker.media.roformer import separation_phase
+
+    # Separation phase for melody stems: Roformer loads once, and only if a song needs it.
+    with separation_phase():
+        for index, (song, needs) in enumerate(preparing):
+            update = {"phase": "preprocess", "total": len(preparing), "unit": "tracks"}
+            context.publish(
+                {**update, "message": f"Preparing audio for {song.title}", "completed": index}
+            )
+            try:
+                audio, _ = batch.audio(song)
+                # Melody needs Roformer vocals; on Modal those are separated remotely.
+                prepare_audio(
+                    audio,
+                    mono_rates=needs.mono_rates,
+                    stereo_rates=needs.stereo_rates,
+                    melody=needs.melody and context.remote is None,
+                    check=context.check,
+                )
+                del audio
+                batch.connection.commit()
+            except Exception:
+                batch.connection.rollback()
+                logger.exception("Could not prepare audio for Navidrome song %s", song.id)
+            context.publish(
+                {**update, "message": f"Prepared audio for {song.title}", "completed": index + 1}
+            )
+
+
+class WaveformPhase(_SongPhase):
+    name = "waveform"
+    summary_key = "waveform"
+    counters = ("waveforms_generated",)
+    activity = "Generating waveform for"
+    failure_message = "Could not generate waveform"
+
+    def analyze(self, context, audio):
+        return analyze_waveform(audio)
+
+    def persist(self, context, item, output):
+        self.batch.commit(lambda: store_waveform(self.batch.connection, *output))
+
+
+class VisualFeaturePhase(_SongPhase):
+    name = "visual_features"
+    summary_key = "visual_features"
+    counters = ("visual_features_generated",)
+    activity = "Prepared visual features for"
+    failure_message = "Could not prepare visual features"
+
+    def analyze(self, context, audio):
+        return analyze_visual_features(audio)
+
+    def persist(self, context, item, output):
+        self.batch.commit(lambda: store_visual_features(self.batch.connection, *output))
+
+
+class EmbeddingPhase(_SongPhase):
+    """Embeds the selected songs with one audio model, loaded once (on Modal, in one call)."""
+
+    counters = ("reused_embeddings",)
+    failure_message = "Audio embedding failed"
+
+    def __init__(
+        self,
+        batch: IngestBatch,
+        external_ids: frozenset[str],
+        phase: str,
+        label: str,
+        load: Callable[[ProcessingContext], AudioEmbeddingModel | RemoteModel],
+        models: tuple[str, int, int],
+    ) -> None:
+        super().__init__(batch, external_ids)
+        self.name = self.summary_key = phase
+        self.activity = label
+        self.counters = (f"embedded_{phase}", "reused_embeddings")
+        self.load = load
+        self.models = models
+        """Progress of model loading: message, models loaded so far, models needed."""
+
+    def open(self, context, items):
+        message, loaded, total = self.models
+        context.publish(
+            {
+                "phase": "models",
+                "message": message,
+                "completed": loaded,
+                "total": total,
+                "unit": "models",
+            }
+        )
+        self.model = self.load(context)
+        connection = self.batch.connection
+        self.run_id = _create_run(connection, self.model)
+        self.attempt_id = start_attempt(connection, self.run_id, len(items))
+        connection.commit()
+
+    def process(self, context, items):
+        connection, remote = self.batch.connection, context.remote
+        embedded = f"embedded_{self.name}"
+        if remote is None:
+            for item in items:
+                context.check()
+                try:
+                    audio, track_id = self.batch.audio(item.song)
+                    if _model_has_embedding(connection, track_id, self.run_id):
+                        yield self._reused(item, track_id)
+                        continue
+                    outcome = embed_track(audio, self.model)
+                    del audio
+                except Exception:  # noqa: BLE001 - one song's audio or embedding
+                    yield self._failed(item)
+                    continue
+                yield ItemResult(
+                    item=item, outcome=embedded, output=("embedded", track_id, outcome)
+                )
+        else:
+            # Upload each song's audio once, then embed the whole phase in one Modal call.
+            # Results stream back in order and are stored as they arrive.
+            pending: list[tuple[SongItem, uuid.UUID, str]] = []
+            for item in items:
+                context.check()
+                try:
+                    audio, track_id = self.batch.audio(item.song)
+                    if _model_has_embedding(connection, track_id, self.run_id):
+                        yield self._reused(item, track_id)
+                        continue
+                    digest = self.batch.bindings[item.song.id][1]
+                    remote.upload(digest, audio)
+                    del audio
+                    pending.append((item, track_id, digest))
+                except Exception:  # noqa: BLE001 - one song's audio
+                    yield self._failed(item)
+            outcomes = remote.embed_audio(self.model, [digest for _, _, digest in pending])
+            for (item, track_id, _), outcome in zip(pending, outcomes):
+                if isinstance(outcome, BaseException):
+                    yield self._failed(item)
+                    continue
+                yield ItemResult(
+                    item=item, outcome=embedded, output=("embedded", track_id, outcome)
+                )
+        finish_attempt(connection, self.attempt_id)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE analysis_runs SET status='complete', finished_at=now() WHERE id=%s",
+                (self.run_id,),
+            )
+        connection.commit()
+
+    @staticmethod
+    def _reused(item: SongItem, track_id: uuid.UUID) -> ItemResult:
+        return ItemResult(item=item, outcome="reused_embeddings", output=("reused", track_id))
+
+    def _failed(self, item: SongItem) -> ItemResult:
+        self.batch.connection.rollback()
+        logger.exception("Failed %s phase for Navidrome song %s", self.name, item.key)
+        # A failure with an output: persist() records it in the run's attempt.
+        return ItemResult(item=item, outcome="failed", output=("error",))
+
+    def persist(self, context, item, output):
+        connection, song = self.batch.connection, item.song
+        if output[0] == "error":
+            self._record_failure(item)
+            return
+        if output[0] == "reused":
+            self.batch.commit(lambda: record_track(connection, self.attempt_id, song.id, output[1]))
+            return
+        _, track_id, (result, ranges) = output
+
+        def store():
+            _store_embedding(connection, track_id, self.run_id, result, ranges)
+            record_track(connection, self.attempt_id, song.id, track_id)
+
+        try:
+            self.batch.commit(store)
+        except Exception:
+            self._record_failure(item)
+            raise
+
+    def _record_failure(self, item: SongItem) -> None:
+        # Do not persist provider exception messages, which may contain credentials.
+        record_track(
+            self.batch.connection,
+            self.attempt_id,
+            item.song.id,
+            error="Audio embedding failed; see service logs",
+        )
+        self.batch.connection.commit()
+
+    def close(self):
+        model = getattr(self, "model", None)
+        if model is not None:
+            release_model(model)
+            self.model = None
+
+
+class MelodyPhase(_SongPhase):
+    """Extracts melody contours for the hum search (on Modal in one separation and one
+    extraction call)."""
+
+    name = "melody"
+    summary_key = "melody"
+    counters = ("melody_indexed",)
+    activity = "Extracting melody from"
+    failure_message = "Could not extract melody"
+
+    def open(self, context, items):
+        self.run_id = create_sync_run(self.batch.connection)
+        self.batch.connection.commit()
+
+    def process(self, context, items):
+        remote = context.remote
+        if remote is None:
+            yield from super().process(context, items)
+        else:
+            unavailable: dict[str, BaseException] = {}
+            # Upload once, extract every song's contours in one Modal call; results stream back
+            # in song order and are stored as they arrive.
+            pending = []
+            for item in items:
+                try:
+                    audio, _ = self.batch.audio(item.song)
+                    remote.upload(self.batch.bindings[item.key][1], audio)
+                    pending.append(item)
+                except Exception as error:  # noqa: BLE001 - one song's audio
+                    unavailable[item.key] = error
+            # Separation phase on Modal first: one Roformer for every melody song.
+            separated = remote.prepare_vocals(
+                [self.batch.bindings[item.key][1] for item in pending], melody=True
+            )
+            for item, outcome in zip(list(pending), separated):
+                if isinstance(outcome, BaseException):
+                    unavailable[item.key] = outcome
+                    pending.remove(item)
+            outcomes = iter(remote.melody([self.batch.bindings[item.key][1] for item in pending]))
+            for item in items:
+                context.check()
+                outcome = unavailable.get(item.key) or next(outcomes)
+                if isinstance(outcome, BaseException):
+                    self.log_failure(item)
+                    yield ItemResult.failed(item, _failure(self.failure_message, outcome))
+                    continue
+                track_id = self.batch.bindings[item.key][0]
+                yield ItemResult(item=item, outcome="melody_indexed", output=(track_id, outcome))
+        with self.batch.connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE analysis_runs SET status='complete',finished_at=now() WHERE id=%s",
+                (self.run_id,),
+            )
+        self.batch.connection.commit()
+
+    def analyze(self, context, audio):
+        return track_contours(audio)
+
+    def persist(self, context, item, output) -> list[str]:
+        track_id, contours = output
+        stored = self.batch.commit(
+            lambda: store_track_contours(
+                self.batch.connection, track_id, self.run_id, b"", usable=contours
+            )
+        )
+        return ["melody_contours"] * stored
+
+
+class FingerprintPhase(_SongPhase):
+    """Chromaprints the selected songs and groups each with a recording it matches."""
+
+    name = "fingerprint"
+    summary_key = "fingerprint"
+    counters = ("fingerprinted",)
+    activity = "Fingerprinting"
+    failure_message = "Could not fingerprint"
+
+    def process(self, context, items):
+        for item in items:
+            context.check()
+            try:
+                audio, track_id = self.batch.audio(item.song)
+                fingerprint, measured, version = compute_chromaprint(audio)
+                del audio
+            except Exception as error:  # noqa: BLE001 - one song's audio or fpcalc
+                self.log_failure(item)
+                yield ItemResult.failed(item, _failure(self.failure_message, error))
+                continue
+            duration = measured or item.song.duration
+            output = (track_id, fingerprint, duration, version)
+            yield ItemResult(item=item, outcome="fingerprinted", output=output)
+
+    def persist(self, context, item, output) -> tuple[str, ...]:
+        connection = self.batch.connection
+
+        def store():
+            with connection.transaction():
+                return store_fingerprint(connection, *output)
+
+        match = self.batch.commit(store)
+        return ("recording_matches",) if match.get("matched") else ()
+
+
+class RecordingIndexPhase(_SongPhase):
+    """Indexes the selected songs for recording search with the configured encoder."""
+
+    name = "recording_fingerprint"
+    summary_key = "recording_fingerprint"
+    counters = ("recording_fingerprinted",)
+    activity = "Recording indexing finished for"
+    failure_message = "Could not index recording"
+
+    def plan(self, context):
+        items = super().plan(context)
+        if items:
+            from worker.recordings.encoder import config_from_env
+
+            self.config = config_from_env()
+            if self.config is None:
+                raise ValueError("Recording encoder configuration disappeared during analysis")
+        return items
+
+    def process(self, context, items):
+        from worker.recordings.search import encode_fingerprints, needs_fingerprints
+
+        for item in items:
+            context.check()
+            try:
+                audio, track_id = self.batch.audio(item.song)
+                if not needs_fingerprints(self.batch.connection, track_id, audio, self.config):
+                    yield ItemResult(item=item, outcome=None)
+                    continue
+                fingerprints = encode_fingerprints(audio, self.config, context.check)
+                del audio
+            except Exception as error:  # noqa: BLE001 - one song's audio or encoding
+                self.batch.connection.rollback()
+                logger.error("Could not index recording for Navidrome song %s", item.key)
+                yield ItemResult.failed(item, _failure(self.failure_message, error))
+                continue
+            yield ItemResult(item=item, outcome=None, output=(track_id, fingerprints))
+
+    def persist(self, context, item, output) -> tuple[str, ...]:
+        from worker.recordings.search import insert_fingerprints
+
+        track_id, fingerprints = output
+        stored = self.batch.commit(
+            lambda: insert_fingerprints(self.batch.connection, track_id, fingerprints, self.config)
+        )
+        return ("recording_fingerprinted",) if stored else ()
+
+
+class DescriptorPhase(_SongPhase):
+    """Measures the selected songs' sound descriptors. A partial measurement is stored and
+    counted as failed."""
+
+    name = "audio_descriptors"
+    summary_key = "audio_descriptors"
+    counters = ("described_audio",)
+    activity = "Measuring sound for"
+    failure_message = "Could not analyze sound descriptors"
+
+    def analyze(self, context, audio):
+        return analyze_audio_descriptors(audio)
+
+    def outcome(self, result):
+        return "failed" if result.get("failed_components") else "described_audio"
+
+    def persist(self, context, item, output):
+        self.batch.commit(lambda: store_audio_descriptors(self.batch.connection, *output))
+
+
 def ingest_navidrome(
     url: str,
     username: str,
     password: str,
     song_ids: list[str],
     progress: Callable[[dict[str, object]], None] | None = None,
-    model_total: int = 2,
     *,
     verify_audio_hashes: bool = True,
 ) -> IngestSummary:
+    """Ingest a batch of Navidrome songs: identity, then each analysis the plan asks for.
+
+    Phases, in order: identity; audio preparation; waveforms; visual features; MuQ-MuLan and
+    MERT embeddings (each model loaded once); melody contours; chromaprints; recording index;
+    sound descriptors. Each runs as a processor over the songs that need it.
+    """
     report = progress or (lambda _: None)
     summary = IngestSummary(requested=len(song_ids))
+    remote = current_remote()
+    context = ProcessingContext(check_cancelled=get_check(), publish=report, remote=remote)
+
+    def run(processor: Processor) -> None:
+        counts = run_stage(processor, context).as_dict()
+        for key, value in counts.items():
+            setattr(summary, key, getattr(summary, key) + value)
 
     with (
         psycopg.connect(DatabaseConfig.load().database_url) as connection,
         NavidromeClient(url, username, password) as navidrome,
     ):
         configure_representations(connection)
-        library_id = _library(connection, url)
-        songs = navidrome.tracks(song_ids)
-        summary.discovered = len(songs)
-        bindings: dict[str, tuple[uuid.UUID, str]] = {}
-        resolved_songs = []
-        # Selected sources require an identity check independently of artifact
-        # completeness. Bind later consumers to these exact bytes and IDs, even
-        # when another worker remaps the source before this claim finishes.
-        for song in songs:
-            report({"phase": "identity", "message": "Resolving track identity"})
-            try:
-                get_check()()
-                if not verify_audio_hashes:
-                    with connection.cursor() as cursor:
-                        cursor.execute(
-                            """SELECT ts.track_id, t.audio_hash FROM track_sources ts
-                            JOIN tracks t ON t.id=ts.track_id
-                            WHERE ts.library_id=%s AND ts.source_type='subsonic' AND ts.external_id=%s""",
-                            (library_id, song.id),
-                        )
-                        known = cursor.fetchone()
-                        if known:
-                            # Reuse identity, but do not claim the bytes were verified.
-                            cursor.execute(
-                                """UPDATE track_sources SET source_data=%s
-                                WHERE library_id=%s AND source_type='subsonic' AND external_id=%s""",
-                                (Jsonb(song.raw), library_id, song.id),
-                            )
-                            cursor.execute(
-                                """UPDATE tracks SET title=%s, artist=%s, album=%s, year=%s,
-                                duration_seconds=%s, genres=%s WHERE id=%s""",
-                                (
-                                    song.title,
-                                    song.artist,
-                                    song.album,
-                                    song.year,
-                                    song.duration,
-                                    [song.genre] if song.genre else [],
-                                    known[0],
-                                ),
-                            )
-                    if known:
-                        connection.commit()
-                        bindings[song.id] = (known[0], known[1])
-                        resolved_songs.append(song)
-                        continue
-                audio = navidrome.audio_bytes(song.id)
-                audio_hash = hashlib.sha256(audio).hexdigest()
-                track_id, inserted = _upsert_track(connection, library_id, song, audio_hash)
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        """UPDATE track_sources SET audio_verified_at=now()
-                        WHERE library_id=%s AND source_type='subsonic' AND external_id=%s
-                            AND track_id=%s""",
-                        (library_id, song.id, track_id),
-                    )
-                connection.commit()
-                bindings[song.id] = (track_id, audio_hash)
-                resolved_songs.append(song)
-                summary.downloaded += 1
-                summary.inserted += int(inserted)
-                del audio
-            except Exception:
-                connection.rollback()
-                summary.failed += 1
-                logger.warning("Could not resolve source identity for Navidrome song %s", song.id)
-        songs = resolved_songs
+        batch = IngestBatch(connection, navidrome, _library(connection, url), verify_audio_hashes)
+        found = navidrome.tracks(song_ids)
+        summary.discovered = len(found)
+        # Selected sources require an identity check independently of artifact completeness.
+        # Bind later consumers to these exact bytes and ids, even when another worker remaps
+        # the source before this claim finishes.
+        run(IdentityPhase(batch, found))
+        songs = batch.songs
         plan = plan_audio(
             connection,
-            library_id,
+            batch.library_id,
             [song.id for song in songs],
-            resolved_track_ids={key: value[0] for key, value in bindings.items()},
+            resolved_track_ids={key: value[0] for key, value in batch.bindings.items()},
         )
-        required_models = int(plan.needs_muq) + int(plan.needs_mert)
         report(
             {
                 "phase": "planning",
@@ -376,485 +889,49 @@ def ingest_navidrome(
                 },
             }
         )
-
+        _prepare_audio(context, batch, plan)
+        run(WaveformPhase(batch, plan.waveform_external_ids))
+        run(VisualFeaturePhase(batch, plan.visual_feature_external_ids))
+        models = int(plan.needs_muq) + int(plan.needs_mert)
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        config = EmbeddingConfig.load()
 
-        def audio_track(song: NavidromeTrack) -> tuple[bytes, uuid.UUID]:
-            return _bound_source_audio(navidrome, song.id, bindings[song.id])
+        def muq(context):
+            if context.remote is not None:
+                return RemoteModel(MuQMuLanModel.name, config.muq_model_id, config.muq_revision)
+            return MuQMuLanModel(config.muq_model_id, config.muq_revision, device)
 
-        # Prepare only the formats requested by outstanding tasks, before loading
-        # GPU models. Same-format consumers and later batches read the disk cache.
-        if active_cache() is not None:
-            preparing = [(song, audio_prerequisites(plan, song.id)) for song in songs]
-            preparing = [
-                (song, needs) for song, needs in preparing if needs.mono_rates or needs.stereo_rates
-            ]
-            from worker.media.roformer import separation_phase
+        def mert(context):
+            if context.remote is not None:
+                return RemoteModel(MertModel.name, config.mert_model_id, config.mert_revision)
+            return MertModel(config.mert_model_id, config.mert_revision, device)
 
-            # Separation phase for melody stems: Roformer loads once, and only if a song needs it.
-            with separation_phase():
-                for index, (song, needs) in enumerate(preparing):
-                    report(
-                        {
-                            "phase": "preprocess",
-                            "message": f"Preparing audio for {song.title}",
-                            "completed": index,
-                            "total": len(preparing),
-                            "unit": "tracks",
-                        }
-                    )
-                    try:
-                        audio, _ = audio_track(song)
-                        # Melody needs Roformer vocals; on Modal those are separated remotely.
-                        prepare_audio(
-                            audio,
-                            mono_rates=needs.mono_rates,
-                            stereo_rates=needs.stereo_rates,
-                            melody=needs.melody and current_remote() is None,
-                            check=get_check(),
-                        )
-                        del audio
-                        connection.commit()
-                    except Exception:
-                        connection.rollback()
-                        # Individual consumers retain their existing failure accounting
-                        # and may retry; one bad source must not stop the whole batch.
-                        logger.exception("Could not prepare audio for Navidrome song %s", song.id)
-                    report(
-                        {
-                            "phase": "preprocess",
-                            "message": f"Prepared audio for {song.title}",
-                            "completed": index + 1,
-                            "total": len(preparing),
-                            "unit": "tracks",
-                        }
-                    )
-
-        def embedding_phase(
-            phase: str,
-            label: str,
-            external_ids: frozenset[str],
-            model: AudioEmbeddingModel | RemoteModel,
-        ) -> None:
-            run_id = _create_run(connection, model)
-            selected = [song for song in songs if song.id in external_ids]
-            attempt_id = start_attempt(connection, run_id, len(selected))
-            connection.commit()
-            remote = current_remote()
-
-            def started(index: int, total: int, song: NavidromeTrack) -> None:
-                report(
-                    {
-                        "phase": phase,
-                        "message": f"{label} {song.title}",
-                        "track": {"id": song.id, "title": song.title, "artist": song.artist},
-                        "completed": index,
-                        "total": total,
-                        "unit": "tracks",
-                        "summary": summary.__dict__,
-                    }
-                )
-
-            def finished(index: int, total: int, song: NavidromeTrack) -> None:
-                report(
-                    {
-                        "phase": phase,
-                        "message": f"{label} {song.title}",
-                        "completed": index + 1,
-                        "total": total,
-                        "unit": "tracks",
-                        "summary": summary.__dict__,
-                    }
-                )
-
-            def reused(song: NavidromeTrack, track_id: uuid.UUID) -> bool:
-                if not _model_has_embedding(connection, track_id, run_id):
-                    return False
-                summary.reused_embeddings += 1
-                record_track(connection, attempt_id, song.id, track_id)
-                connection.commit()
-                return True
-
-            def stored(
-                song: NavidromeTrack,
-                track_id: uuid.UUID,
-                outcome: tuple[EmbeddingResult, list[tuple[float, float]]],
-            ) -> None:
-                _store_embedding(connection, track_id, run_id, *outcome)
-                record_track(connection, attempt_id, song.id, track_id)
-                if phase == "muq":
-                    summary.embedded_muq += 1
-                else:
-                    summary.embedded_mert += 1
-                connection.commit()
-
-            def failed(song: NavidromeTrack) -> None:
-                connection.rollback()
-                summary.failed += 1
-                logger.exception("Failed %s phase for Navidrome song %s", phase, song.id)
-                # Do not persist provider exception messages, which may contain credentials.
-                record_track(
-                    connection,
-                    attempt_id,
-                    song.id,
-                    error="Audio embedding failed; see service logs",
-                )
-                connection.commit()
-
-            if remote is None:
-                for index, song in enumerate(selected):
-                    started(index, len(selected), song)
-                    try:
-                        audio, track_id = audio_track(song)
-                        if reused(song, track_id):
-                            continue
-                        outcome = embed_track(audio, model)
-                        del audio
-                        stored(song, track_id, outcome)
-                    except Exception:
-                        failed(song)
-                    finished(index, len(selected), song)
-            else:
-                # Upload each track's audio once, then embed the whole phase in one
-                # Modal call. Results stream back in order and are stored as they arrive.
-                pending: list[tuple[NavidromeTrack, uuid.UUID, str]] = []
-                for song in selected:
-                    try:
-                        audio, track_id = audio_track(song)
-                        if reused(song, track_id):
-                            continue
-                        remote.upload(bindings[song.id][1], audio)
-                        del audio
-                        pending.append((song, track_id, bindings[song.id][1]))
-                    except Exception:
-                        failed(song)
-                outcomes = remote.embed_audio(model, [digest for _, _, digest in pending])
-                for index, ((song, track_id, _), outcome) in enumerate(zip(pending, outcomes)):
-                    started(index, len(pending), song)
-                    try:
-                        if isinstance(outcome, BaseException):
-                            raise outcome
-                        stored(song, track_id, outcome)
-                    except Exception:
-                        failed(song)
-                    finished(index, len(pending), song)
-            finish_attempt(connection, attempt_id)
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "UPDATE analysis_runs SET status='complete', finished_at=now() WHERE id=%s",
-                    (run_id,),
-                )
-            connection.commit()
-
-        waveform_songs = [song for song in songs if song.id in plan.waveform_external_ids]
-        for index, song in enumerate(waveform_songs):
-            report(
-                {
-                    "phase": "waveform",
-                    "message": f"Generating waveform for {song.title}",
-                    "completed": index,
-                    "total": len(waveform_songs),
-                    "unit": "tracks",
-                }
-            )
-            try:
-                audio, track_id = audio_track(song)
-                store_waveform(connection, track_id, audio)
-                del audio
-                connection.commit()
-                summary.waveforms_generated += 1
-            except Exception:
-                connection.rollback()
-                summary.failed += 1
-                logger.exception("Could not generate waveform for Navidrome song %s", song.id)
-            report(
-                {
-                    "phase": "waveform",
-                    "message": f"Generating waveform for {song.title}",
-                    "completed": index + 1,
-                    "total": len(waveform_songs),
-                    "unit": "tracks",
-                    "summary": summary.__dict__,
-                }
-            )
-
-        visual_feature_songs = [
-            song for song in songs if song.id in plan.visual_feature_external_ids
-        ]
-        for index, song in enumerate(visual_feature_songs):
-            report(
-                {
-                    "phase": "visual_features",
-                    "message": f"Preparing visual features for {song.title}",
-                    "completed": index,
-                    "total": len(visual_feature_songs),
-                    "unit": "tracks",
-                }
-            )
-            try:
-                audio, track_id = audio_track(song)
-                store_visual_features(connection, track_id, audio)
-                del audio
-                connection.commit()
-                summary.visual_features_generated += 1
-            except Exception:
-                connection.rollback()
-                summary.failed += 1
-                logger.exception("Could not prepare visual features for Navidrome song %s", song.id)
-            report(
-                {
-                    "phase": "visual_features",
-                    "message": f"Prepared visual features for {song.title}",
-                    "completed": index + 1,
-                    "total": len(visual_feature_songs),
-                    "unit": "tracks",
-                    "summary": summary.__dict__,
-                }
-            )
-
-        loaded = 0
         if plan.needs_muq:
-            report(
-                {
-                    "phase": "models",
-                    "message": "Loading semantic model",
-                    "completed": loaded,
-                    "total": required_models,
-                    "unit": "models",
-                }
-            )
-            muq = (
-                RemoteModel(
-                    MuQMuLanModel.name,
-                    EmbeddingConfig.load().muq_model_id,
-                    EmbeddingConfig.load().muq_revision,
-                )
-                if current_remote()
-                else MuQMuLanModel(
-                    EmbeddingConfig.load().muq_model_id, EmbeddingConfig.load().muq_revision, device
+            run(
+                EmbeddingPhase(
+                    batch,
+                    plan.muq_external_ids,
+                    "muq",
+                    "Embedding semantics for",
+                    muq,
+                    ("Loading semantic model", 0, models),
                 )
             )
-            try:
-                embedding_phase("muq", "Embedding semantics for", plan.muq_external_ids, muq)
-            finally:
-                release_model(muq)
-                del muq
-            loaded += 1
-
         if plan.needs_mert:
-            report(
-                {
-                    "phase": "models",
-                    "message": "Loading acoustic model",
-                    "completed": loaded,
-                    "total": required_models,
-                    "unit": "models",
-                }
-            )
-            mert = (
-                RemoteModel(
-                    MertModel.name,
-                    EmbeddingConfig.load().mert_model_id,
-                    EmbeddingConfig.load().mert_revision,
-                )
-                if current_remote()
-                else MertModel(
-                    EmbeddingConfig.load().mert_model_id,
-                    EmbeddingConfig.load().mert_revision,
-                    device,
+            run(
+                EmbeddingPhase(
+                    batch,
+                    plan.mert_external_ids,
+                    "mert",
+                    "Embedding acoustics for",
+                    mert,
+                    ("Loading acoustic model", int(plan.needs_muq), models),
                 )
             )
-            try:
-                embedding_phase("mert", "Embedding acoustics for", plan.mert_external_ids, mert)
-            finally:
-                release_model(mert)
-                del mert
-
-        melody_songs = [song for song in songs if song.id in plan.melody_external_ids]
-        if melody_songs:
-            melody_run_id = create_sync_run(connection)
-            connection.commit()
-            remote = current_remote()
-            unavailable: dict[str, BaseException] = {}
-            if remote is not None:
-                # Upload once, extract every track's contours in one Modal call;
-                # results stream back in song order and are stored as they arrive.
-                pending = []
-                for song in melody_songs:
-                    try:
-                        audio, _ = audio_track(song)
-                        remote.upload(bindings[song.id][1], audio)
-                        pending.append(song)
-                    except Exception as error:
-                        unavailable[song.id] = error
-                # Separation phase on Modal first: one Roformer for every melody song.
-                separated = remote.prepare_vocals(
-                    [bindings[song.id][1] for song in pending], melody=True
-                )
-                for song, outcome in zip(list(pending), separated):
-                    if isinstance(outcome, BaseException):
-                        unavailable[song.id] = outcome
-                        pending.remove(song)
-                outcomes = iter(remote.melody([bindings[song.id][1] for song in pending]))
-            for index, song in enumerate(melody_songs):
-                report(
-                    {
-                        "phase": "melody",
-                        "message": f"Extracting melody from {song.title}",
-                        "completed": index,
-                        "total": len(melody_songs),
-                        "unit": "tracks",
-                        "summary": summary.__dict__,
-                    }
-                )
-                try:
-                    if remote is None:
-                        audio, track_id = audio_track(song)
-                        stored = store_track_contours(connection, track_id, melody_run_id, audio)
-                    else:
-                        outcome = unavailable.get(song.id) or next(outcomes)
-                        if isinstance(outcome, BaseException):
-                            raise outcome
-                        stored = store_track_contours(
-                            connection, bindings[song.id][0], melody_run_id, b"", usable=outcome
-                        )
-                    summary.melody_contours += stored
-                    summary.melody_indexed += 1
-                    connection.commit()
-                except Exception:
-                    connection.rollback()
-                    summary.failed += 1
-                    logger.exception("Could not extract melody for Navidrome song %s", song.id)
-                report(
-                    {
-                        "phase": "melody",
-                        "message": f"Extracting melody from {song.title}",
-                        "completed": index + 1,
-                        "total": len(melody_songs),
-                        "unit": "tracks",
-                        "summary": summary.__dict__,
-                    }
-                )
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "UPDATE analysis_runs SET status='complete',finished_at=now() WHERE id=%s",
-                    (melody_run_id,),
-                )
-            connection.commit()
-
-        fingerprint_songs = [song for song in songs if song.id in plan.fingerprint_external_ids]
-        for index, song in enumerate(fingerprint_songs):
-            report(
-                {
-                    "phase": "fingerprint",
-                    "message": f"Fingerprinting {song.title}",
-                    "track": {"id": song.id, "title": song.title, "artist": song.artist},
-                    "completed": index,
-                    "total": len(fingerprint_songs),
-                    "unit": "tracks",
-                    "summary": summary.__dict__,
-                }
-            )
-            try:
-                audio, track_id = audio_track(song)
-                with connection.transaction():
-                    match = store_and_match_fingerprint(connection, track_id, audio, song.duration)
-                summary.fingerprinted += 1
-                summary.recording_matches += int(bool(match.get("matched")))
-                del audio
-                connection.commit()
-            except Exception:
-                connection.rollback()
-                summary.failed += 1
-                logger.exception("Could not fingerprint Navidrome song %s", song.id)
-            report(
-                {
-                    "phase": "fingerprint",
-                    "message": f"Fingerprinting {song.title}",
-                    "completed": index + 1,
-                    "total": len(fingerprint_songs),
-                    "unit": "tracks",
-                    "summary": summary.__dict__,
-                }
-            )
-
-        recording_songs = [
-            song for song in songs if song.id in plan.recording_fingerprint_external_ids
-        ]
-        if recording_songs:
-            from worker.recordings.encoder import config_from_env
-            from worker.recordings.search import store_fingerprints
-
-            recording_config = config_from_env()
-            if recording_config is None:
-                raise ValueError("Recording encoder configuration disappeared during analysis")
-            for index, song in enumerate(recording_songs):
-                report(
-                    {
-                        "phase": "recording_fingerprint",
-                        "message": f"Indexing recording for {song.title}",
-                        "completed": index,
-                        "total": len(recording_songs),
-                        "unit": "tracks",
-                    }
-                )
-                failed = False
-                try:
-                    audio, track_id = audio_track(song)
-                    stored = store_fingerprints(
-                        connection, track_id, audio, recording_config, get_check()
-                    )
-                    del audio
-                    connection.commit()
-                    summary.recording_fingerprinted += int(stored)
-                except Exception:
-                    connection.rollback()
-                    summary.failed += 1
-                    failed = True
-                    logger.error("Could not index recording for Navidrome song %s", song.id)
-                report(
-                    {
-                        "phase": "recording_fingerprint",
-                        "message": (
-                            f"Recording indexing failed for {song.title}"
-                            if failed
-                            else f"Recording indexing finished for {song.title}"
-                        ),
-                        "completed": index + 1,
-                        "total": len(recording_songs),
-                        "unit": "tracks",
-                        "summary": summary.__dict__,
-                    }
-                )
-
-        descriptor_songs = [song for song in songs if song.id in plan.descriptor_external_ids]
-        for index, song in enumerate(descriptor_songs):
-            try:
-                audio, track_id = audio_track(song)
-                descriptors = store_audio_descriptors(connection, track_id, audio)
-                del audio
-                if descriptors.get("failed_components"):
-                    summary.failed += 1
-                else:
-                    summary.described_audio += 1
-                connection.commit()
-            except Exception:
-                connection.rollback()
-                summary.failed += 1
-                logger.exception(
-                    "Could not analyze sound descriptors for Navidrome song %s", song.id
-                )
-            report(
-                {
-                    "phase": "audio_descriptors",
-                    "message": f"Measuring sound for {song.title}",
-                    "completed": index + 1,
-                    "total": len(descriptor_songs),
-                    "unit": "tracks",
-                    "summary": summary.__dict__,
-                }
-            )
-
+        run(MelodyPhase(batch, plan.melody_external_ids))
+        run(FingerprintPhase(batch, plan.fingerprint_external_ids))
+        run(RecordingIndexPhase(batch, plan.recording_fingerprint_external_ids))
+        run(DescriptorPhase(batch, plan.descriptor_external_ids))
         summary.already_linked = len(songs) - len(plan.download_external_ids)
         report(
             {

@@ -15,6 +15,7 @@ from worker.library.visual_features import (
     VISUAL_FEATURE_REVISION,
     _structure,
     extract_visual_features,
+    analyze_visual_features,
     store_visual_features,
 )
 
@@ -191,7 +192,7 @@ def test_store_uses_revision_two_and_source_hop_without_committing():
     cursor = connection.cursor.return_value.__enter__ = Mock(return_value=Mock())
     connection.cursor.return_value.__exit__ = Mock(return_value=False)
     with patch("worker.library.visual_features.decode_audio", return_value=np.zeros(512)) as decode:
-        result = store_visual_features(connection, "track", b"audio")
+        result = store_visual_features(connection, "track", analyze_visual_features(b"audio"))
     decode.assert_called_once_with(b"audio", SAMPLE_RATE)
     sql, params = cursor.return_value.execute.call_args.args
     assert "ON CONFLICT (track_id)" in sql
@@ -208,7 +209,7 @@ def test_store_persists_terminal_unsupported_result_for_long_audio():
         patch("worker.library.visual_features.decode_audio", return_value=samples),
         patch("worker.library.visual_features.extract_visual_features") as extract,
     ):
-        result = store_visual_features(connection, "track", b"audio")
+        result = store_visual_features(connection, "track", analyze_visual_features(b"audio"))
     extract.assert_not_called()
     sql, params = cursor.return_value.execute.call_args.args
     assert "'unsupported'" in sql
