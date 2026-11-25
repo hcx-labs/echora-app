@@ -42,7 +42,7 @@ export default function ServerStep({
   useEffect(() => {
     if (!connection || editing || preview) return;
     let active = true;
-    api<{ tracks: Track[] }>(`/navidrome/connections/${connection.id}/sample?limit=18`)
+    api<{ tracks: Track[] }>(`/sync/connections/${connection.id}/sample?limit=18`)
       .then((result) => active && setPreview({ tracks: result.tracks }))
       .catch(() => active && setPreview({ tracks: [] }));
     return () => {
@@ -63,7 +63,7 @@ export default function ServerStep({
     setError("");
     try {
       const result = await api<Discovered>(
-        "/navidrome/discover",
+        "/sync/discover",
         json("POST", { url: url.trim(), username: username.trim(), password, limit: 18 }),
       );
       await selectConnection(result.connection_id);

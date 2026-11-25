@@ -54,7 +54,7 @@ type Status = {
   tracks_with_artwork: number;
 };
 
-const endpoint = "/analysis/settings/motion-artwork";
+const endpoint = "/api/v1/settings/motion-artwork";
 // Rendering time on an RTX 3090 with the int8 LTX-2.5 distilled model, for 10-second loops.
 const resolutions = [
   { value: 768, label: "768 × 768", hint: "about 1 min per track" },

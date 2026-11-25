@@ -35,7 +35,7 @@ export default function SessionRenewal() {
       now: Date.now,
       visible: () => document.visibilityState === "visible",
       request: (activity, signal) =>
-        fetch(`/analysis/auth/session${activity ? "/activity" : ""}`, {
+        fetch(`/api/v1/auth/session${activity ? "/activity" : ""}`, {
           method: activity ? "POST" : "GET",
           credentials: "same-origin",
           cache: "no-store",

@@ -164,7 +164,7 @@ type Curation = {
 };
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`/analysis${path}`, options);
+  const response = await fetch(`/api/v1${path}`, options);
   const text = response.status === 204 ? "" : await response.text();
   let body: { detail?: string } | null = null;
   if (text) {
@@ -225,7 +225,7 @@ export default function CurateLibrary() {
   const urlCurationId = useSubPath("curate");
   const [syncedUrlId, setSyncedUrlId] = useState<string | null | undefined>(undefined);
   const curationJobs = useCurationJobs(connectionId, async (signal) => {
-    const body = await api<{ curations: Curation[] }>("/library/curations", { signal });
+    const body = await api<{ curations: Curation[] }>("/curations", { signal });
     if (signal.aborted) return;
     setCurations(body.curations);
     publishCurations(body.curations);
@@ -236,7 +236,7 @@ export default function CurateLibrary() {
   const busy = busyAction !== null;
 
   function loadCurations() {
-    return api<{ curations: Curation[] }>("/library/curations")
+    return api<{ curations: Curation[] }>("/curations")
       .then((body) => {
         setCurations(body.curations);
         publishCurations(body.curations);
@@ -341,7 +341,7 @@ export default function CurateLibrary() {
     setBusyAction("preview");
     try {
       setPreview(
-        await api<Preview>("/library/curations/preview", {
+        await api<Preview>("/curations/preview", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(recipe),
@@ -363,7 +363,7 @@ export default function CurateLibrary() {
     setBusyAction("save");
     try {
       const result = await api<{ job_id?: string; id?: string }>(
-        selectedCurationId ? `/library/curations/${selectedCurationId}` : "/library/curations",
+        selectedCurationId ? `/curations/${selectedCurationId}` : "/curations",
         {
           method: selectedCurationId ? "PUT" : "POST",
           headers: { "content-type": "application/json" },
@@ -397,7 +397,7 @@ export default function CurateLibrary() {
       durationSeconds: track.duration_seconds,
       coverUrl:
         track.cover_art && connectionId ? coverArtUrl(connectionId, track.cover_art) : undefined,
-      streamUrl: mediaUrl(`/navidrome/connections/${connectionId}/stream/${track.source_id}`),
+      streamUrl: mediaUrl(`/media/connections/${connectionId}/stream/${track.source_id}`),
       connectionId,
       sourceId: track.source_id,
     }));
@@ -410,7 +410,7 @@ export default function CurateLibrary() {
       ),
     );
     try {
-      const result = await api<{ job_id: string }>(`/library/curations/${curation.id}/refresh`, {
+      const result = await api<{ job_id: string }>(`/curations/${curation.id}/refresh`, {
         method: "POST",
       });
       curationJobs.track(result.job_id);
@@ -423,7 +423,7 @@ export default function CurateLibrary() {
   }
   async function toggleSchedule(curation: Curation) {
     try {
-      await api(`/library/curations/${curation.id}`, {
+      await api(`/curations/${curation.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ refresh_enabled: !curation.refresh_enabled }),
@@ -437,7 +437,7 @@ export default function CurateLibrary() {
     if (!deleteTarget) return;
     setBusyAction("delete");
     try {
-      await api(`/library/curations/${deleteTarget.id}?delete_navidrome=${deleteNavidrome}`, {
+      await api(`/curations/${deleteTarget.id}?delete_navidrome=${deleteNavidrome}`, {
         method: "DELETE",
       });
       if (deleteTarget.id === selectedCurationId) {

@@ -19,7 +19,7 @@ func configure(t *testing.T, send func(host.HTTPRequest) (*host.HTTPResponse, er
 	oldConfig, oldSend := getConfig, sendHTTP
 	getConfig = func(key string) (string, bool) {
 		if key == "apiUrl" {
-			return "https://echora.example/analysis/integrations/navidrome/v1/", true
+			return "https://echora.example/api/v1/plugin/", true
 		}
 		return "test-key", true
 	}

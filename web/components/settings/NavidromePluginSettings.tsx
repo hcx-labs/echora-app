@@ -45,7 +45,7 @@ const initial: Profile = {
   include_translations: true,
   lyrics_format: "ttml",
 };
-const endpoint = "/analysis/settings/integrations/navidrome";
+const endpoint = "/api/v1/settings/integrations/navidrome";
 
 async function request<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   const response = await fetch(endpoint + path, {
@@ -101,7 +101,7 @@ export default function NavidromePluginSettings({ connectionId }: { connectionId
         setKeys(storedKeys);
         setLoaded(true);
         setLyricsPaused(lyrics_paused);
-        setApiUrl(`${window.location.origin}/analysis/integrations/navidrome/v1`);
+        setApiUrl(`${window.location.origin}/api/v1/plugin`);
       })
       .catch((reason) => {
         if (!cancelled) setLoadError(reason.message);

@@ -55,7 +55,7 @@ export default function AppSidebar({
   async function logout() {
     setLoggingOut(true);
     try {
-      await fetch("/analysis/auth/logout", { method: "POST" });
+      await fetch("/api/v1/auth/logout", { method: "POST" });
     } finally {
       window.location.assign(new URL("/login", window.location.origin));
     }

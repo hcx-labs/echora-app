@@ -145,7 +145,7 @@ export default function BrowseLibrary() {
   }, [urlRead, query, artist, album, sortBy, sortDirection, metadata]);
 
   useEffect(() => {
-    fetch("/analysis/auth/me")
+    fetch("/api/v1/auth/me")
       .then((response) => (response.ok ? response.json() : null))
       .then((user) => setConnectionId(user?.navidrome_connection_id || ""))
       .catch(() => {});
@@ -168,7 +168,7 @@ export default function BrowseLibrary() {
           sort_direction: sortDirection,
         });
         appendMetadataFilters(params, metadata);
-        fetch(`/analysis/library/tracks?${params}`, { signal: controller.signal })
+        fetch(`/api/v1/library/tracks?${params}`, { signal: controller.signal })
           .then(async (response) => {
             const body = await response.json();
             if (!response.ok) throw new Error(body.detail || "Could not load tracks");
@@ -288,7 +288,7 @@ export default function BrowseLibrary() {
       album: track.album,
       durationSeconds: track.duration_seconds,
       streamUrl: mediaUrl(
-        `/navidrome/connections/${connectionId}/stream/${encodeURIComponent(track.source_id)}`,
+        `/media/connections/${connectionId}/stream/${encodeURIComponent(track.source_id)}`,
       ),
       connectionId,
       sourceId: track.source_id,

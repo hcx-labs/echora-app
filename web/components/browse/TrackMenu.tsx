@@ -79,9 +79,7 @@ export default function TrackMenu({ track, onSaved }: { track: Track; onSaved: (
     setOpen(false);
     setBusy(true);
     try {
-      const response = await fetch(
-        `/analysis/library/tracks/${encodeURIComponent(track.id)}/lyrics`,
-      );
+      const response = await fetch(`/api/v1/library/tracks/${encodeURIComponent(track.id)}/lyrics`);
       const body = (await response.json()) as Lyrics;
       if (!response.ok) throw new Error("Could not load lyrics");
       setLyrics(body.text || "");
@@ -103,7 +101,7 @@ export default function TrackMenu({ track, onSaved }: { track: Track; onSaved: (
     setBusy(true);
     try {
       const response = await fetch(
-        `/analysis/library/tracks/${encodeURIComponent(track.id)}/lyrics`,
+        `/api/v1/library/tracks/${encodeURIComponent(track.id)}/lyrics`,
         {
           method: "PUT",
           headers: { "content-type": "application/json" },
@@ -132,7 +130,7 @@ export default function TrackMenu({ track, onSaved }: { track: Track; onSaved: (
     setBusy(true);
     try {
       const response = await fetch(
-        `/analysis/library/tracks/${encodeURIComponent(track.id)}/lyrics/transcription-language`,
+        `/api/v1/library/tracks/${encodeURIComponent(track.id)}/lyrics/transcription-language`,
         {
           method: "PUT",
           headers: { "content-type": "application/json" },
@@ -162,7 +160,7 @@ export default function TrackMenu({ track, onSaved }: { track: Track; onSaved: (
     setBusy(true);
     try {
       const response = await fetch(
-        `/analysis/library/tracks/${encodeURIComponent(track.id)}/lyrics/status`,
+        `/api/v1/library/tracks/${encodeURIComponent(track.id)}/lyrics/status`,
         {
           method: "PUT",
           headers: { "content-type": "application/json" },

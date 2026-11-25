@@ -10,7 +10,7 @@ export default function RuntimeConfigBootstrap() {
       () => controller.abort(),
       runtimeConfig().recording_request_timeout_ms,
     );
-    void fetch("/analysis/settings/runtime", { cache: "no-store", signal: controller.signal })
+    void fetch("/api/v1/settings/runtime", { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) return;
         const value: unknown = await response.json();

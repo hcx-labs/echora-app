@@ -24,7 +24,7 @@ export const isActiveJob = (job: Job | null) =>
 export const isTerminalJob = (job: Job | null) =>
   !!job && ["complete", "partial", "failed", "cancelled"].includes(job.status);
 export async function jobRequest<T>(path: string, signal: AbortSignal, method = "GET"): Promise<T> {
-  const response = await fetch(`/analysis${path}`, { signal, method });
+  const response = await fetch(`/api/v1${path}`, { signal, method });
   const body = await response.json();
   if (!response.ok) throw new Error(body?.detail || `Request failed (${response.status})`);
   return body as T;

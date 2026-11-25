@@ -41,10 +41,10 @@ export default function ArtistProfileView({ artist }: { artist: string }) {
       if (!controller.signal.aborted) setArtwork("");
     });
     Promise.all([
-      fetch("/analysis/auth/me", { signal: controller.signal }).then((response) =>
+      fetch("/api/v1/auth/me", { signal: controller.signal }).then((response) =>
         response.ok ? response.json() : null,
       ),
-      fetch(`/analysis/library/tracks?${new URLSearchParams({ artist, limit: "20" })}`, {
+      fetch(`/api/v1/library/tracks?${new URLSearchParams({ artist, limit: "20" })}`, {
         signal: controller.signal,
       }).then((response) => (response.ok ? response.json() : null)),
     ])
@@ -67,11 +67,11 @@ export default function ArtistProfileView({ artist }: { artist: string }) {
     });
     const query = new URLSearchParams({ artist, model });
     Promise.all([
-      fetch(`/analysis/library/artists/profile?${query}`, { signal: controller.signal }).then(
+      fetch(`/api/v1/library/artists/profile?${query}`, { signal: controller.signal }).then(
         (response) =>
           response.ok ? response.json() : Promise.reject(new Error("Artist profile unavailable")),
       ),
-      fetch(`/analysis/library/artists/similar?${query}`, { signal: controller.signal }).then(
+      fetch(`/api/v1/library/artists/similar?${query}`, { signal: controller.signal }).then(
         (response) =>
           response.ok
             ? response.json()

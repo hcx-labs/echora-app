@@ -35,7 +35,7 @@ type Configuration = {
   lyric_themes: boolean;
 };
 type Section = "endpoint" | "translation" | "transcription" | "themes";
-const endpoint = "/analysis/settings/external-ai";
+const endpoint = "/api/v1/settings/external-ai";
 const normalizeTag = (value: string) => value.trim().replaceAll("_", "-").toLowerCase();
 
 function validate(value: Configuration, section: Section): string {

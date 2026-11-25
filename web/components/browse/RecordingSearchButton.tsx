@@ -46,7 +46,7 @@ export default function RecordingSearchButton({
   const lifecycle = useRef(new RecordingAttempt(cancelJob));
   function cancelJob(id: string) {
     if (id)
-      void fetch(`/analysis/library/recording/search/${encodeURIComponent(id)}`, {
+      void fetch(`/api/v1/search/recording/${encodeURIComponent(id)}`, {
         method: "DELETE",
         keepalive: true,
         signal: AbortSignal.timeout(runtimeConfig().recording_request_timeout_ms),
@@ -67,7 +67,7 @@ export default function RecordingSearchButton({
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/analysis/library/recording/status", {
+    fetch("/api/v1/search/recording/status", {
       signal: AbortSignal.any([
         controller.signal,
         AbortSignal.timeout(runtimeConfig().recording_request_timeout_ms),
@@ -125,16 +125,13 @@ export default function RecordingSearchButton({
     }, runtimeConfig().recording_search_timeout_ms);
     async function poll() {
       try {
-        const response = await fetch(
-          `/analysis/library/recording/search/${encodeURIComponent(jobId)}`,
-          {
-            signal: AbortSignal.any([
-              controller.signal,
-              AbortSignal.timeout(runtimeConfig().recording_request_timeout_ms),
-            ]),
-            cache: "no-store",
-          },
-        );
+        const response = await fetch(`/api/v1/search/recording/${encodeURIComponent(jobId)}`, {
+          signal: AbortSignal.any([
+            controller.signal,
+            AbortSignal.timeout(runtimeConfig().recording_request_timeout_ms),
+          ]),
+          cache: "no-store",
+        });
         if (lifecycle.current.generation !== attempt || controller.signal.aborted) return;
         if ([401, 403, 404].includes(response.status)) {
           if (!controller.signal.aborted) {
@@ -204,7 +201,7 @@ export default function RecordingSearchButton({
     }
     setPhase("uploading");
     try {
-      const response = await fetch("/analysis/library/recording/search", {
+      const response = await fetch("/api/v1/search/recording", {
         method: "POST",
         headers: { "content-type": audio.type || "application/octet-stream" },
         body: audio,

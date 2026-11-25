@@ -4,7 +4,7 @@ const COVER_SIZE_MIN = 64;
 const COVER_SIZE_MAX = 1600;
 
 export function coverArtUrl(connectionId: string, coverId: string, size?: number) {
-  const path = `/navidrome/connections/${encodeURIComponent(connectionId)}/cover/${encodeURIComponent(coverId)}`;
+  const path = `/media/connections/${encodeURIComponent(connectionId)}/cover/${encodeURIComponent(coverId)}`;
   return mediaUrl(size ? `${path}?size=${coverArtSize(size)}` : path);
 }
 

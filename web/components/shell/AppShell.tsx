@@ -65,7 +65,7 @@ export default function AppShell({
       if (onboarding && cachedUser.onboarding_complete) router.replace("/home");
       else if (!onboarding && !cachedUser.onboarding_complete) router.replace("/setup");
     } else
-      fetch("/analysis/auth/me")
+      fetch("/api/v1/auth/me")
         .then((response) => {
           if (!active || generation !== sessionGeneration()) return null;
           if (response.status === 401) {

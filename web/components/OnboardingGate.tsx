@@ -5,7 +5,7 @@ import AppLoading from "./shell/AppLoading";
 
 export default function OnboardingGate() {
   useEffect(() => {
-    fetch("/analysis/auth/me")
+    fetch("/api/v1/auth/me")
       .then((response) => {
         if (response.status === 401) {
           window.location.replace("/login");

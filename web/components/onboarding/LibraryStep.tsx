@@ -102,7 +102,7 @@ export default function LibraryStep({
 
   useEffect(() => {
     let active = true;
-    api<Status>(`/navidrome/connections/${connection.id}/sync/status`)
+    api<Status>(`/sync/connections/${connection.id}/status`)
       .then((value) => active && setStatus(value))
       .catch((reason) => active && setStatusError(reason.message));
     api<{ available: boolean; default: Compute }>("/settings/external-processing/availability")
@@ -123,7 +123,7 @@ export default function LibraryStep({
   useEffect(() => {
     if (scope !== "sample") return;
     let active = true;
-    api<{ tracks: Track[] }>(`/navidrome/connections/${connection.id}/sample?limit=${SAMPLE_SIZE}`)
+    api<{ tracks: Track[] }>(`/sync/connections/${connection.id}/sample?limit=${SAMPLE_SIZE}`)
       .then((value) => {
         if (!active) return;
         setSample(value.tracks);
@@ -151,11 +151,11 @@ export default function LibraryStep({
       const result =
         scope === "library"
           ? await api<{ job_id: string }>(
-              `/navidrome/connections/${connection.id}/sync`,
+              `/sync/connections/${connection.id}`,
               json("POST", { mode: "missing", verify_audio_hashes: true, compute: modal.compute }),
             )
           : await api<{ job_id: string }>(
-              `/navidrome/connections/${connection.id}/import`,
+              `/sync/connections/${connection.id}/import`,
               json("POST", { track_ids: chosen.map((item) => item.id) }),
             );
       track(result.job_id);

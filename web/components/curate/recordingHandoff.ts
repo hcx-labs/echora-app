@@ -18,7 +18,7 @@ export async function resolveRecordingReference(
   signal: AbortSignal,
 ): Promise<Reference> {
   const params = new URLSearchParams({ limit: "1", track_id: trackId });
-  const response = await fetch(`/analysis/library/tracks?${params}`, { signal });
+  const response = await fetch(`/api/v1/library/tracks?${params}`, { signal });
   if (!response.ok) throw new Error("Could not load the recording from your library");
   const body: { tracks: Reference[] } = await response.json();
   const match = body.tracks.find((track) => track.id.toLowerCase() === trackId);

@@ -308,13 +308,13 @@ export default function MusicGalaxy() {
     };
   }, []);
   useEffect(() => {
-    fetch("/analysis/auth/me")
+    fetch("/api/v1/auth/me")
       .then((response) => response.json())
       .then((user) => setConnectionId(user.navidrome_connection_id || ""))
       .catch(() => {});
   }, []);
   useEffect(() => {
-    fetch("/analysis/library/concepts")
+    fetch("/api/v1/library/concepts")
       .then((response) => response.json())
       .then((body) => setConcepts([...(body.predefined || []), ...(body.personal || [])]))
       .catch(() => {});
@@ -322,7 +322,7 @@ export default function MusicGalaxy() {
   useEffect(() => {
     if (!selectedConcepts.length) return;
     const controller = new AbortController();
-    fetch("/analysis/library/concepts/lens", {
+    fetch("/api/v1/search/concepts", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -360,8 +360,8 @@ export default function MusicGalaxy() {
       const sequence = ++loadSequence.current;
       const blend = semanticWeight > 0 && semanticWeight < 1;
       const url = blend
-        ? `/analysis/library/map?model=blend&semantic_weight=${semanticWeight}`
-        : `/analysis/library/map?model=${model}`;
+        ? `/api/v1/library/map?model=blend&semantic_weight=${semanticWeight}`
+        : `/api/v1/library/map?model=${model}`;
       fetch(url, { signal: controller.signal })
         .then((response) => response.json())
         .then((body) => {
@@ -469,7 +469,7 @@ export default function MusicGalaxy() {
       album: point.album,
       durationSeconds: point.duration_seconds,
       streamUrl: mediaUrl(
-        `/navidrome/connections/${connectionId}/stream/${encodeURIComponent(point.source_id)}`,
+        `/media/connections/${connectionId}/stream/${encodeURIComponent(point.source_id)}`,
       ),
       connectionId,
       sourceId: point.source_id,
@@ -479,7 +479,7 @@ export default function MusicGalaxy() {
   function generateJourney(destination: Point) {
     if (!journeyStart || destination.id === journeyStart.id) return;
     setJourneyLoading(true);
-    fetch("/analysis/library/journeys/preview", {
+    fetch("/api/v1/curations/journeys/preview", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({

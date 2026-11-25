@@ -1,4 +1,4 @@
-export const CALIBRATION_SAMPLES = "/analysis/library/recording/calibration/samples";
+export const CALIBRATION_SAMPLES = "/api/v1/search/recording/calibration/samples";
 export type RecordingAvailability = {
   enabled: boolean;
   recognition_enabled?: boolean;

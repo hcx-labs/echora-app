@@ -29,7 +29,7 @@ type Status = {
 };
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`/analysis${path}`, options);
+  const response = await fetch(`/api/v1${path}`, options);
   const body = await response.json().catch(() => null);
   if (!response.ok || !body)
     throw new Error(body?.detail || `The request failed (${response.status})`);
@@ -69,14 +69,14 @@ export default function SyncLibrary() {
   function scan(connection: string) {
     setBusy(true);
     setError("");
-    api<Status>(`/navidrome/connections/${connection}/sync/status`)
+    api<Status>(`/sync/connections/${connection}/status`)
       .then(setStatus)
       .catch((reason) => setError(reason.message))
       .finally(() => setBusy(false));
   }
 
   useEffect(() => {
-    fetch("/analysis/auth/me")
+    fetch("/api/v1/auth/me")
       .then((response) => response.json())
       .then((user) => {
         const connection = user.navidrome_connection_id || "";
@@ -113,7 +113,7 @@ export default function SyncLibrary() {
     setStarting(true);
     try {
       const result = await api<{ job_id: string; status: string; existing: boolean }>(
-        `/navidrome/connections/${connectionId}/sync`,
+        `/sync/connections/${connectionId}`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },

@@ -67,7 +67,7 @@ export default function BrowseMetadataFilters({
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     const abort = new AbortController();
-    fetch("/analysis/library/filter-options", { signal: abort.signal })
+    fetch("/api/v1/library/filter-options", { signal: abort.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error();
         const body = await response.json();

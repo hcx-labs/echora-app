@@ -7,7 +7,7 @@ import { Button } from "../ui/button";
 export default function Login() {
   const [configured, setConfigured] = useState<boolean | null>(null);
   useEffect(() => {
-    fetch("/analysis/auth/oidc/status")
+    fetch("/api/v1/auth/oidc/status")
       .then((response) => response.json())
       .then((body) => setConfigured(Boolean(body.configured)))
       .catch(() => setConfigured(false));
@@ -30,7 +30,7 @@ export default function Login() {
           loading={configured === null}
           disabled={!configured}
           onClick={() => {
-            window.location.assign(new URL("/analysis/auth/oidc/start", window.location.origin));
+            window.location.assign(new URL("/api/v1/auth/oidc/start", window.location.origin));
           }}
         >
           <ShieldCheck />

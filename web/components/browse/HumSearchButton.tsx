@@ -59,7 +59,7 @@ export default function HumSearchButton({
     let timer: ReturnType<typeof setTimeout>;
     async function refresh() {
       try {
-        const response = await fetch("/analysis/library/hum/index", { signal: controller.signal });
+        const response = await fetch("/api/v1/search/hum/index", { signal: controller.signal });
         const value: IndexStatus | null = response.ok ? await response.json() : null;
         if (controller.signal.aborted) return;
         if (value) {
@@ -91,7 +91,7 @@ export default function HumSearchButton({
     if (index.status !== "complete") {
       setState("building");
       try {
-        const response = await fetch("/analysis/library/hum/index?track_limit=50", {
+        const response = await fetch("/api/v1/search/hum/index?track_limit=50", {
           method: "POST",
           signal: attempt.signal,
         });
@@ -133,7 +133,7 @@ export default function HumSearchButton({
         setState("searching");
         try {
           const recording = new Blob(chunks, { type: active.mimeType });
-          const response = await fetch("/analysis/library/hum/search?limit=10", {
+          const response = await fetch("/api/v1/search/hum?limit=10", {
             method: "POST",
             headers: { "content-type": active.mimeType || "application/octet-stream" },
             body: recording,

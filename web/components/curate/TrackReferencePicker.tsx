@@ -50,7 +50,7 @@ export default function TrackReferencePicker({
           offset: "0",
           sort_by: "name",
         });
-        const response = await fetch(`/analysis/library/tracks?${params}`, {
+        const response = await fetch(`/api/v1/library/tracks?${params}`, {
           signal: controller.signal,
         });
         if (!response.ok) throw new Error("Track search failed. Try again.");
