@@ -618,7 +618,10 @@ class MelodyPhase(_SongPhase):
             outcomes = iter(remote.melody([self.batch.bindings[item.key][1] for item in pending]))
             for item in items:
                 context.check()
-                outcome = unavailable.get(item.key) or next(outcomes)
+                try:
+                    outcome = unavailable.get(item.key) or next(outcomes)
+                except Exception as error:  # noqa: BLE001 - the Modal stream broke or ended early
+                    outcome = error
                 if isinstance(outcome, BaseException):
                     self.log_failure(item)
                     yield ItemResult.failed(item, _failure(self.failure_message, outcome))
