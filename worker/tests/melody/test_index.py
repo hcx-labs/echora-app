@@ -193,18 +193,14 @@ def test_runs_record_roformer_and_residual_provenance():
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     cursor.fetchone.return_value = {"id": "run"}
-    for create in (
-        lambda: h.create_sync_run(connection),
-        lambda: h._create_run(connection, "corpus"),
-    ):
-        assert create() == "run"
-        sql, params = cursor.execute.call_args.args
-        assert params[0] == h.MELODY_CONTOUR_REVISION
-        config = params[2].obj
-        assert config["separator_model"] == "KimberleyJSN/melbandroformer"
-        assert "overlap2" in config["separator_revision"]
-        assert config["accompaniment"] == "stereo-mix-minus-vocals-then-mean-v1"
-        assert "'mixed'" in sql
+    assert h.create_sync_run(connection) == "run"
+    sql, params = cursor.execute.call_args.args
+    assert params[0] == h.MELODY_CONTOUR_REVISION
+    config = params[2].obj
+    assert config["separator_model"] == "KimberleyJSN/melbandroformer"
+    assert "overlap2" in config["separator_revision"]
+    assert config["accompaniment"] == "stereo-mix-minus-vocals-then-mean-v1"
+    assert "'mixed'" in sql
 
 
 def test_search_loads_only_current_recipe_and_owned_tracks(monkeypatch):

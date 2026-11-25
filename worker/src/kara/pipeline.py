@@ -613,8 +613,8 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
     """Aligns the batch's lyrics to their audio with the Echora Kara aligner.
 
     Songs whose lyrics came with word timing keep it (``supplied``). The others are prepared
-    first, every one of them, so vocal separation never alternates with the aligner on the GPU;
-    then the aligner loads once and aligns them all (on Modal in one call). One batch aligns at a
+    first, every one of them (into the batch's source cache, or up to Modal); then the aligner
+    loads once and aligns them all (on Modal in one call). One batch aligns at a
     time in this worker; the aligner process stops after the stage.
     """
 

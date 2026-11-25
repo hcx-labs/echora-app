@@ -6,7 +6,7 @@ weights are not in the image: `prepare_models` fills a persistent Volume, and
 a manifest file on it records which pinned model set is present.
 
 Echora deploys this app itself from Settings → External processing. To deploy
-by hand, from services/analysis with a Modal token configured:
+by hand, from an environment with the worker installed and a Modal token configured:
 
     ECHORA_MODAL_IMAGE=ghcr.io/hackslashx/echora-analysis-gpu:<version> \
         modal deploy -m worker.remote.modal_app
