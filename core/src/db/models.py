@@ -5,7 +5,17 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    SmallInteger,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -144,7 +154,7 @@ class Curation(Base):
     themes_prompts: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     sound_negative_prompts: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     themes_negative_prompts: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
-    sound_weight: Mapped[int] = mapped_column(Integer, default=50)
+    sound_weight: Mapped[int] = mapped_column(SmallInteger, default=50)
     sound_profile: Mapped[dict] = mapped_column(JSONB, default=dict)
     positive_track_ids: Mapped[list[uuid.UUID]] = mapped_column(
         ARRAY(UUID(as_uuid=True)), default=list
@@ -171,7 +181,7 @@ class Curation(Base):
     journey_end_track_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tracks.id", ondelete="SET NULL")
     )
-    journey_lyrics_weight: Mapped[int] = mapped_column(Integer, default=25)
+    journey_lyrics_weight: Mapped[int] = mapped_column(SmallInteger, default=25)
     refresh_interval_hours: Mapped[int] = mapped_column(Integer, default=24)
     navidrome_playlist_id: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, default="draft")
