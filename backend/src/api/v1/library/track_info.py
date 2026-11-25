@@ -13,6 +13,8 @@ from backend.api.responses import ResponseModel
 from backend.library.track_info import track_info
 from core.db.connection import connect
 from core.errors import NotFoundError
+from core.library import store as library
+from core.lyrics import store as lyrics
 from worker.themes.pipeline import PROMPT_REVISION as LYRIC_THEMES_REVISION
 
 
@@ -96,38 +98,12 @@ class TrackInfoEndpoint(Endpoint):
     response = TrackInfo
 
     def handle(self, track_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> dict:
-        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
-            cursor.execute(
-                """SELECT ts.source_data FROM user_track_links link
-                   JOIN track_sources ts ON ts.track_id=link.track_id AND ts.library_id=link.library_id
-                                        AND ts.external_id=link.external_id
-                   WHERE link.user_id=%s AND link.track_id=%s ORDER BY ts.id LIMIT 1""",
-                (user["id"], track_id),
-            )
-            source = cursor.fetchone()
+        with connect() as connection:
+            source = library.source_data(connection, user["id"], track_id)
             if source is None:
                 raise NotFoundError("Track is not in your library")
-            cursor.execute(
-                """SELECT descriptors FROM track_audio_descriptors
-                   WHERE track_id=%s AND status IN ('complete', 'partial')
-                   ORDER BY created_at DESC LIMIT 1""",
-                (track_id,),
-            )
-            descriptors = cursor.fetchone()
-            cursor.execute(
-                """SELECT text, language, provenance, karaoke_lines IS NOT NULL
-                          AND jsonb_array_length(karaoke_lines) > 0 AS karaoke_lines
-                   FROM lyrics WHERE track_id=%s""",
-                (track_id,),
-            )
-            lyrics = cursor.fetchone()
+            descriptors = library.latest_descriptors(connection, track_id)
+            lyrics_row = lyrics.lyrics_facts(connection, track_id)
             # Only a description written for these lyrics and the current prompt.
-            cursor.execute(
-                """SELECT th.description, th.themes FROM track_lyric_themes th
-                   JOIN lyrics ly ON ly.track_id=th.track_id
-                   WHERE th.track_id=%s AND th.status='ready' AND th.prompt_revision=%s
-                     AND th.source_checksum=encode(sha256(convert_to(ly.text, 'UTF8')), 'hex')""",
-                (track_id, LYRIC_THEMES_REVISION),
-            )
-            themes = cursor.fetchone()
-        return {"track_id": str(track_id), **track_info(source, descriptors, lyrics, themes)}
+            themes = lyrics.current_themes(connection, track_id, LYRIC_THEMES_REVISION)
+        return {"track_id": str(track_id), **track_info(source, descriptors, lyrics_row, themes)}

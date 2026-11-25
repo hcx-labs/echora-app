@@ -12,6 +12,7 @@ from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
 from core.db.connection import connect
 from core.errors import NotFoundError
+from core.lyrics import store
 from core.lyrics.translations import load_translations
 from worker.translation.pipeline import source_lines as translation_source_lines
 
@@ -52,22 +53,8 @@ class TrackLyricsEndpoint(Endpoint):
     response = TrackLyrics
 
     def handle(self, track_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> dict:
-        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
-            cursor.execute(
-                """SELECT l.text, l.language, l.source, l.provenance, l.availability_status,
-                          karaoke.lines AS karaoke_lines, karaoke.model AS karaoke_model,
-                          karaoke.model_revision AS karaoke_model_revision,
-                          karaoke.bounded AS karaoke_bounded
-                   FROM user_track_links link
-                   LEFT JOIN lyrics l ON l.track_id=link.track_id
-                   LEFT JOIN LATERAL (
-                     SELECT kv.* FROM karaoke_lyrics_variants kv
-                     WHERE kv.track_id=link.track_id AND kv.bounded=false LIMIT 1
-                   ) karaoke ON true
-                   WHERE link.user_id=%s AND link.track_id=%s LIMIT 1""",
-                (user["id"], track_id),
-            )
-            row = cursor.fetchone()
+        with connect() as connection:
+            row = store.user_lyrics(connection, user["id"], track_id)
         if row is None:
             raise NotFoundError("Track is not in your library")
         provenance = row.get("provenance") or {}

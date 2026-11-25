@@ -11,18 +11,10 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.requests import PutRequest
 from backend.api.responses import ResponseModel
-from backend.library.db import require_visible
 from core.db.connection import connect
 from core.errors import InvalidQueryError
-
-UPSERT_SQL = """INSERT INTO lyrics (track_id, source, text, language, provenance, availability_status)
-   VALUES (%s,'manual',%s,%s,jsonb_build_object('manual',true,'edited_at',now()::text),'available')
-   ON CONFLICT (track_id) DO UPDATE SET source='manual', text=EXCLUDED.text,
-     language=EXCLUDED.language, provenance=(CASE WHEN lyrics.text IS DISTINCT FROM EXCLUDED.text THEN
-         coalesce(lyrics.provenance,'{}'::jsonb) - 'lines' - 'synced'
-       ELSE coalesce(lyrics.provenance,'{}'::jsonb) END)
-       || jsonb_build_object('manual',true,'edited_at',now()::text),
-     availability_status='available', created_at=now()"""
+from core.library import store as library
+from core.lyrics import store as lyrics
 
 
 class LyricsUpdate(PutRequest):
@@ -55,18 +47,15 @@ class TrackLyricsUpdate(Endpoint):
         if not lyric_text:
             raise InvalidQueryError("Lyrics cannot be empty")
         language = body.language.strip().lower() if body.language else None
-        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
-            require_visible(cursor, user["id"], track_id, "Track is not in your library")
-            cursor.execute("SELECT text, language FROM lyrics WHERE track_id=%s", (track_id,))
-            existing = cursor.fetchone()
+        with connect() as connection:
+            library.require_visible(
+                connection, user["id"], track_id, "Track is not in your library"
+            )
+            existing = lyrics.lyrics_text(connection, track_id)
             changed = existing is None or existing["text"] != lyric_text
-            cursor.execute(UPSERT_SQL, (track_id, lyric_text, language))
+            lyrics.save_manual_lyrics(connection, track_id, lyric_text, language)
             if changed:
-                cursor.execute("DELETE FROM karaoke_lyrics_variants WHERE track_id=%s", (track_id,))
-                cursor.execute(
-                    "DELETE FROM embeddings WHERE track_id=%s AND embedding_type='lyrics'",
-                    (track_id,),
-                )
+                lyrics.discard_derived(connection, track_id)
         return {
             "track_id": str(track_id),
             "karaoke_pending": changed,

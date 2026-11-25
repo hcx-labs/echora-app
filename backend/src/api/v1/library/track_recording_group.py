@@ -12,6 +12,7 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
 from core.db.connection import connect
+from core.library import store
 
 
 class RecordingGroup(ResponseModel):
@@ -41,32 +42,15 @@ class TrackRecordingGroup(Endpoint):
     response = TrackRecordingGroupState
 
     def handle(self, track_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> dict:
-        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
-            cursor.execute(
-                """SELECT rg.id, rg.status, rg.canonical_track_id, rg.created_at, rg.updated_at
-                   FROM recording_group_members member JOIN recording_groups rg ON rg.id=member.group_id
-                   WHERE member.track_id=%s""",
-                (track_id,),
-            )
-            group = cursor.fetchone()
+        with connect() as connection:
+            group = store.recording_group(connection, track_id)
             if group is None:
-                cursor.execute("SELECT 1 FROM track_fingerprints WHERE track_id=%s", (track_id,))
-                return {"group": None, "fingerprinted": cursor.fetchone() is not None}
-            cursor.execute(
-                """SELECT t.id, t.title, t.artist, t.album, t.duration_seconds, member.confidence,
-                          member.membership_status, array_agg(DISTINCT ts.external_id) AS source_ids
-                   FROM recording_group_members member JOIN tracks t ON t.id=member.track_id
-                   LEFT JOIN track_sources ts ON ts.track_id=t.id WHERE member.group_id=%s
-                   GROUP BY t.id, member.confidence, member.membership_status ORDER BY t.title""",
-                (group["id"],),
+                return {
+                    "group": None,
+                    "fingerprinted": store.is_fingerprinted(connection, track_id),
+                }
+            members = store.recording_group_members(connection, group["id"])
+            evidence = store.recording_match_evidence(
+                connection, [member["id"] for member in members]
             )
-            members = cursor.fetchall()
-            cursor.execute(
-                """SELECT id, left_track_id, right_track_id, decision, chromaprint_score,
-                          duration_delta_seconds, semantic_similarity, acoustic_similarity,
-                          matcher_revision, created_at FROM recording_match_evidence
-                   WHERE left_track_id=ANY(%s) AND right_track_id=ANY(%s) ORDER BY created_at DESC""",
-                ([member["id"] for member in members], [member["id"] for member in members]),
-            )
-            evidence = cursor.fetchall()
         return {"group": {**group, "members": members, "evidence": evidence}, "fingerprinted": True}

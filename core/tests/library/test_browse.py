@@ -1,7 +1,7 @@
 import pytest
 
-from backend.library.browse_filters import predicates
 from core.errors import InvalidQueryError
+from core.library.browse import predicates
 
 
 def test_values_are_bound_not_interpolated():

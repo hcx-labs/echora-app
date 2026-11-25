@@ -1,4 +1,4 @@
-"""Run the lyrics endpoints' upserts against PostgreSQL, including type inference."""
+"""Run the lyrics store's upserts against PostgreSQL, including type inference."""
 
 import os
 from uuid import uuid4
@@ -6,7 +6,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from backend.api.v1.library import track_lyrics_status, track_transcription_language
+from core.lyrics import store
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def test_instrumental_and_missing_insert_and_update(db):
     for first, second in [("instrumental", "missing"), ("missing", "instrumental")]:
         track = uuid4()
         for status in [first, second]:
-            db.execute(track_lyrics_status.UPSERT_SQL, (track, status, status))
+            store.set_manual_status(db, track, status)
             row = db.execute(
                 "SELECT availability_status,provenance FROM lyrics WHERE track_id=%s", (track,)
             ).fetchone()
@@ -38,10 +38,28 @@ def test_instrumental_and_missing_insert_and_update(db):
 def test_forced_transcription_insert_and_update(db):
     track = uuid4()
     for language in ["en", "ja"]:
-        db.execute(track_transcription_language.UPSERT_SQL, (track, language, language))
+        store.force_transcription(db, track, language)
         row = db.execute(
             "SELECT availability_status,provenance FROM lyrics WHERE track_id=%s", (track,)
         ).fetchone()
         assert row[0] == "missing"
         assert row[1]["transcription_language"] == language
         assert row[1]["forced_transcription"] is True
+
+
+def test_manual_lyrics_keep_line_timing_only_while_the_text_is_unchanged(db):
+    track = uuid4()
+    db.execute(
+        "INSERT INTO lyrics VALUES (%s,'navidrome','old','en','{\"lines\": [1]}','available')",
+        (track,),
+    )
+    store.save_manual_lyrics(db, track, "old", "en")
+    assert "lines" in store_provenance(db, track)
+    store.save_manual_lyrics(db, track, "new", None)
+    provenance = store_provenance(db, track)
+    assert "lines" not in provenance and provenance["manual"] is True
+    assert store.lyrics_text(db, track) == {"text": "new", "language": None}
+
+
+def store_provenance(db, track):
+    return db.execute("SELECT provenance FROM lyrics WHERE track_id=%s", (track,)).fetchone()[0]

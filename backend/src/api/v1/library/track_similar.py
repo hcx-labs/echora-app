@@ -10,6 +10,7 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
 from core.db.connection import connect
+from core.embeddings import store
 from core.errors import NotFoundError
 
 
@@ -41,26 +42,11 @@ class TrackSimilar(Endpoint):
     def handle(
         self, track_id: uuid.UUID, limit: int = 20, user: SessionUser = Depends(current_user)
     ) -> dict:
-        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
-            cursor.execute(
-                """SELECT e.embedding FROM current_embeddings e
-                   WHERE e.track_id=%s AND e.embedding_type='semantic_fusion'""",
-                (track_id,),
-            )
-            seed = cursor.fetchone()
+        with connect() as connection:
+            seed = store.semantic_fusion_vector(connection, track_id)
             if seed is None:
                 raise NotFoundError("Track has no semantic fusion vector")
-            cursor.execute(
-                """SELECT t.id, t.title, t.artist, t.album,
-                          1 - (e.embedding <=> %s::vector) AS similarity
-                   FROM current_embeddings e
-                   JOIN tracks t ON t.id=e.track_id
-                   WHERE e.embedding_type='semantic_fusion' AND e.track_id != %s
-                   ORDER BY e.embedding <=> %s::vector LIMIT %s""",
-                (seed["embedding"], track_id, seed["embedding"], max(1, min(limit, 100))),
+            results = store.nearest_semantic_fusion(
+                connection, seed, track_id, max(1, min(limit, 100))
             )
-            return {
-                "track_id": str(track_id),
-                "mode": "semantic_fusion",
-                "results": cursor.fetchall(),
-            }
+        return {"track_id": str(track_id), "mode": "semantic_fusion", "results": results}

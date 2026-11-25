@@ -21,7 +21,8 @@ def test_update_lyrics_keeps_text_and_resets_karaoke_when_changed(client, user, 
         "lyrics_embedding_pending": True,
     }
     assert db.executed[0][1] == (user["id"], TRACK)
-    assert db.executed[2] == (lyrics_update.UPSERT_SQL, (TRACK, "new\n words", "ja"))
+    assert "INSERT INTO lyrics" in db.executed[2][0]
+    assert db.executed[2][1] == (TRACK, "new\n words", "ja")
     assert "karaoke_lyrics_variants" in db.executed[3][0]
 
 
@@ -47,7 +48,8 @@ def test_lyrics_status(client, monkeypatch):
     db = install(monkeypatch, lyrics_status, [{"x": 1}])
     response = client.put(f"{BASE}/lyrics/status", json={"status": "instrumental"})
     assert response.json() == {"track_id": str(TRACK), "status": "instrumental"}
-    assert db.executed[1] == (lyrics_status.UPSERT_SQL, (TRACK, "instrumental", "instrumental"))
+    assert "INSERT INTO lyrics" in db.executed[1][0]
+    assert db.executed[1][1] == (TRACK, "instrumental", "instrumental")
     assert client.put(f"{BASE}/lyrics/status", json={"status": "bad"}).status_code == 422
 
 
@@ -63,7 +65,8 @@ def test_forced_transcription_needs_ai_lyrics(client, monkeypatch):
         "language": "pt-BR",
         "transcription_pending": True,
     }
-    assert db.executed[2] == (transcription.UPSERT_SQL, (TRACK, "pt-BR", "pt-BR"))
+    assert "INSERT INTO lyrics" in db.executed[2][0]
+    assert db.executed[2][1] == (TRACK, "pt-BR", "pt-BR")
 
 
 def test_lyrics_prefer_karaoke_lines_and_list_ready_translations(client, monkeypatch):

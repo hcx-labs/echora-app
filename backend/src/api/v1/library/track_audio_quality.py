@@ -12,6 +12,7 @@ from backend.api.responses import ResponseModel
 from backend.library.track_info import LOSSLESS_CODECS
 from core.db.connection import connect
 from core.errors import NotFoundError
+from core.library import store
 
 
 class AudioQuality(ResponseModel):
@@ -34,22 +35,8 @@ class TrackAudioQuality(Endpoint):
     response = AudioQuality
 
     def handle(self, track_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> dict:
-        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
-            cursor.execute(
-                """SELECT ts.source_data->>'suffix' AS codec,
-                          ts.source_data->>'contentType' AS content_type,
-                          (ts.source_data->>'bitRate')::integer AS bit_rate_kbps,
-                          (ts.source_data->>'bitDepth')::integer AS bit_depth,
-                          (ts.source_data->>'samplingRate')::integer AS sample_rate_hz,
-                          (ts.source_data->>'channelCount')::integer AS channels
-                   FROM user_track_links link
-                   JOIN track_sources ts ON ts.track_id=link.track_id AND ts.library_id=link.library_id
-                                        AND ts.external_id=link.external_id
-                   WHERE link.user_id=%s AND link.track_id=%s
-                   ORDER BY ts.id LIMIT 1""",
-                (user["id"], track_id),
-            )
-            row = cursor.fetchone()
+        with connect() as connection:
+            row = store.audio_quality(connection, user["id"], track_id)
         if row is None:
             raise NotFoundError("Track is not in your library")
         codec = str(row.get("codec") or "").lower()

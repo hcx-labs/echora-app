@@ -10,18 +10,9 @@ from fastapi import Depends
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
-from backend.library.db import require_visible
 from core.db.connection import connect
+from core.library import store
 from worker.library.descriptors import DESCRIPTOR_REVISION
-
-VOCAL_ACTIVITY_SQL = """SELECT activity.activity, activity.run_id
-   FROM track_vocal_activity activity
-   JOIN current_analysis_runs ar ON ar.id=activity.run_id
-   WHERE activity.track_id=%s AND ar.kind='voice_classification'
-   ORDER BY activity.created_at DESC LIMIT 1"""
-
-DESCRIPTORS_SQL = """SELECT revision, status, descriptors, created_at FROM track_audio_descriptors
-   WHERE track_id=%s AND revision=%s"""
 
 
 class AudioDescriptors(ResponseModel):
@@ -44,12 +35,10 @@ class TrackAudioDescriptors(Endpoint):
     response = AudioDescriptors
 
     def handle(self, track_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> dict:
-        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
-            require_visible(cursor, user["id"], track_id, "Track not found")
-            cursor.execute(DESCRIPTORS_SQL, (track_id, DESCRIPTOR_REVISION))
-            descriptors = cursor.fetchone()
-            cursor.execute(VOCAL_ACTIVITY_SQL, (track_id,))
-            vocal = cursor.fetchone()
+        with connect() as connection:
+            store.require_visible(connection, user["id"], track_id, "Track not found")
+            descriptors = store.audio_descriptors(connection, track_id, DESCRIPTOR_REVISION)
+            vocal = store.vocal_activity(connection, track_id)
         return {
             "track_id": str(track_id),
             "status": descriptors["status"] if descriptors else "pending",
