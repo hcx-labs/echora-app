@@ -24,9 +24,7 @@ from worker.models.download import model_manifest
 from worker.processing import ProcessingContext, run_stage
 from worker.remote.compute import adopt_compute_settings, compute_settings
 
-CONFIG = remote_compute.ModalConfig(
-    "ak-test", "as-secret", "L40S", "ghcr.io/x/echora-analysis-gpu:1.0"
-)
+CONFIG = remote_compute.ModalConfig("ak-test", "as-secret", "L40S", "ghcr.io/x/echora-worker:1.0")
 
 
 class NotFound(Exception):

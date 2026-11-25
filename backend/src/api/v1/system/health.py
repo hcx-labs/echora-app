@@ -21,4 +21,4 @@ class Health(Endpoint):
     response = HealthStatus
 
     def handle(self) -> dict[str, str]:
-        return {"status": "ok", "service": "echora-analysis"}
+        return {"status": "ok", "service": "echora-backend"}

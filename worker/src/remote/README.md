@@ -28,7 +28,7 @@ processing.
 - `compute.py`: every config class with `compute()` fields travels with each call
   (`compute_settings()`), and the container adopts it (`adopt_compute_settings()`), so remote
   results match local ones.
-- `modal_app.py`: the deployed app. Its image is Echora's GPU analysis image with the deploying
+- `modal_app.py`: the deployed app. Its image is Echora's GPU worker image with the deploying
   worker's source on top; model weights live on a Modal volume, with a manifest of the pinned
   model set.
 

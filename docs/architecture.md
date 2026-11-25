@@ -6,7 +6,7 @@ Echora separates immutable track identity, recording equivalence, model represen
 
 The Next.js web service renders the interface; the browser calls the backend's API at `/api/v1/*` (nginx routes it to the backend directly, `next dev` through a rewrite; routes are listed in [the v1 route map](design/api-v1-routes.md)). The root `PlayerProvider` keeps playback and queues alive across routes.
 
-The FastAPI analysis service owns OIDC sessions, application APIs, playback proxying, interactive inference, clustering, and job submission. Background work runs outside the API through PostgreSQL-backed jobs. Analysis workers process sync, import, and backfill batches; scheduled workers enqueue due curations and execute both automatic and manual refreshes. Claims, leases, retries, cancellation, and owner-scoped history are durable. See [worker operations](jobs.md) and [the batch-worker decision](adr/0006-use-durable-jobs-with-batch-analysis-workers.md).
+The FastAPI backend (`backend/`, image `echora-backend`) owns OIDC sessions, application APIs, playback proxying, interactive inference, clustering, and job submission. Background work runs outside the API through PostgreSQL-backed jobs. Analysis workers process sync, import, and backfill batches; scheduled workers enqueue due curations and execute both automatic and manual refreshes. Claims, leases, retries, cancellation, and owner-scoped history are durable. See [worker operations](jobs.md) and [the batch-worker decision](adr/0006-use-durable-jobs-with-batch-analysis-workers.md).
 
 PostgreSQL 17 with pgvector is the canonical store. SQLAlchemy handles ordinary lifecycle queries. Reviewed PostgreSQL SQL remains in analytical paths where pgvector operations, CTEs, bulk reconciliation, or query plans need direct control. Alembic creates the v1 schema and applies every later revision during analysis startup.
 
@@ -36,4 +36,4 @@ A curation is a durable recipe for a fully managed Navidrome playlist. Revisions
 
 ## Deployment
 
-Production runs separate web and analysis API deployments behind one ingress, plus analysis and scheduled worker deployments without public ports. The web service proxies analysis requests internally. PostgreSQL and model snapshots use persistent storage. The model init container has network access; the analysis container does not download model files at runtime.
+Production runs separate web (`echora-web`) and backend (`echora-backend`) deployments behind one ingress, plus analysis and scheduled worker deployments (`echora-worker`, `python -m worker.executor analysis|scheduled`) without public ports. The ingress routes `/api/v1/` to the backend. PostgreSQL and model snapshots use persistent storage. The model init container has network access; the backend and worker containers do not download model files at runtime.

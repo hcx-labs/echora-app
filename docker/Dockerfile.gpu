@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime
+FROM pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime AS base
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /service
 # ffmpeg follows the pinned Ubuntu base image security repository.
@@ -22,6 +22,30 @@ RUN for package in core worker backend; do mkdir -p build/$package/src && touch 
 # fastText lid.176.ftz (CC BY-SA 3.0), pinned by hash to the model the v3 manifest was built with.
 RUN mkdir -p /opt/fa_kara_models \
     && /opt/venv/bin/python -c "import hashlib, urllib.request; data = urllib.request.urlopen('https://huggingface.co/julien-c/fasttext-language-id/resolve/9f2e94d2fd6b2615d26f5ec5b34cf7e2f38cb86e/lid.176.ftz').read(); assert hashlib.sha256(data).hexdigest() == '8f3472cfe8738a7b6099e8e999c3cbfae0dcd15696aac7d7738a8039db603e83', 'lid.176.ftz hash'; open('/opt/fa_kara_models/lid.176.ftz', 'wb').write(data)"
+# The GPU worker image of this same build, which Modal runs (docs/modal-compute.md).
+ARG ECHORA_MODAL_IMAGE=""
+ENV ECHORA_MODAL_IMAGE="${ECHORA_MODAL_IMAGE:-ghcr.io/hackslashx/echora-worker:latest}"
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONPATH="/service/packages" \
+    HF_HOME="/models/huggingface" \
+    TORCH_HOME="/models/torch" \
+    LID_MODEL_PATH="/models/lid.176.bin" \
+    NLTK_DATA="/usr/local/share/nltk_data"
+RUN mkdir -p /models/huggingface /home/echora \
+    && chown -R echora /models /home/echora
+
+# --- echora-backend: the API (/api/v1). Runs the migrations, then serves.
+FROM base AS backend
+# core, worker and backend import under their project names.
+COPY core/src ./packages/core
+COPY worker/src ./packages/worker
+COPY backend/src ./packages/backend
+COPY core/alembic.ini ./alembic.ini
+EXPOSE 8000
+CMD ["sh", "-c", "mkdir -p /data/preprocessed /data/recording-calibration \"${ECHORA_MOTION_ARTWORK_DIR:-/data/motion-artwork}\" && chown echora /data/preprocessed /data/recording-calibration \"${ECHORA_MOTION_ARTWORK_DIR:-/data/motion-artwork}\" && chmod 700 /data/recording-calibration && chown -R echora /models && runuser -u echora -- python -m worker.models.download --prune-only && runuser -u echora -- alembic upgrade head && exec runuser -u echora -- uvicorn backend.app:create_app --factory --host 0.0.0.0 --port 8000"]
+
+# --- echora-worker: sync processing (`python -m worker.executor analysis|scheduled`).
+FROM base AS worker
 # ComfyUI for optional motion artwork. The worker starts it only while a batch renders loops.
 # Its own venv keeps its pins (transformers, SQLAlchemy, alembic) apart from Echora's; torch is shared.
 ARG COMFYUI_COMMIT=d43a5fa20c8547ff42d13232f589a06536c42b97
@@ -33,21 +57,9 @@ RUN mkdir -p /opt/comfyui \
     && python -m venv --system-site-packages /opt/comfyui-venv \
     && /opt/comfyui-venv/bin/pip install -r /tmp/comfyui-requirements.txt \
     && rm /tmp/comfyui-requirements.txt
-# core, worker and backend import under their project names.
+# core and worker import under their project names; the worker never imports backend.
 COPY core/src ./packages/core
 COPY worker/src ./packages/worker
-COPY backend/src ./packages/backend
 COPY core/alembic.ini ./alembic.ini
-# The GPU analysis image of this same build, which Modal runs (docs/modal-compute.md).
-ARG ECHORA_MODAL_IMAGE=""
-ENV ECHORA_MODAL_IMAGE="${ECHORA_MODAL_IMAGE:-ghcr.io/hackslashx/echora-analysis-gpu:latest}"
-ENV PATH="/opt/venv/bin:$PATH" \
-    PYTHONPATH="/service/packages" \
-    HF_HOME="/models/huggingface" \
-    TORCH_HOME="/models/torch" \
-    LID_MODEL_PATH="/models/lid.176.bin" \
-    NLTK_DATA="/usr/local/share/nltk_data"
-RUN mkdir -p /models/huggingface /home/echora \
-    && chown -R echora /models /home/echora
-EXPOSE 8000
-CMD ["sh", "-c", "mkdir -p /data/preprocessed /data/recording-calibration \"${ECHORA_MOTION_ARTWORK_DIR:-/data/motion-artwork}\" && chown echora /data/preprocessed /data/recording-calibration \"${ECHORA_MOTION_ARTWORK_DIR:-/data/motion-artwork}\" && chmod 700 /data/recording-calibration && chown -R echora /models && runuser -u echora -- python -m worker.models.download --prune-only && runuser -u echora -- alembic upgrade head && exec runuser -u echora -- uvicorn backend.app:create_app --factory --host 0.0.0.0 --port 8000"]
+USER echora
+CMD ["python", "-m", "worker.executor", "analysis"]

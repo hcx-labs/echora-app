@@ -46,7 +46,7 @@ Migration `0050_session_activity` preserves existing sessions' original expirati
 
 Settings cover database pools, worker timing and retries, provider requests, cache budgets, preprocessing locks, subprocess deadlines, inference batch sizes, recording quotas, and retention. New recording and calibration rows receive configured expiry values explicitly rather than relying on historical SQL defaults. Existing rows retain their recorded deadlines.
 
-`ECHORA_MODAL_IMAGE` is the base image for analysis on Modal ([docs/modal-compute.md](modal-compute.md)). Release images set it at build time to the GPU analysis image of their own version; override it only to test a different image. The Modal token itself is configured in Settings → External processing, not in the environment.
+`ECHORA_MODAL_IMAGE` is the base image for analysis on Modal ([docs/modal-compute.md](modal-compute.md)). Release images set it at build time to the GPU worker image (`echora-worker`) of their own version; override it only to test a different image. The Modal token itself is configured in Settings → External processing, not in the environment.
 
 Model IDs and revisions preserve their previous defaults. Compose intentionally enables a pinned MOSS model while direct Python defaults leave it disabled. Do not uncomment blank MOSS entries in the catalog unless you intend to disable transcription. Settings do not replace database-backed user preferences or curation schedules.
 

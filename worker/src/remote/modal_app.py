@@ -1,6 +1,6 @@
 r"""Echora analysis on Modal (see docs/modal-compute.md).
 
-The image is Echora's published GPU analysis image with the deploying worker's
+The image is Echora's published GPU worker image with the deploying worker's
 own analysis source on top, so remote code is exactly the worker's code. Model
 weights are not in the image: `prepare_models` fills a persistent Volume, and
 a manifest file on it records which pinned model set is present.
@@ -8,7 +8,7 @@ a manifest file on it records which pinned model set is present.
 Echora deploys this app itself from Settings → External processing. To deploy
 by hand, from an environment with the worker installed and a Modal token configured:
 
-    ECHORA_MODAL_IMAGE=ghcr.io/hackslashx/echora-analysis-gpu:<version> \
+    ECHORA_MODAL_IMAGE=ghcr.io/hackslashx/echora-worker:<version> \
         modal deploy -m worker.remote.modal_app
 
 Every compute call carries the worker's processing settings (model revisions,
@@ -35,7 +35,7 @@ MANIFEST = f"{MODELS}/.echora-model-manifest"
 # The worker's packages, by import name (they live in core/src and worker/src in a checkout).
 PACKAGES = {name: Path(__import__(name).__file__).resolve().parent for name in ("core", "worker")}
 
-IMAGE = os.environ.get("ECHORA_MODAL_IMAGE") or "ghcr.io/hackslashx/echora-analysis-gpu:latest"
+IMAGE = os.environ.get("ECHORA_MODAL_IMAGE") or "ghcr.io/hackslashx/echora-worker:latest"
 GPU = os.environ.get("ECHORA_MODAL_GPU") or "L40S"
 if GPU not in GPU_TYPES:
     raise ValueError(f"Unsupported Modal GPU type: {GPU}")
