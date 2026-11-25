@@ -21,6 +21,28 @@ class Result:
         return self.rows
 
 
+class Cursor:
+    """What the store's fetch helpers use: execute, then fetch from the same object."""
+
+    def __init__(self, db):
+        self.db, self.result = db, Result()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+    def execute(self, sql, args=()):
+        self.result = self.db.execute(sql, args)
+
+    def fetchone(self):
+        return self.result.fetchone()
+
+    def fetchall(self):
+        return self.result.fetchall()
+
+
 class Database:
     def __init__(self):
         self.curation = {
@@ -52,6 +74,9 @@ class Database:
     def rollback(self):
         self.curation, self.publication, self.revisions = deepcopy(self.saved)
         self.events.append("rollback")
+
+    def cursor(self, **_):
+        return Cursor(self)
 
     def execute(self, sql, args=()):
         sql = " ".join(sql.split())
@@ -163,7 +188,7 @@ def env(monkeypatch, library_helpers):
         _load_connection=lambda _: ("url", "user", "secret"), NavidromeClient=Client
     )
     library_helpers(main)
-    monkeypatch.setattr(cj, "_connect", lambda: db)
+    monkeypatch.setattr(cj, "connect", lambda **_: db)
     monkeypatch.setattr(cj, "_prepare", prepare)
     job = {
         "id": uuid4(),

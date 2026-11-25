@@ -10,6 +10,7 @@ import uuid
 from typing import Any, cast
 
 from psycopg import Connection
+from psycopg.types.json import Jsonb
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -143,3 +144,237 @@ def remove_curation(session: Session, curation_id: uuid.UUID, user_id: uuid.UUID
     curation = owned_curation(session, curation_id, user_id)
     if curation is not None:
         session.delete(curation)
+
+
+# Refreshing and publishing a curation (worker.curation.jobs). The caller holds the curation's
+# advisory lock on the connection, which must be dedicated to it: the lock is session-level.
+
+_REFRESH_NEXT = (
+    "next_refresh_at=CASE WHEN refresh_enabled THEN "
+    "now()+make_interval(hours => refresh_interval_hours) END"
+)
+
+
+def lock_curation(db: Connection, curation_id: uuid.UUID) -> None:
+    """Wait for and take the curation's session advisory lock."""
+    db.execute(
+        "SELECT pg_advisory_lock(hashtextextended(%s, 0))", ("curation:" + str(curation_id),)
+    )
+
+
+def try_lock_curation(db: Connection, curation_id: uuid.UUID) -> bool:
+    """Take the curation's session advisory lock if no one holds it."""
+    row = fetch_one(
+        db,
+        "SELECT pg_try_advisory_lock(hashtextextended(%s, 0)) AS acquired",
+        ("curation:" + str(curation_id),),
+    )
+    return bool(row and row["acquired"])
+
+
+def unlock_curation(db: Connection, curation_id: uuid.UUID) -> None:
+    """Release the curation's session advisory lock."""
+    db.execute(
+        "SELECT pg_advisory_unlock(hashtextextended(%s, 0))", ("curation:" + str(curation_id),)
+    )
+
+
+def curation_row(db: Connection, curation_id: uuid.UUID, user_id: uuid.UUID) -> dict | None:
+    """Every column of the user's curation."""
+    return fetch_one(
+        db, "SELECT * FROM curations WHERE id=%s AND user_id=%s", (curation_id, user_id)
+    )
+
+
+def due_curation_ids(db: Connection, limit: int) -> list[uuid.UUID]:
+    """Drafts and curations whose automatic refresh is due, the longest waiting first."""
+    return [
+        row["id"]
+        for row in fetch_all(
+            db,
+            """SELECT id FROM curations
+            WHERE status='draft' OR (refresh_enabled AND next_refresh_at <= now())
+            ORDER BY next_refresh_at NULLS FIRST LIMIT %s""",
+            (limit,),
+        )
+    ]
+
+
+def due_curation(db: Connection, curation_id: uuid.UUID) -> dict | None:
+    """Every column of the curation, if it is still a draft or due."""
+    return fetch_one(
+        db,
+        """SELECT * FROM curations WHERE id=%s
+        AND (status='draft' OR (refresh_enabled AND next_refresh_at <= now()))""",
+        (curation_id,),
+    )
+
+
+def mark_queued(db: Connection, curation_id: uuid.UUID) -> None:
+    """A refresh is queued: a draft becomes pending and the next automatic refresh moves on."""
+    db.execute(
+        f"""UPDATE curations SET status=CASE WHEN status='draft' THEN 'pending' ELSE status END,
+        {_REFRESH_NEXT}, updated_at=now() WHERE id=%s""",
+        (curation_id,),
+    )
+
+
+def unresolved_publication(db: Connection, curation_id: uuid.UUID) -> dict | None:
+    """The curation's publication that has not completed, if any."""
+    return fetch_one(
+        db,
+        "SELECT * FROM curation_publications WHERE curation_id=%s AND state <> 'complete'",
+        (curation_id,),
+    )
+
+
+def latest_revision_track_ids(db: Connection, curation_id: uuid.UUID, limit: int) -> list:
+    """The songs of the curation's newest revision, in playlist order."""
+    return [
+        row["track_id"]
+        for row in fetch_all(
+            db,
+            """SELECT crt.track_id
+        FROM curation_revision_tracks crt JOIN curation_revisions cr ON cr.id=crt.revision_id
+        WHERE cr.curation_id=%s AND cr.revision_number=(SELECT max(revision_number)
+            FROM curation_revisions WHERE curation_id=%s) ORDER BY crt.position LIMIT %s""",
+            (curation_id, curation_id, limit),
+        )
+    ]
+
+
+def track_names(db: Connection, track_ids: list) -> list[dict[str, Any]]:
+    """``id`` (text), ``title`` and ``artist`` of each song."""
+    return fetch_all(
+        db, "SELECT id::text AS id, title, artist FROM tracks WHERE id=ANY(%s)", (track_ids,)
+    )
+
+
+def next_revision_number(db: Connection, curation_id: uuid.UUID) -> int:
+    """The number the curation's next revision takes."""
+    row = fetch_one(
+        db,
+        "SELECT coalesce(max(revision_number), 0)+1 AS value FROM curation_revisions WHERE curation_id=%s",
+        (curation_id,),
+    )
+    return row["value"] if row else 1
+
+
+def job_publication(db: Connection, curation_id: uuid.UUID, job_id: uuid.UUID) -> dict | None:
+    """The job's publication, or else the curation's unresolved one."""
+    return fetch_one(
+        db,
+        """SELECT * FROM curation_publications
+        WHERE curation_id=%s AND (job_id=%s OR state <> 'complete')
+        ORDER BY (job_id=%s) DESC LIMIT 1""",
+        (curation_id, job_id, job_id),
+    )
+
+
+def add_publication(
+    db: Connection,
+    curation_id: uuid.UUID,
+    job_id: uuid.UUID,
+    plan: dict[str, Any],
+    playlist_id: str | None,
+) -> dict[str, Any]:
+    """Store a prepared publication of the plan; returns its row."""
+    return cast(
+        dict[str, Any],
+        fetch_one(
+            db,
+            """INSERT INTO curation_publications
+            (id, curation_id, job_id, state, plan, playlist_id)
+            VALUES (%s,%s,%s,'prepared',%s,%s) RETURNING *""",
+            (uuid.uuid4(), curation_id, job_id, Jsonb(plan), playlist_id),
+        ),
+    )
+
+
+def adopt_publication(db: Connection, publication_id: uuid.UUID, job_id: uuid.UUID) -> None:
+    """Hand a publication to another job."""
+    db.execute(
+        "UPDATE curation_publications SET job_id=%s, updated_at=now() WHERE id=%s",
+        (job_id, publication_id),
+    )
+
+
+def mark_publishing(db: Connection, publication_id: uuid.UUID, curation_id: uuid.UUID) -> None:
+    """The publication goes to Navidrome next; the curation shows it as pending meanwhile."""
+    db.execute(
+        "UPDATE curation_publications SET state='publishing', updated_at=now() WHERE id=%s",
+        (publication_id,),
+    )
+    db.execute(
+        "UPDATE curations SET status='pending', last_error='Publication pending; refresh resumes the saved selection', updated_at=now() WHERE id=%s",
+        (curation_id,),
+    )
+
+
+def record_playlist(
+    db: Connection, publication_id: uuid.UUID, curation_id: uuid.UUID, playlist_id: str
+) -> None:
+    """Store the Navidrome playlist id on the publication and the curation."""
+    db.execute(
+        "UPDATE curation_publications SET playlist_id=%s, updated_at=now() WHERE id=%s",
+        (playlist_id, publication_id),
+    )
+    db.execute(
+        "UPDATE curations SET navidrome_playlist_id=%s WHERE id=%s", (playlist_id, curation_id)
+    )
+
+
+def add_revision(
+    db: Connection,
+    curation_id: uuid.UUID,
+    revision_number: int,
+    recipe: dict[str, Any],
+    tracks: list[dict[str, Any]],
+) -> None:
+    """Store a revision and its songs in order.
+
+    Each song has ``id``, ``score``, ``source_id`` and ``evidence``.
+    """
+    row = fetch_one(
+        db,
+        """INSERT INTO curation_revisions (curation_id, revision_number, recipe)
+        VALUES (%s,%s,%s) RETURNING id""",
+        (curation_id, revision_number, Jsonb(recipe)),
+    )
+    revision = cast(dict[str, Any], row)["id"]
+    for position, track in enumerate(tracks):
+        db.execute(
+            """INSERT INTO curation_revision_tracks
+            (revision_id, position, track_id, score, evidence, source_id)
+            VALUES (%s,%s,%s,%s,%s,%s)""",
+            (
+                revision,
+                position,
+                track["id"],
+                track["score"],
+                Jsonb(track["evidence"]),
+                track["source_id"],
+            ),
+        )
+
+
+def complete_publication(db: Connection, publication_id: uuid.UUID, curation_id: uuid.UUID) -> None:
+    """The curation is ready and refreshed now; its publication is complete."""
+    db.execute(
+        f"""UPDATE curations SET status='ready', last_error=NULL,
+        last_refreshed_at=now(), {_REFRESH_NEXT},
+        updated_at=now() WHERE id=%s""",
+        (curation_id,),
+    )
+    db.execute(
+        "UPDATE curation_publications SET state='complete', updated_at=now() WHERE id=%s",
+        (publication_id,),
+    )
+
+
+def mark_failed(db: Connection, curation_id: uuid.UUID, error: str) -> None:
+    """The refresh failed with ``error``."""
+    db.execute(
+        "UPDATE curations SET status='failed', last_error=%s, updated_at=now() WHERE id=%s",
+        (error, curation_id),
+    )
