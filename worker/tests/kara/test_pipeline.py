@@ -752,3 +752,28 @@ def test_supplied_word_timing_is_stored_without_aligning(monkeypatch):
     monkeypatch.setattr(pipeline, "_run_fa_kara", MagicMock(side_effect=AssertionError("aligned")))
     assert align_batch(ids=("0",)) == {"total": 1, "aligned": 0, "supplied": 1, "failed": 0}
     assert stored == [(track, timing, "digest")]
+
+
+def test_malformed_stored_lines_fail_that_song_only(monkeypatch):
+    connection = MagicMock()
+    connection.__enter__.return_value = connection
+    bad, good = uuid.uuid4(), uuid.uuid4()
+    timing = [{"text": "Hello", "start_ms": 0}]
+    connection.cursor.return_value.__enter__.return_value.fetchall.return_value = [
+        _row(bad, "0", "Bad", "Hello", "en", "not a list", None, None),
+        _row(good, "1", "Good", "Hello", "en", [], timing, "digest"),
+    ]
+    monkeypatch.setattr(pipeline, "connect", lambda **_: connection)
+    monkeypatch.setattr(pipeline, "resolve_library_id", lambda *a: "library")
+    monkeypatch.setattr(
+        pipeline, "plan_karaoke", lambda *a, **kw: SimpleNamespace(karaoke_external_ids=["0", "1"])
+    )
+    monkeypatch.setattr(pipeline, "NavidromeClient", lambda *a: MagicMock())
+    monkeypatch.setattr(pipeline, "_stop_fa_kara_worker", MagicMock())
+    stored = []
+    monkeypatch.setattr(
+        pipeline, "_store_supplied_karaoke", lambda conn, *args: stored.append(args)
+    )
+    monkeypatch.setattr(pipeline, "_run_fa_kara", MagicMock(side_effect=AssertionError("aligned")))
+    assert align_batch(ids=("0", "1")) == {"total": 2, "aligned": 0, "supplied": 1, "failed": 1}
+    assert stored == [(good, timing, "digest")]
