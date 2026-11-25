@@ -717,6 +717,132 @@ def _display_span_results(
     return results
 
 
+def _lead_rhythm(plan, all_encoded, lead_spans, lead_ranges):
+    """How the lead sang each of its lines, for backing lines that repeat them.
+
+    Returns the lead lines in order as (text, token starts, end) in frames (text: the letters of
+    the line's tokens; None in place of a line with a token the path left out) and the song's
+    median lead token length in frames.
+    """
+    texts = [
+        tuple(tuple(all_encoded[i]) for i in tokens)
+        for _, flag, tokens in plan
+        if not flag and tokens
+    ]
+    if len(texts) != len(lead_ranges):
+        return [], 0
+    lines, lengths = [], []
+    for text, (first, last) in zip(texts, lead_ranges):
+        spans = lead_spans[first:last]
+        if not all(spans):
+            lines.append(None)
+            continue
+        lines.append((text, [group[0].start for group in spans], spans[-1][-1].end))
+        lengths.extend(group[-1].end - group[0].start for group in spans)
+    return lines, (sorted(lengths)[len(lengths) // 2] if lengths else 0)
+
+
+def _decode_paced_block(
+    window,
+    groups,
+    line_sizes,
+    rhythm,
+    blank,
+    letter_cap,
+    token_cap,
+    vowels,
+    blank_free_tokens,
+    rhythm_ratio,
+    pace_ratio,
+    frame_shift,
+    crammed_ratio=0.5,
+    longest_pause_seconds=4.0,
+    bonus=None,
+):
+    """One block of background lines as a CTC path that keeps the lead's rhythm.
+
+    See ``_decode_background_blocks``. Raises RuntimeError when the window is too short for it.
+
+    The time between two lines is kept by a pause after the first: a one-letter group on the blank
+    column with a minimum length. Lead lines sung faster than ``crammed_ratio`` of the song's pace
+    are crammed, not a rhythm; a pause the lead takes is believed up to ``longest_pause_seconds``.
+    """
+    lead_lines, pace = rhythm
+    texts, offset = [], 0
+    for size in line_sizes:
+        texts.append(tuple(tuple(group) for group in groups[offset : offset + size]))
+        offset += size
+    longest_pause = round(longest_pause_seconds / frame_shift)
+    paced_groups, identities, minimums, kept = [], [], [], []
+    for index, text in enumerate(texts):
+        following = texts[index + 1] if index + 1 < len(texts) else None
+        renditions = []  # (the lead sings the next backing line after it, token lengths, pause)
+        for position, line in enumerate(lead_lines):
+            if line is None or line[0] != text:
+                continue
+            _, starts, end = line
+            if (end - starts[0]) / len(starts) < crammed_ratio * pace:
+                continue
+            after = lead_lines[position + 1] if position + 1 < len(lead_lines) else None
+            together = following is not None and after is not None and after[0] == following
+            pause = min(longest_pause, max(0, after[1][0] - end)) if together else 0
+            lengths = [later - earlier for earlier, later in zip(starts, [*starts[1:], end])]
+            renditions.append((together, lengths, pause))
+        if any(together for together, _, _ in renditions):
+            renditions = [rendition for rendition in renditions if rendition[0]]
+        pause_floor = 0
+        if renditions:
+            renditions.sort(key=lambda rendition: sum(rendition[1]) + rendition[2])
+            together, lengths, pause = renditions[len(renditions) // 2]
+            floors = [max(token_cap, int(rhythm_ratio * length)) for length in lengths]
+            # The lead may hold a line's last word far longer than the backing voice does: that
+            # token only takes the song's pace, and the pause what is left of the lead's time
+            # from the token's start to the next line.
+            floors[-1] = max(token_cap, min(floors[-1], int(pace_ratio * pace)))
+            if together:
+                pause_floor = int(rhythm_ratio * (lengths[-1] + pause)) - floors[-1]
+        else:
+            floors = [max(token_cap, int(pace_ratio * pace))] * len(text)
+        for group, floor in zip(text, floors):
+            kept.append(len(paced_groups))
+            paced_groups.append(list(group))
+            identities.append(list(group))
+            minimums.extend(token_minimum_frames([list(group)], letter_cap, floor, vowels))
+        if pause_floor > 0:
+            identities.append([-1 - len(paced_groups)])  # its own sound: never a CTC repeat
+            paced_groups.append([blank])
+            minimums.append(pause_floor)
+    if bonus is not None:
+        # One column per (token, letter): the letter's score plus the text head's for its token.
+        owner = {position: token for token, position in enumerate(kept)}
+        columns, labels = [], []
+        for position, group in enumerate(paced_groups):
+            labels.append(list(range(len(columns), len(columns) + len(group))))
+            for letter in group:
+                column = window[:, letter]
+                if position in owner:
+                    column = column + bonus[:, owner[position]].to(window)
+                columns.append(column)
+        window = torch.stack([*columns, window[:, blank]], dim=1)
+        paced_groups, blank = labels, len(columns)
+    spans = align_with_minimum_durations(
+        window,
+        paced_groups,
+        blank=blank,
+        minimum_frames=minimums,
+        acoustic_token_groups=identities,
+        blank_free_tokens=blank_free_tokens,
+    )
+    # Spans carry their letters, not the columns the bonus gave them.
+    return [
+        [
+            TokenSpan(letter, span.start, span.end, span.score)
+            for letter, span in zip(group, spans[index])
+        ]
+        for group, index in zip(groups, kept)
+    ]
+
+
 def _decode_background_blocks(
     plan,
     all_encoded,
@@ -728,14 +854,37 @@ def _decode_background_blocks(
     min_token_ms,
     blank_free_tokens,
     margin_seconds=1.0,
+    lead_emission=None,
+    rhythm_ratio=0.9,
+    pace_ratio=0.8,
+    text_share=None,
+    text_bonus=0.0,
 ):
     """B0: decode each block of consecutive background lines on the background head.
 
-    A block's window runs from the start of the lead line before it to the end of the lead line
-    after it (plus ``margin_seconds``), so an echo may sit on, or just after, the lead it answers.
-    Inside the window the block is one duration-floored CTC path, as the lead; a window never starts
-    before the previous block's end, so background lines keep their order. Returns the blocks
-    with their token indexes (input order), line sizes and spans (global frames).
+    A block's window runs from the end of the lead line before it (less ``margin_seconds``) to the
+    end of the lead line after it (plus the margin), so an echo may sit on the tail of the lead it
+    answers or after it. Inside the window the block is one duration-floored CTC path, as the lead;
+    a window never starts before the previous block's end, so background lines keep their order.
+    Returns the blocks with their token indexes (input order), line sizes and spans (global frames).
+
+    A backing voice is often too faint or too processed for either head to read its words, and a
+    path with nothing to read crams a block against its first sound or stretches one line over the
+    rest of the song (six "(How could you?)" lines done in 13 s of a 25 s outro, the first of them
+    on top of the lead line before). Four things give such a block its pace:
+    - where no lead line is sung the lead head (``lead_emission``) hears the backing voice too
+      (often better than the background head: nothing else is singing), so there the block reads
+      both heads together;
+    - a backing line the lead sings elsewhere keeps at least ``rhythm_ratio`` of the lead's time on
+      each token but the last, and where the lead sings the next backing line right after it, of
+      the time from one line's start to the next as well: a repeated section keeps its rhythm;
+    - any other backing token takes at least ``pace_ratio`` of the song's median lead token;
+    - the text head's bonus, as on the lead path: ``text_share`` is the head's log P(token |
+      singing) for the backing voice [frames, backing tokens] with each token's column, and a
+      token's letters score ``text_bonus`` x its share on top of what the heads hear.
+    The window opens at the end of the lead line before the block, not its start: the background
+    head hears that line faintly too, and a block with no clear sound of its own began on top of
+    it. A window too short for the lead's rhythm falls back to the plain duration floors.
     """
     background = aligner_model.last_background_log_probs
     frames = background.shape[0]
@@ -747,6 +896,15 @@ def _decode_background_blocks(
     lead_line_frames = [
         (lead_spans[start][0].start, lead_spans[end - 1][-1].end) for start, end in lead_ranges
     ]
+    heard = background
+    if lead_emission is not None:
+        both = torch.logaddexp(lead_emission.to(background), background)
+        both = both - both.logsumexp(dim=-1, keepdim=True)
+        free = torch.ones(frames, dtype=torch.bool, device=background.device)
+        for line_start, line_end in lead_line_frames:
+            free[line_start:line_end] = False
+        heard = torch.where(free[:, None], both, background)
+    rhythm = _lead_rhythm(plan, all_encoded, lead_spans, lead_ranges)
     blocks, lead_seen = [], 0
     for line_index, flag, tokens in plan:
         if not flag:
@@ -767,7 +925,7 @@ def _decode_background_blocks(
     background_end = 0  # background lines stay in order among themselves
     for block in blocks:
         before, after = block["lead_before"] - 1, block["lead_before"]
-        start = max(0, lead_line_frames[before][0] - margin) if before >= 0 else 0
+        start = max(0, lead_line_frames[before][1] - margin) if before >= 0 else 0
         stop = (
             min(frames, lead_line_frames[after][1] + margin)
             if after < len(lead_line_frames)
@@ -777,24 +935,46 @@ def _decode_background_blocks(
         start = max(start, background_end)
         stop = max(stop, min(frames, start + 2 * sum(map(len, groups))))
 
-        window = background[start:stop].to(torch.float32)
+        window = heard[start:stop].to(torch.float32)
         try:
-            spans = align_with_minimum_durations(
+            spans = _decode_paced_block(
                 window,
                 groups,
-                blank=aligner_model.blank,
-                minimum_frames=token_minimum_frames(groups, letter_cap, token_cap, vowels),
-                blank_free_tokens=blank_free_tokens,
+                block["lines"],
+                rhythm,
+                aligner_model.blank,
+                letter_cap,
+                token_cap,
+                vowels,
+                blank_free_tokens,
+                rhythm_ratio,
+                pace_ratio,
+                frame_shift,
+                bonus=None
+                if text_share is None
+                else text_bonus
+                * text_share[0][start:stop][:, [text_share[1][i] for i in block["tokens"]]],
             )
         except RuntimeError:
-            # Too dense for the duration floors: one frame per letter.
-            spans = align_with_minimum_durations(
-                window,
-                groups,
-                blank=aligner_model.blank,
-                minimum_frames=[1] * sum(map(len, groups)),
-                blank_free_tokens=blank_free_tokens,
-            )
+            spans = None  # the window is shorter than the lead's rhythm: the plain floors
+        if spans is None:
+            try:
+                spans = align_with_minimum_durations(
+                    window,
+                    groups,
+                    blank=aligner_model.blank,
+                    minimum_frames=token_minimum_frames(groups, letter_cap, token_cap, vowels),
+                    blank_free_tokens=blank_free_tokens,
+                )
+            except RuntimeError:
+                # Too dense for the duration floors: one frame per letter.
+                spans = align_with_minimum_durations(
+                    window,
+                    groups,
+                    blank=aligner_model.blank,
+                    minimum_frames=[1] * sum(map(len, groups)),
+                    blank_free_tokens=blank_free_tokens,
+                )
         block["fallback"] = False
         block["spans"] = [
             [TokenSpan(s.token, s.start + start, s.end + start, s.score) for s in g] for g in spans
@@ -1389,6 +1569,7 @@ def align_audio_with_timeline(
 
     raw_emission = emission
     text_share, optional_share = None, None
+    background_share = None  # (the head's share of each whole backing line token, its column)
     if text_bonus > 0 and aligner_model.text_aligner is not None:
         # The whole song's tokens in text order (backing lines tagged by background_lines, as B0).
         source_lines = all_token_lines
@@ -1404,11 +1585,20 @@ def align_audio_with_timeline(
                 lines.append(line_index)
                 cursor += 1
         inline = [j for j, flag in enumerate(all_optional or []) if flag]
+        # Whole backing lines are placed apart from the lead (B0), with the head's backing voice.
+        whole = [i for _, flag, tokens in background_plan or [] if flag for i in tokens]
         text_share = aligner_model.text_token_share(
-            raw_emission, groups_all, voices, lines, backing=inline or None
+            raw_emission, groups_all, voices, lines, backing=[*inline, *whole] or None
         )
-        if inline:
-            text_share, optional_share = text_share
+        if inline or whole:
+            text_share, backing_share = text_share
+            if inline:
+                optional_share = backing_share[:, : len(inline)]
+            if whole:
+                background_share = (
+                    backing_share[:, len(inline) :],
+                    {token: column for column, token in enumerate(whole)},
+                )
     emission, scoring_emission, initial_spans, duration_floor, skipped = _decode_lead(emission)
     background_blocks = None
     if background_plan is not None:
@@ -1425,6 +1615,9 @@ def align_audio_with_timeline(
             min_letter_ms,
             min_token_ms,
             blank_free_tokens,
+            lead_emission=raw_emission,
+            text_share=background_share,
+            text_bonus=text_bonus,
         )
         explained = raw_emission.clone()
         for block in background_blocks:
@@ -1600,6 +1793,7 @@ def align_audio_with_timeline(
             "fallback_blocks": sum(1 for block in background_blocks if block.get("fallback")),
             "fallback_score": 0.0,
             "lead_in_order": False,
+            "paced": True,
         }
         token_lines = all_token_lines
     for result in results:
