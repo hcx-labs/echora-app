@@ -37,10 +37,10 @@ class _CorpusService(SearchService[None, Corpus]):
     scope: uuid.UUID
 
     def index_key(self) -> str:
-        """A digest of every current (song, run) pair.
+        """A digest of every current embedding row and its song's title, artist and album.
 
-        Any added, replaced or unlinked embedding, or a switch of the active representation,
-        changes it.
+        Any added, re-embedded or unlinked embedding, a retagged song, or a switch of the active
+        representation, changes it.
         """
         with connect() as connection:
             return store.corpus_digest(connection, self.kind, self.scope)
