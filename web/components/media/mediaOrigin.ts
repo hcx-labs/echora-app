@@ -11,7 +11,9 @@
 
 type MediaBase = string & { __brand?: never };
 declare global {
-  interface Window { __ECHORA_MEDIA_BASE__?: MediaBase }
+  interface Window {
+    __ECHORA_MEDIA_BASE__?: MediaBase;
+  }
 }
 
 function base(): string {

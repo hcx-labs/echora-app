@@ -26,10 +26,23 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" className="dark">
       <head>
         <script
-          dangerouslySetInnerHTML={{ __html: `window.__ECHORA_MEDIA_BASE__=${JSON.stringify(mediaBase)};` }}
+          dangerouslySetInnerHTML={{
+            __html: `window.__ECHORA_MEDIA_BASE__=${JSON.stringify(mediaBase)};`,
+          }}
         />
       </head>
-      <body><div className="app-viewport"><RuntimeConfigBootstrap /><MotionPreferences /><Backdrop /><PlayerProvider><SessionRenewal />{children}</PlayerProvider><Toaster /></div></body>
+      <body>
+        <div className="app-viewport">
+          <RuntimeConfigBootstrap />
+          <MotionPreferences />
+          <Backdrop />
+          <PlayerProvider>
+            <SessionRenewal />
+            {children}
+          </PlayerProvider>
+          <Toaster />
+        </div>
+      </body>
     </html>
   );
 }

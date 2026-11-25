@@ -19,7 +19,8 @@ export function sizedPlayerCoverArtUrl(url: string, size: number) {
   const parsed = new URL(sizedCoverArtUrl(url, size), "https://echora.invalid");
   parsed.searchParams.set("cache", "player");
   return parsed.origin === "https://echora.invalid"
-    ? `${parsed.pathname}${parsed.search}${parsed.hash}` : parsed.toString();
+    ? `${parsed.pathname}${parsed.search}${parsed.hash}`
+    : parsed.toString();
 }
 
 function coverArtSize(size: number) {
