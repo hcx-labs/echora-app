@@ -14,6 +14,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import core.jobs.queue as jobs
+from core.recordings import store
 from worker.recordings.config import RecordingConfig
 from worker.recordings.errors import CalibrationDisabled, TrackUnavailable
 from worker.recordings.search import SAMPLE_RATE, QueueFull, decode_query
@@ -54,7 +55,7 @@ def _public(row):
 
 
 def _lock(db):
-    db.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (_LOCK,))
+    store.lock_calibration(db, _LOCK)
 
 
 def save(
@@ -74,9 +75,7 @@ def save(
     expected = UUID(str(expected_track_id)) if expected_track_id is not None else None
     if expected is not None:
         with jobs._db() as db:
-            if not db.execute(
-                "SELECT 1 FROM user_track_links WHERE user_id=%s AND track_id=%s", (owner, expected)
-            ).fetchone():
+            if not store.in_library(db, owner, expected):
                 raise TrackUnavailable("This song is not available in your library")
     # Validation is bounded decoding only, not model inference. Do not put private
     # query audio into the shared library preprocessing cache.
@@ -94,13 +93,7 @@ def save(
     try:
         with jobs._db() as db:
             _lock(db)
-            quota = db.execute(
-                """SELECT count(*) AS total,
-                count(*) FILTER (WHERE user_id=%s) AS owned,
-                count(*) FILTER (WHERE user_id=%s AND created_at>now()-interval '1 minute') AS recent
-                FROM recording_calibration_samples""",
-                (owner, owner),
-            ).fetchone()
+            quota = store.calibration_quota(db, owner)
             # Expired rows count until cleanup erases their files, bounding disk
             # retention even while a worker is stopped.
             if (
@@ -109,32 +102,21 @@ def save(
                 or quota["recent"] >= RecordingConfig.load().calibration_uploads_per_minute
             ):
                 raise QueueFull("Calibration storage is full. Delete a saved clip or try later.")
-            if (
-                expected is not None
-                and not db.execute(
-                    "SELECT 1 FROM user_track_links WHERE user_id=%s AND track_id=%s",
-                    (owner, expected),
-                ).fetchone()
-            ):
+            if expected is not None and not store.in_library(db, owner, expected):
                 raise TrackUnavailable("This song is not available in your library")
-            row = db.execute(
-                """INSERT INTO recording_calibration_samples
-                (id,user_id,expected_track_id,not_in_library,notes,consent_version,
-                 audio_sha256,byte_count,duration_seconds,expires_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,now()+%s*interval '1 second') RETURNING *""",
-                (
-                    sample_id,
-                    owner,
-                    expected,
-                    bool(not_in_library),
-                    notes.strip(),
-                    CONSENT_VERSION,
-                    hashlib.sha256(audio).hexdigest(),
-                    len(audio),
-                    duration,
-                    RecordingConfig.load().calibration_retention_seconds,
-                ),
-            ).fetchone()
+            row = store.add_calibration_sample(
+                db,
+                id=sample_id,
+                user_id=owner,
+                expected_track_id=expected,
+                not_in_library=bool(not_in_library),
+                notes=notes.strip(),
+                consent_version=CONSENT_VERSION,
+                audio_sha256=hashlib.sha256(audio).hexdigest(),
+                byte_count=len(audio),
+                duration_seconds=duration,
+                retention_seconds=RecordingConfig.load().calibration_retention_seconds,
+            )
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             written = True
             with os.fdopen(fd, "wb") as stream:
@@ -156,30 +138,21 @@ def save(
 
 def list_samples(user_id):
     with jobs._db() as db:
-        rows = db.execute(
-            """SELECT s.*,t.title AS expected_title,t.artist AS expected_artist
-            FROM recording_calibration_samples s
-            LEFT JOIN tracks t ON t.id=s.expected_track_id AND EXISTS (
-                SELECT 1 FROM user_track_links u WHERE u.user_id=s.user_id AND u.track_id=t.id)
-            WHERE s.user_id=%s AND s.expires_at>now() ORDER BY s.created_at DESC,s.id
-            LIMIT %s""",
-            (UUID(str(user_id)), RecordingConfig.load().calibration_max_user_samples),
-        ).fetchall()
+        rows = store.calibration_samples(
+            db, UUID(str(user_id)), RecordingConfig.load().calibration_max_user_samples
+        )
     return {"samples": [_public(row) for row in rows]}
 
 
 def delete(sample_id, user_id) -> bool:
     with jobs._db() as db:
         _lock(db)
-        row = db.execute(
-            "SELECT id FROM recording_calibration_samples WHERE id=%s AND user_id=%s FOR UPDATE",
-            (UUID(str(sample_id)), UUID(str(user_id))),
-        ).fetchone()
-        if row is None:
+        sample = store.lock_calibration_sample(db, UUID(str(sample_id)), UUID(str(user_id)))
+        if sample is None:
             return False
         # Unlink first: failed deletion never reports success while keeping audio.
-        _file(directory(), row["id"]).unlink(missing_ok=True)
-        db.execute("DELETE FROM recording_calibration_samples WHERE id=%s", (row["id"],))
+        _file(directory(), sample).unlink(missing_ok=True)
+        store.delete_calibration_sample(db, sample)
     return True
 
 
@@ -191,19 +164,12 @@ def cleanup():
     """
     root = directory()
     with jobs._db() as db:
-        if not db.execute(
-            "SELECT pg_try_advisory_xact_lock(hashtextextended(%s,0)) AS locked", (_LOCK,)
-        ).fetchone()["locked"]:
+        if not store.try_lock_calibration(db, _LOCK):
             return
-        expired = db.execute(
-            "SELECT id FROM recording_calibration_samples WHERE expires_at<=now() FOR UPDATE"
-        ).fetchall()
-        for row in expired:
-            _file(root, row["id"]).unlink(missing_ok=True)
-            db.execute("DELETE FROM recording_calibration_samples WHERE id=%s", (row["id"],))
-        retained = {
-            str(row["id"]) for row in db.execute("SELECT id FROM recording_calibration_samples")
-        }
+        for expired in store.lock_expired_calibration_samples(db):
+            _file(root, expired).unlink(missing_ok=True)
+            store.delete_calibration_sample(db, expired)
+        retained = store.calibration_sample_ids(db)
         now = time.time()
         if root.exists():
             for path in root.glob("*.audio"):
