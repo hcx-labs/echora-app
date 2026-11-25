@@ -257,6 +257,8 @@ class ThemeProcessor(Processor[None, ThemeItem, ThemeRecord]):
 
     name = "themes"
     summary_key = "themes"
+    # A failed write is a database problem, not a failed description: retry the batch.
+    storage_failure_fails_job = True
     counters = ("described",)
     total_key = None
     activity = "Describing song themes"

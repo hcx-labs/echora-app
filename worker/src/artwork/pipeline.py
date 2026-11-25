@@ -235,6 +235,8 @@ class MotionArtworkProcessor(Processor[None, ArtworkItem, dict]):
 
     name = "motion-artwork"
     summary_key = "motion_artwork"
+    # A rendered loop that cannot be stored (disk, database) must not be dropped silently.
+    storage_failure_fails_job = True
     counters = ("rendered", "reused")
     total_key = "tracks"
     failure_key = "errors"

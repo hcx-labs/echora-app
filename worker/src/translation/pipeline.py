@@ -105,6 +105,8 @@ class TranslationProcessor(Processor[None, TranslationItem, list[dict]]):
 
     name = "translation"
     summary_key = "translations"
+    # A failed write is a database problem, not a failed request: retry the batch.
+    storage_failure_fails_job = True
     counters = ("translated", "reused", "failed", "declined", "stale")
     total_key = None
     activity = "Translating missing lyrics"

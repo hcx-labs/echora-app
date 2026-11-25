@@ -496,6 +496,8 @@ class TranscriptRefinementProcessor(Processor[None, RefinementItem, dict[str, ob
 
     name = "lyrics"
     summary_key = "lyrics"
+    # A refined transcript that cannot be saved fails the batch, so it is retried.
+    storage_failure_fails_job = True
     total_key = None
     activity = "Refining transcript for"
     current_message = None

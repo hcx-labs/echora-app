@@ -65,8 +65,8 @@ class Processor[ConfigT: EchoraConfig | None, InputT: Item, OutputT](ABC):
        cancellation; release only what was acquired.
 
     A failure that belongs to one item is yielded as ``ItemResult.failed`` and the stage goes on.
-    An ``EchoraError`` escaping ``process`` fails every item that has no result yet. Any other
-    exception is a bug and fails the job.
+    A ``ProcessingError`` escaping ``process`` fails every item that has no result yet. Any other
+    exception (an integration that is down, a bug) fails the job, and the queue retries it.
     """
 
     name: ClassVar[str]
@@ -89,6 +89,11 @@ class Processor[ConfigT: EchoraConfig | None, InputT: Item, OutputT](ABC):
     """Progress message when nothing needs this stage (``None``: no update, for a step inside
     a larger stage)."""
 
+    storage_failure_fails_job: ClassVar[bool] = False
+    """Whether an exception from ``persist`` fails the job (and so retries the batch) instead of
+    counting one failed item. For stages whose output is costly and cannot be recomputed cheaply
+    on the next sync, or whose failure counter the retry policy does not read."""
+
     def __init__(self, config: ConfigT = None) -> None:
         self.config = config
 
@@ -110,7 +115,8 @@ class Processor[ConfigT: EchoraConfig | None, InputT: Item, OutputT](ABC):
     ) -> Iterable[str] | None:
         """Store one output. Called for each result that has one, as soon as it is yielded.
 
-        Any exception fails only this item; roll back what it wrote before raising. It may return
+        Any exception fails only this item (the whole job with ``storage_failure_fails_job``);
+        roll back what it wrote before raising. It may return
         counters to add on top of the item's outcome, for what only storing tells ("matched": the
         fingerprint joined a recording group).
         """

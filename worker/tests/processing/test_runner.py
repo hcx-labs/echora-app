@@ -3,7 +3,7 @@ from collections.abc import Iterator, Sequence
 import pytest
 
 from core.config import EchoraConfig, setting
-from core.errors import JobCancelled, ModelUnavailableError, ProcessingError
+from core.errors import IntegrationError, JobCancelled, ModelUnavailableError, ProcessingError
 from worker.processing import Item, ItemResult, ProcessingContext, Processor, run_stage
 
 
@@ -45,6 +45,8 @@ class _Doubler(Processor[_Config, _Song, int]):
                 raise ModelUnavailableError("model gone")
             if item.value == 99:
                 raise RuntimeError("bug")
+            if item.value == 77:
+                raise IntegrationError("service down")
             if item.value == 0:
                 yield ItemResult(item=item, outcome="reused")
             elif item.value % 2:
@@ -114,6 +116,24 @@ def test_a_domain_error_escaping_process_fails_the_remaining_items():
     summary = run_stage(processor, ProcessingContext())
     assert processor.events[-1] == "close"
     assert summary.as_dict() == {"total": 3, "doubled": 1, "failed": 2}
+
+
+def test_an_integration_failure_fails_the_job_after_closing():
+    processor = _Doubler(_Config(), _songs(2, 77, 6))
+    with pytest.raises(IntegrationError):
+        run_stage(processor, ProcessingContext())
+    assert processor.events[-1] == "close"
+    assert processor.stored == {"t0": 4}
+
+
+def test_a_storage_failure_fails_the_job_when_the_stage_says_so():
+    class _Strict(_Doubler):
+        storage_failure_fails_job = True
+
+    processor = _Strict(_Config(), _songs(2, 4, 6))
+    with pytest.raises(ValueError, match="storage failed"):
+        run_stage(processor, ProcessingContext())
+    assert processor.events[-1] == "close"
 
 
 def test_a_bug_propagates_after_closing():
