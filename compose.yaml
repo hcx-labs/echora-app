@@ -100,7 +100,7 @@ services:
       - "host.docker.internal:host-gateway"
     ports: ["8000:8000"]
     healthcheck: &analysis-healthcheck
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/system/health')"]
       interval: 5s
       timeout: 3s
       retries: 30
