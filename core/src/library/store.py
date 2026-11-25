@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any, TypedDict, cast
 
 from psycopg import Connection
+from psycopg.types.json import Jsonb
 
 from core.db.connection import fetch_all, fetch_one
 from core.errors import NotFoundError
@@ -379,3 +380,122 @@ def profile_modes(db: Connection, profile_id: uuid.UUID) -> list[dict[str, Any]]
         )
         mode.pop("id")
     return modes
+
+
+def library_songs(db: Connection, user_id: uuid.UUID) -> list[dict[str, Any]]:
+    """Every song of the user's library with its Navidrome source id and cover."""
+    return fetch_all(
+        db,
+        """SELECT t.id::text AS id, t.title, t.artist, t.album, t.duration_seconds,
+                  source.external_id AS source_id, source.cover_art
+           FROM tracks t
+           LEFT JOIN LATERAL (
+             SELECT ts.external_id, ts.source_data->>'coverArt' AS cover_art
+             FROM track_sources ts
+             JOIN user_track_links links
+               ON links.user_id=%s AND links.library_id=ts.library_id
+              AND links.track_id=ts.track_id AND links.external_id=ts.external_id
+             WHERE ts.track_id=t.id AND ts.source_type='subsonic'
+             ORDER BY ts.id LIMIT 1
+           ) source ON true
+           WHERE EXISTS (SELECT 1 FROM user_track_links utl WHERE utl.track_id=t.id AND utl.user_id=%s)""",
+        (user_id, user_id),
+    )
+
+
+def save_artist_profile(
+    db: Connection,
+    name: str,
+    model: str,
+    corpus_hash: str,
+    track_count: int,
+    component_count: int,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Store an artist's profile for its corpus (replacing the payload); ``id``, ``created_at``."""
+    return cast(
+        dict[str, Any],
+        fetch_one(
+            db,
+            """INSERT INTO artist_profiles
+                 (artist_key, artist_name, model_name, corpus_hash, track_count, component_count, payload)
+               VALUES (%s,%s,%s,%s,%s,%s,%s)
+               ON CONFLICT (artist_key, model_name, corpus_hash) DO UPDATE SET payload=EXCLUDED.payload
+               RETURNING id, created_at""",
+            (
+                name.casefold(),
+                name,
+                model,
+                corpus_hash,
+                track_count,
+                component_count,
+                Jsonb(payload),
+            ),
+        ),
+    )
+
+
+def community_snapshot(db: Connection, snapshot_id: uuid.UUID) -> dict[str, Any] | None:
+    """A stored community map (``payload``, ``created_at``)."""
+    return fetch_one(
+        db, "SELECT payload, created_at FROM community_snapshots WHERE id=%s", (snapshot_id,)
+    )
+
+
+def cached_community_snapshot(
+    db: Connection, model: str, semantic_weight: float, corpus_hash: str, revision: int
+) -> dict[str, Any] | None:
+    """The community map stored for this corpus and algorithm (``id``, ``payload``, ``created_at``)."""
+    return fetch_one(
+        db,
+        """SELECT id, payload, created_at FROM community_snapshots
+           WHERE model_name=%s AND semantic_weight=%s AND corpus_hash=%s AND algorithm_revision=%s""",
+        (model, semantic_weight, corpus_hash, revision),
+    )
+
+
+def community_snapshots(db: Connection, limit: int) -> list[dict[str, Any]]:
+    """The newest community maps, without their payloads."""
+    return fetch_all(
+        db,
+        """SELECT id, model_name, semantic_weight, corpus_hash, algorithm_revision,
+                  track_count, parameters, metrics, created_at
+           FROM community_snapshots ORDER BY created_at DESC LIMIT %s""",
+        (limit,),
+    )
+
+
+def save_community_snapshot(
+    db: Connection,
+    model: str,
+    semantic_weight: float,
+    corpus_hash: str,
+    revision: int,
+    track_count: int,
+    parameters: dict[str, Any],
+    metrics: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Store a community map for its corpus and algorithm; ``id``, ``created_at``."""
+    return cast(
+        dict[str, Any],
+        fetch_one(
+            db,
+            """INSERT INTO community_snapshots
+                 (model_name, semantic_weight, corpus_hash, algorithm_revision, track_count, parameters, metrics, payload)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (model_name, semantic_weight, corpus_hash, algorithm_revision)
+               DO UPDATE SET payload=EXCLUDED.payload, parameters=EXCLUDED.parameters, metrics=EXCLUDED.metrics
+               RETURNING id, created_at""",
+            (
+                model,
+                semantic_weight,
+                corpus_hash,
+                revision,
+                track_count,
+                Jsonb(parameters),
+                Jsonb(metrics),
+                Jsonb(payload),
+            ),
+        ),
+    )

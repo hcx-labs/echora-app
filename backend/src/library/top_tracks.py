@@ -9,6 +9,7 @@ import uuid
 from core.curation.listening import navidrome_play_counts
 from core.db.connection import connect
 from core.integrations.navidrome import NavidromeClient
+from core.library import store
 from core.library.connections import load_connection
 
 # Navidrome play counts need a full catalog scan, so keep each user's ranking briefly.
@@ -36,21 +37,5 @@ def navidrome_ranking(user_id: str, connection_id: str) -> list[tuple[str, int]]
 
 def library_track_rows(user_id: object) -> list[dict[str, object]]:
     """Every song of the user's library with its Navidrome source id and cover."""
-    with connect(dict_rows=True) as connection, connection.cursor() as cursor:
-        cursor.execute(
-            """SELECT t.id::text AS id, t.title, t.artist, t.album, t.duration_seconds,
-                      source.external_id AS source_id, source.cover_art
-               FROM tracks t
-               LEFT JOIN LATERAL (
-                 SELECT ts.external_id, ts.source_data->>'coverArt' AS cover_art
-                 FROM track_sources ts
-                 JOIN user_track_links links
-                   ON links.user_id=%s AND links.library_id=ts.library_id
-                  AND links.track_id=ts.track_id AND links.external_id=ts.external_id
-                 WHERE ts.track_id=t.id AND ts.source_type='subsonic'
-                 ORDER BY ts.id LIMIT 1
-               ) source ON true
-               WHERE EXISTS (SELECT 1 FROM user_track_links utl WHERE utl.track_id=t.id AND utl.user_id=%s)""",
-            (user_id, user_id),
-        )
-        return cursor.fetchall()
+    with connect() as connection:
+        return store.library_songs(connection, user_id)

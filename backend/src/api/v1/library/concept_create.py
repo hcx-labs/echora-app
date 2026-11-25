@@ -8,6 +8,7 @@ from pydantic import Field
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.v1.library._concept_models import Concept, ConceptExamples
+from core.curation import store
 from core.db.connection import connect
 from core.errors import InvalidQueryError
 
@@ -31,23 +32,14 @@ class ConceptCreateEndpoint(Endpoint):
     def handle(self, body: ConceptCreate, user: SessionUser = Depends(current_user)) -> dict:
         if not body.positive_prompts and not body.positive_track_ids:
             raise InvalidQueryError("A concept needs a positive prompt or positive track")
-        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
-            cursor.execute(
-                """
-                INSERT INTO concepts (user_id, name, description, positive_prompts, negative_prompts,
-                                      positive_track_ids, negative_track_ids)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                RETURNING id, name, description, positive_prompts, negative_prompts,
-                          positive_track_ids, negative_track_ids, enabled, created_at, updated_at
-                """,
-                (
-                    user["id"],
-                    body.name.strip(),
-                    body.description.strip(),
-                    body.positive_prompts,
-                    body.negative_prompts,
-                    body.positive_track_ids,
-                    body.negative_track_ids,
-                ),
+        with connect() as connection:
+            return store.create_concept(
+                connection,
+                user["id"],
+                body.name.strip(),
+                body.description.strip(),
+                body.positive_prompts,
+                body.negative_prompts,
+                body.positive_track_ids,
+                body.negative_track_ids,
             )
-            return cursor.fetchone()

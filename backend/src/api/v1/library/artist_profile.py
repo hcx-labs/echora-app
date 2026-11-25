@@ -6,7 +6,6 @@ from datetime import datetime
 
 from fastapi import Depends
 from fastapi.encoders import jsonable_encoder
-from psycopg.types.json import Jsonb
 
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
@@ -15,6 +14,7 @@ from backend.api.v1.library._artist_models import ArtistFacet
 from backend.library.artist_corpus import artist_embedding_corpus, artist_payload
 from core.db.connection import connect
 from core.errors import NotFoundError
+from core.library import store
 
 
 class ArtistProfileResult(ResponseModel):
@@ -51,22 +51,14 @@ class ArtistProfile(Endpoint):
         display_name = str(rows[indices[0]]["artist"])
         payload, profile = artist_payload(display_name, rows, matrix, indices)
         stored = jsonable_encoder({**payload, "model": model, "corpus_hash": corpus_hash})
-        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
-            cursor.execute(
-                """INSERT INTO artist_profiles
-                     (artist_key, artist_name, model_name, corpus_hash, track_count, component_count, payload)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s)
-                   ON CONFLICT (artist_key, model_name, corpus_hash) DO UPDATE SET payload=EXCLUDED.payload
-                   RETURNING id, created_at""",
-                (
-                    display_name.casefold(),
-                    display_name,
-                    model,
-                    corpus_hash,
-                    len(indices),
-                    len(profile.weights),
-                    Jsonb(stored),
-                ),
+        with connect() as connection:
+            saved = store.save_artist_profile(
+                connection,
+                display_name,
+                model,
+                corpus_hash,
+                len(indices),
+                len(profile.weights),
+                stored,
             )
-            saved = cursor.fetchone()
         return {**stored, "profile_id": str(saved["id"]), "created_at": saved["created_at"]}
