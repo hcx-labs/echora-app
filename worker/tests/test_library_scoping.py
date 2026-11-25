@@ -1,10 +1,6 @@
 """Dependency-free orchestration regressions; execute real function bodies with fake IO."""
 
 import ast
-from contextlib import nullcontext
-import functools
-import hashlib
-import logging
 from core.config import config_classes
 from pathlib import Path
 from types import SimpleNamespace
@@ -83,96 +79,6 @@ class LibraryScopingTests(unittest.TestCase):
         sql, params = self.cursor.execute.call_args.args
         self.assertIn("lower(rtrim(root_path", sql)
         self.assertEqual(params, ("https://music/",))
-
-    def pipeline_namespace(self, kind):
-        client = MagicMock()
-        connect = MagicMock()
-        connect.return_value.__enter__.return_value = self.connection
-        navidrome = MagicMock()
-        navidrome.return_value.__enter__.return_value = client
-        ns = load_functions(
-            f"{ {'karaoke': 'kara'}.get(kind, kind) }/pipeline.py",
-            psycopg=SimpleNamespace(connect=connect),
-            os=SimpleNamespace(environ={"DATABASE_URL": "fake"}),
-            NavidromeClient=navidrome,
-            torch=SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)),
-            prepare_audio=MagicMock(),
-            get_check=lambda: lambda: None,
-            functools=functools,
-            hashlib=hashlib,
-            current_remote=lambda: None,
-            separation_phase=nullcontext,
-            SongTranscriber=MagicMock(),
-            needs_repair=lambda draft: False,
-            diagnostic_writer=MagicMock(),
-            logging=logging,
-        )
-        for name in (
-            "resolve_library_id",
-            "configure_representations",
-            "_create_run",
-            "start_attempt",
-            "record_track",
-            "finish_attempt",
-            "_store_lyrics",
-            "store_original",
-            "release_model",
-            "_stop_fa_kara_worker",
-            "_stored_model_revision",
-        ):
-            ns[name] = MagicMock()
-        ns["resolve_library_id"].return_value = self.library_id
-        return ns, client
-
-    def test_lyrics_scope_and_cleanup_on_cancellation(self):
-        ns, client = self.pipeline_namespace("lyrics")
-        ns["plan_lyrics"] = MagicMock(
-            return_value=SimpleNamespace(lyrics_external_ids=("shared-id",))
-        )
-        model = MagicMock()
-        model.embed.side_effect = Cancelled()
-        ns["LyricsEmbeddingModel"] = MagicMock(return_value=model)
-        client.lyrics.return_value = {"text": "words", "status": "available"}
-        self.cursor.fetchall.return_value = [(uuid.uuid4(), "shared-id", "Title")]
-        with self.assertRaises(Cancelled):
-            ns["backfill_lyrics"]("https://music", "user", "password")
-        ns["plan_lyrics"].assert_called_once_with(self.connection, None, library_id=self.library_id)
-        # The track selection; per-track lyric lookups follow it.
-        sql, params = next(
-            call.args
-            for call in self.cursor.execute.call_args_list
-            if "track_sources" in call.args[0]
-        )
-        self.assertIn("ts.library_id=%s", sql)
-        self.assertEqual(params, (["shared-id"], self.library_id))
-        ns["release_model"].assert_called_once_with(model)
-        ns["finish_attempt"].assert_not_called()
-
-    def test_lyrics_cleanup_when_run_setup_fails(self):
-        ns, _ = self.pipeline_namespace("lyrics")
-        ns["plan_lyrics"] = MagicMock(
-            return_value=SimpleNamespace(lyrics_external_ids=("shared-id",))
-        )
-        model = MagicMock()
-        ns["LyricsEmbeddingModel"] = MagicMock(return_value=model)
-        ns["_create_run"].side_effect = RuntimeError("database unavailable")
-        self.cursor.fetchall.return_value = [(uuid.uuid4(), "shared-id", "Title")]
-        with self.assertRaisesRegex(RuntimeError, "database unavailable"):
-            ns["backfill_lyrics"]("https://music", "user", "password")
-        ns["release_model"].assert_called_once_with(model)
-
-    def test_pipelines_never_select_sources_when_library_resolution_fails(self):
-        for kind in ("lyrics",):
-            with self.subTest(kind=kind):
-                ns, client = self.pipeline_namespace(kind)
-                ns["resolve_library_id"].side_effect = ValueError("unknown library")
-                ns["_KARAOKE_LOCK"] = MagicMock()
-                with self.assertRaisesRegex(ValueError, "unknown library"):
-                    ns[f"backfill_{kind}"]("https://unknown", "user", "password")
-                client.audio_bytes.assert_not_called()
-                client.lyrics.assert_not_called()
-                ns["configure_representations"].assert_not_called()
-                self.cursor.execute.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -8,9 +8,15 @@ import uuid
 import pytest
 
 import worker.lyrics.pipeline as lp
+from worker.processing import ProcessingContext
 import worker.transcription.config as transcription_config
-import worker.transcription.song as song_transcription
-import worker.transcription.recovery as transcription_recovery
+
+
+def run_lyrics():
+    """The lyrics stage's summary for a batch of the planned songs."""
+    from worker.processing import ProcessingContext
+
+    return lp.lyrics_stage(ProcessingContext(user_id="user", library=("url", "user", "password")))
 
 
 def setup(monkeypatch, provider, stored=None):
@@ -113,7 +119,7 @@ def test_resolve_all_lyrics_then_prepare_then_transcribe(monkeypatch):
             "instrumental": {"text": None, "status": "instrumental"},
         },
     )
-    result = lp.backfill_lyrics("url", "user", "password")
+    result = run_lyrics()
     assert state.events == [("retrieve", name) for name in state.ids] + [
         ("prepare", "missing-a"),
         ("prepare", "missing-b"),
@@ -138,7 +144,7 @@ def test_existing_text_and_disabled_transcription_do_not_prepare(monkeypatch):
     )
     state.stored[state.ids["existing"]] = ("previous text", {}, "available")
     monkeypatch.setattr(transcription_config, "transcription_enabled", Mock(return_value=False))
-    lp.backfill_lyrics("url", "user", "password")
+    run_lyrics()
     lp.prepare_audio.assert_not_called()
     state.client.audio_bytes.assert_not_called()
     state.transcriber.generate.assert_not_called()
@@ -153,7 +159,7 @@ def test_preparation_failure_is_counted_once_and_other_track_runs(monkeypatch):
         },
     )
     lp.prepare_audio.side_effect = [ValueError("bad audio"), None]
-    result = lp.backfill_lyrics("url", "user", "password")
+    result = run_lyrics()
     assert result["failed"] == 1
     assert result["embedded"] == 1
     assert state.transcriber.generate.call_count == 1
@@ -168,14 +174,14 @@ def test_preparation_cancellation_propagates(monkeypatch):
 
     lp.prepare_audio.side_effect = Cancel()
     with pytest.raises(Cancel):
-        lp.backfill_lyrics("url", "user", "password")
+        run_lyrics()
     state.transcriber.generate.assert_not_called()
 
 
 def test_disable_between_preparation_and_asr_stops_generation(monkeypatch):
     state = setup(monkeypatch, {"missing": {"text": None, "status": "missing"}})
     transcription_config.transcription_enabled.side_effect = [True, True, False]
-    result = lp.backfill_lyrics("url", "user", "password")
+    result = run_lyrics()
     lp.prepare_audio.assert_called_once()
     state.transcriber.generate.assert_not_called()
     assert result["missing"] == 1
@@ -184,7 +190,84 @@ def test_disable_between_preparation_and_asr_stops_generation(monkeypatch):
 def test_concurrent_lyrics_writer_prevents_embedding_discarded_candidate(monkeypatch):
     state = setup(monkeypatch, {"missing": {"text": None, "status": "missing"}})
     state.store.return_value = None
-    result = lp.backfill_lyrics("url", "user", "password")
+    result = run_lyrics()
     state.transcriber.generate.assert_called_once()
     lp._store_embeddings.assert_not_called()
     assert result["embedded"] == 0
+
+
+class _Cancel(BaseException):
+    pass
+
+
+def test_lyrics_scope_and_model_release_on_cancellation(monkeypatch):
+    state = setup(monkeypatch, {"shared-id": {"text": "words", "status": "available"}})
+    model = Mock()
+    model.embed.side_effect = _Cancel()
+    monkeypatch.setattr(lp, "LyricsEmbeddingModel", Mock(return_value=model))
+    with pytest.raises(_Cancel):
+        lp.lyrics_stage(
+            ProcessingContext(
+                user_id="user", library=("https://music", "u", "p"), track_ids=("shared-id",)
+            )
+        )
+    assert lp.plan_lyrics.call_args.args[1] == ["shared-id"]
+    library = lp.resolve_library_id.return_value
+    assert lp.plan_lyrics.call_args.kwargs == {"library_id": library}
+    # The track selection; per-track lyric lookups follow it.
+    sql, params = next(
+        call.args for call in state.cursor.execute.call_args_list if "track_sources" in call.args[0]
+    )
+    assert "ts.library_id=%s" in sql and params == (["shared-id"], library)
+    lp.release_model.assert_called_once_with(model)
+    lp.finish_attempt.assert_not_called()
+
+
+def test_model_is_released_when_run_setup_fails(monkeypatch):
+    setup(monkeypatch, {"shared-id": {"text": "words", "status": "available"}})
+    model = Mock()
+    monkeypatch.setattr(lp, "LyricsEmbeddingModel", Mock(return_value=model))
+    lp._create_run.side_effect = RuntimeError("database unavailable")
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        run_lyrics()
+    lp.release_model.assert_called_once_with(model)
+
+
+def test_unknown_library_selects_nothing(monkeypatch):
+    state = setup(monkeypatch, {"shared-id": {"text": "words", "status": "available"}})
+    lp.resolve_library_id.side_effect = ValueError("unknown library")
+    with pytest.raises(ValueError, match="unknown library"):
+        run_lyrics()
+    state.client.lyrics.assert_not_called()
+    lp.configure_representations.assert_not_called()
+    state.cursor.execute.assert_not_called()
+
+
+def test_new_transcripts_are_refined_before_embedding(monkeypatch):
+    state = setup(monkeypatch, {"missing": {"text": None, "status": "missing"}})
+    state.transcriber.finish.side_effect = lambda draft: {
+        "text": "recognized words",
+        "status": "available",
+        "ai_generated": True,
+        "lines": [{"text": "recognized words"}],
+    }
+    import core.lyrics.translations as translations
+    import worker.transcription.refinement as refinement
+
+    monkeypatch.setattr(translations, "load_settings", lambda: (SimpleNamespace(), None))
+    monkeypatch.setattr(refinement, "enabled", lambda settings: True)
+    monkeypatch.setattr(
+        refinement,
+        "refine",
+        lambda settings, key, lyrics, **song: {**lyrics, "text": "corrected words"},
+    )
+    state.connection.execute.return_value = SimpleNamespace(
+        fetchone=lambda: ("Artist",), rowcount=1
+    )
+    embedded = []
+    model = Mock()
+    model.embed.side_effect = lambda text: embedded.append(text)
+    monkeypatch.setattr(lp, "LyricsEmbeddingModel", Mock(return_value=model))
+    result = run_lyrics()
+    assert (result["refined"], result["embedded"], result["failed"]) == (1, 1, 0)
+    assert embedded == ["corrected words"]

@@ -80,8 +80,8 @@ def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -
         return summary
 
     pending = {item.key: item for item in items}
-    processor.open(context, items)
     try:
+        processor.open(context, items)
         for index, result in enumerate(processor.process(context, items), start=1):
             context.check()
             item = result.item
@@ -96,10 +96,11 @@ def run_stage(processor: Processor[Any, Any, Any], context: ProcessingContext) -
                     _log_failure(processor, item, error)
                     summary.count("failed")
                 else:
-                    summary.count(result.outcome)
+                    if result.outcome is not None:
+                        summary.count(result.outcome)
                     for outcome in extra or ():
                         summary.count(outcome)
-            else:
+            elif result.outcome is not None:
                 summary.count(result.outcome)
             context.report(
                 Progress(

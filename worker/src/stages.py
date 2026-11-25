@@ -144,17 +144,9 @@ def _audio_profiles(batch: Batch) -> dict[str, Any]:
 
 
 def _lyrics(batch: Batch) -> dict[str, Any]:
-    from worker.lyrics.pipeline import backfill_lyrics
+    from worker.lyrics.pipeline import lyrics_stage
 
-    return {
-        "lyrics": backfill_lyrics(
-            *batch.library,
-            progress=batch.report,
-            external_ids=batch.track_ids,
-            only_missing=True,
-            refresh_existing=batch.payload.get("refresh_lyrics", False),
-        )
-    }
+    return {"lyrics": lyrics_stage(batch.context())}
 
 
 def _theme_processor() -> Processor:

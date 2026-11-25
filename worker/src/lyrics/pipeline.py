@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from core.db.config import DatabaseConfig
+from core.errors import ProcessingError
 from core.embeddings.config import EmbeddingConfig
 from core.library.connections import credential_cipher
 
-from collections.abc import Callable
+from contextlib import ExitStack
+from dataclasses import dataclass
 import hashlib
 import json
 import logging
@@ -23,11 +25,14 @@ from core.lyrics.sources import store_original
 from worker.planning.audio import plan_lyrics, resolve_library_id
 from core.embeddings.representations import configure_representations, embedding_config
 from worker.library.attempts import start_attempt, record_track, finish_attempt
-from worker.media.preprocessing import prepare_audio, get_check
-from worker.remote.session import RemoteModel, current as current_remote
+from worker.media.preprocessing import prepare_audio
+from worker.processing import Item, ItemResult, ProcessingContext, Processor, run_stage
+from worker.remote.session import RemoteModel
 from worker.media.roformer import separation_phase
 from worker.transcription.song import SongTranscriber, needs_repair
 from worker.transcription.recovery import diagnostic_writer
+
+logger = logging.getLogger(__name__)
 
 
 def _vector_literal(vector) -> str:
@@ -115,69 +120,6 @@ def _language(language_distribution: dict, result: dict[str, object]) -> str | N
     return None if language == "xxx" else language
 
 
-def _refine_transcripts(connection, items, summary, report) -> None:
-    """External AI second pass over this run's new AI transcripts, in place in `items`.
-
-    Runs after transcription has released its models and before embedding, so search,
-    translations and karaoke all use the corrected text. A failure keeps the transcript.
-    """
-    from worker.transcription.refinement import RefinementError, enabled, refine
-    from core.lyrics.translations import load_settings
-
-    try:
-        settings, encrypted = load_settings()
-    except Exception:
-        logging.getLogger(__name__).exception(
-            "Could not load External AI settings; transcripts stay unrefined"
-        )
-        return
-    if not items or not enabled(settings):
-        return
-    key = credential_cipher().decrypt(bytes(encrypted)).decode() if encrypted else None
-    for index, (position, track_id, title, lyrics) in enumerate(items):
-        report(
-            {
-                "phase": "lyrics",
-                "message": f"Refining transcript for {title}",
-                "completed": index,
-                "total": len(items),
-                "unit": "tracks",
-            }
-        )
-        artist = connection.execute("SELECT artist FROM tracks WHERE id=%s", (track_id,)).fetchone()
-        try:
-            refined = refine(
-                settings,
-                key,
-                lyrics,
-                title=title,
-                artist=(artist[0] if artist else "") or "",
-                languages=(detect_distribution(str(lyrics["text"])).get("languages") or {}),
-            )
-        except RefinementError as error:
-            summary["refinement_failed"] = summary.get("refinement_failed", 0) + 1
-            logging.getLogger(__name__).warning(
-                "Transcript refinement failed for %s: %s", track_id, error
-            )
-            continue
-        distribution = detect_distribution(str(refined["text"]))
-        updated = connection.execute(
-            """UPDATE lyrics SET text=%s, language=%s, provenance=%s
-               WHERE track_id=%s AND source='transcribed' AND text=%s""",
-            (
-                refined["text"],
-                _language(distribution, refined),
-                Jsonb(_provenance(refined, distribution)),
-                track_id,
-                lyrics["text"],
-            ),
-        ).rowcount
-        connection.commit()
-        if updated:
-            summary["refined"] = summary.get("refined", 0) + 1
-            items[index] = (position, track_id, title, refined)
-
-
 def _store_lyrics(
     connection: psycopg.Connection, track_id: uuid.UUID, result: dict[str, object]
 ) -> uuid.UUID | None:
@@ -246,251 +188,230 @@ def _store_embeddings(
             )
 
 
-def backfill_lyrics(
-    url: str,
-    username: str,
-    password: str,
-    progress: Callable[[dict[str, object]], None] | None = None,
-    external_ids: list[str] | None = None,
-    only_missing: bool = False,
-    refresh_existing: bool = False,
-) -> dict[str, int]:
-    report = progress or (lambda _: None)
-    summary = {
-        "total": 0,
-        "available": 0,
-        "missing": 0,
-        "unavailable": 0,
-        "embedded": 0,
-        "failed": 0,
-    }
-    with (
-        psycopg.connect(DatabaseConfig.load().database_url) as connection,
-        NavidromeClient(url, username, password) as client,
-    ):
-        library_id = resolve_library_id(connection, url)
-        configure_representations(connection)
-        planned = plan_lyrics(connection, external_ids, library_id=library_id).lyrics_external_ids
-        if refresh_existing and external_ids is not None:
-            planned = frozenset(external_ids)
-        if not planned:
-            report(
-                {
-                    "phase": "planning",
-                    "message": "Lyrics analysis already current",
-                    "completed": 0,
-                    "total": 0,
-                    "unit": "tracks",
-                }
+class LyricsItem(Item):
+    """A song whose lyrics or lyric embedding are missing or stale."""
+
+    track_id: uuid.UUID
+    external_id: str
+
+
+@dataclass(frozen=True)
+class LyricsResult:
+    """A song's lyrics, and whether they still need storing (``False``: already stored)."""
+
+    lyrics: dict[str, object]
+    store: bool = True
+
+
+@dataclass(frozen=True)
+class _Transcription:
+    item: LyricsItem
+    config: tuple
+    missing: dict[str, object]
+    """The song's lyrics if it is not transcribed after all (status missing)."""
+
+
+class LyricsProcessor(Processor[None, LyricsItem, LyricsResult]):
+    """Retrieves the batch's lyrics from Navidrome, and transcribes the songs that have none.
+
+    Phases (docs/batch-phases.md): retrieve every song's lyrics; separate the vocals of every song
+    to transcribe with one Roformer; generate every transcript with MOSS loaded once; repair
+    compressed timing with the karaoke aligner loaded once, only for drafts that need it. Each
+    song's lyrics are stored as soon as they are known. Each song counts as its lyrics status
+    (available, missing, unavailable, instrumental, ...), except lyrics a concurrent writer
+    superseded, which count as nothing and are not embedded.
+
+    Afterwards ``embeddable`` holds the songs whose text needs embedding, in order, and
+    ``fresh`` the track ids transcribed in this batch.
+    """
+
+    name = "lyrics"
+    summary_key = "lyrics"
+    counters = ("available", "missing", "unavailable")
+    activity = "Retrieving lyrics for"
+    current_message = "Lyrics analysis already current"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.embeddable: list[tuple[uuid.UUID, str, dict[str, object]]] = []
+        self.fresh: set[uuid.UUID] = set()
+
+    def plan(self, context: ProcessingContext) -> list[LyricsItem]:
+        ids = list(context.track_ids)
+        with psycopg.connect(DatabaseConfig.load().database_url) as connection:
+            self.library_id = resolve_library_id(connection, context.library_url)
+            configure_representations(connection)
+            planned = plan_lyrics(connection, ids, library_id=self.library_id).lyrics_external_ids
+            if context.options.get("refresh_lyrics", False):
+                planned = frozenset(ids)
+            if not planned:
+                return []
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """SELECT DISTINCT ON (ts.track_id) ts.track_id, ts.external_id, t.title
+                       FROM track_sources ts JOIN tracks t ON t.id=ts.track_id
+                       WHERE ts.source_type='subsonic' AND ts.external_id=ANY(%s) AND ts.library_id=%s
+                       ORDER BY ts.track_id, ts.id""",
+                    (list(planned), self.library_id),
+                )
+                rows = cursor.fetchall()
+        return [
+            LyricsItem(
+                key=str(track_id), label=title or "", track_id=track_id, external_id=external_id
             )
-            return summary
+            for track_id, external_id, title in rows
+        ]
+
+    def open(self, context, items) -> None:
+        self.stack = ExitStack()
+        self.connection = self.stack.enter_context(
+            psycopg.connect(DatabaseConfig.load().database_url)
+        )
+        self.client = self.stack.enter_context(NavidromeClient(*context.library))
+
+    def close(self) -> None:
+        if hasattr(self, "stack"):
+            self.stack.close()
+
+    def process(self, context, items):
+        transcriptions: list[_Transcription] = []
+        for index, item in enumerate(items):
+            context.check()
+            try:
+                found = self._retrieve(item)
+            except Exception as error:  # noqa: BLE001 - one song's lyrics
+                self.connection.rollback()
+                logger.exception("Lyrics retrieval/transcription failed for %s", item.track_id)
+                yield ItemResult.failed(item, _failure("Lyrics retrieval failed", error))
+                continue
+            if isinstance(found, _Transcription):
+                transcriptions.append(found)
+                context.publish(
+                    {
+                        "phase": "lyrics",
+                        "message": f"Lyrics need transcription for {item.label}",
+                        "completed": index + 1,
+                        "total": len(items),
+                        "unit": "tracks",
+                    }
+                )
+                continue
+            yield ItemResult(item=item, outcome=None, output=found)
+        if transcriptions:
+            yield from self._transcribe(context, transcriptions)
+
+    def _retrieve(self, item: LyricsItem) -> LyricsResult | _Transcription:
+        """The song's lyrics, or the transcription it needs."""
+        from worker.transcription.config import transcription_enabled, transcription_model
+
+        connection = self.connection
+        provider_lyrics = self.client.lyrics(item.external_id)
+        # Archive the provider's lyrics as soon as they are read, whatever the song's outcome.
+        store_original(
+            connection, self.library_id, item.external_id, item.track_id, provider_lyrics
+        )
+        connection.commit()
+        # Manual edits remain authoritative when their embedding needs to be rebuilt.
         with connection.cursor() as cursor:
             cursor.execute(
-                """SELECT DISTINCT ON (ts.track_id) ts.track_id, ts.external_id, t.title
-                   FROM track_sources ts JOIN tracks t ON t.id=ts.track_id
-                   WHERE ts.source_type='subsonic' AND ts.external_id=ANY(%s) AND ts.library_id=%s
-                   ORDER BY ts.track_id, ts.id""",
-                (list(planned), library_id),
+                "SELECT text, provenance, availability_status, source FROM lyrics WHERE track_id=%s",
+                (item.track_id,),
             )
-            tracks = cursor.fetchall()
-        summary["total"] = len(tracks)
-        embeddable: list[tuple[uuid.UUID, str, dict[str, object]]] = []
-        fresh_transcripts: set[uuid.UUID] = set()
-        transcriptions = []
-
-        def accept_lyrics(track_id, title, lyrics, stored=False):
-            if not stored:
-                stored_id = _store_lyrics(connection, track_id, lyrics)
-                if stored_id is None:
-                    # A concurrent writer supplied text. Never embed our discarded candidate.
-                    connection.commit()
-                    return
-            status = str(lyrics.get("status") or "unavailable")
-            summary[status] = summary.get(status, 0) + 1
-            if lyrics.get("text"):
-                embeddable.append((track_id, title, lyrics))
-                if not stored and lyrics.get("ai_generated") and lyrics.get("lines"):
-                    fresh_transcripts.add(track_id)
+            stored = cursor.fetchone()
+        if stored and (stored[1] or {}).get("manual_status"):
+            # A user-set status is final, even though these rows use source='none'.
+            lyrics = {
+                "text": stored[0],
+                "status": (stored[1] or {})["manual_status"],
+                **(stored[1] or {}),
+            }
+            return LyricsResult(lyrics, store=False)
+        if stored and stored[3] == "manual":
+            return LyricsResult(
+                {"text": stored[0], "status": stored[2], **(stored[1] or {})}, store=False
+            )
+        if stored and (stored[1] or {}).get("forced_transcription"):
+            forced_language = str((stored[1] or {}).get("transcription_language") or "")
+            config = transcription_model() if transcription_enabled(connection) else None
+            if not config:
+                raise RuntimeError("AI lyric generation is disabled")
             connection.commit()
-
-        for index, (track_id, external_id, title) in enumerate(tracks):
-            try:
-                provider_lyrics = client.lyrics(external_id)
-                store_original(connection, library_id, external_id, track_id, provider_lyrics)
-                connection.commit()
-                stored = None
-                # Archive the provider separately; manual edits remain authoritative
-                # when their embedding needs to be rebuilt.
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        "SELECT text, provenance, availability_status, source FROM lyrics WHERE track_id=%s",
-                        (track_id,),
-                    )
-                    stored = cursor.fetchone()
-                if stored and (stored[1] or {}).get("manual_status"):
-                    # A user-set status is final, even though these rows use source='none'.
-                    lyrics = {
-                        "text": stored[0],
-                        "status": (stored[1] or {})["manual_status"],
-                        **(stored[1] or {}),
-                    }
-                elif stored and stored[3] == "manual":
-                    lyrics = {"text": stored[0], "status": stored[2], **(stored[1] or {})}
-                elif stored and (stored[1] or {}).get("forced_transcription"):
-                    forced_language = str((stored[1] or {}).get("transcription_language") or "")
-                    from worker.transcription.config import (
-                        transcription_model,
-                        transcription_enabled,
-                    )
-
-                    config = transcription_model() if transcription_enabled(connection) else None
-                    if not config:
-                        raise RuntimeError("AI lyric generation is disabled")
-                    transcriptions.append(
-                        (
-                            track_id,
-                            external_id,
-                            title,
-                            config,
-                            {"status": "missing", "transcription_language": forced_language},
-                        )
-                    )
-                    stored = None
-                    connection.commit()
-                    report(
-                        {
-                            "phase": "lyrics",
-                            "message": f"Lyrics need transcription for {title}",
-                            "completed": index + 1,
-                            "total": len(tracks),
-                            "unit": "tracks",
-                        }
-                    )
-                    continue
-                else:
-                    stored = None
-                    lyrics = provider_lyrics
-                    # A retrieval miss must not erase a previous AI transcript or lyrics
-                    # that merely need embedding with a newer embedding model.
-                    if not str(lyrics.get("text") or "").strip():
-                        with connection.cursor() as cursor:
-                            cursor.execute(
-                                "SELECT text, provenance, availability_status FROM lyrics WHERE track_id=%s AND (NULLIF(btrim(text),'') IS NOT NULL OR availability_status='instrumental')",
-                                (track_id,),
-                            )
-                            stored = cursor.fetchone()
-                        if stored:
-                            lyrics = {"text": stored[0], "status": stored[2], **(stored[1] or {})}
-                        elif lyrics.get("status") != "instrumental" and (
-                            evidence := _instrumental_evidence(connection, track_id)
-                        ):
-                            # Clearly no sung vocals: transcribing the near-silent stem only
-                            # yields invented text. Stored as instrumental, so later syncs skip it.
-                            lyrics = {
-                                "text": None,
-                                "status": "instrumental",
-                                "instrumental_evidence": evidence,
-                            }
-                        elif lyrics.get("status") != "instrumental":
-                            from worker.transcription.config import (
-                                transcription_model,
-                                transcription_enabled,
-                            )
-
-                            config = (
-                                transcription_model() if transcription_enabled(connection) else None
-                            )
-                            if config:
-                                transcriptions.append(
-                                    (track_id, external_id, title, config, lyrics)
-                                )
-                                connection.commit()
-                                report(
-                                    {
-                                        "phase": "lyrics",
-                                        "message": f"Lyrics need transcription for {title}",
-                                        "completed": index + 1,
-                                        "total": len(tracks),
-                                        "unit": "tracks",
-                                    }
-                                )
-                                continue
-                accept_lyrics(track_id, title, lyrics, stored=bool(stored))
-            except Exception:
-                connection.rollback()
-                logging.getLogger(__name__).exception(
-                    "Lyrics retrieval/transcription failed for %s", track_id
-                )
-                summary["failed"] += 1
-            report(
-                {
-                    "phase": "lyrics",
-                    "message": f"Retrieving lyrics for {title}",
-                    "completed": index + 1,
-                    "total": len(tracks),
-                    "unit": "tracks",
-                    "summary": summary,
-                }
+            missing = {"status": "missing", "transcription_language": forced_language}
+            return _Transcription(item, config, missing)
+        lyrics = provider_lyrics
+        if str(lyrics.get("text") or "").strip():
+            return LyricsResult(lyrics)
+        # A retrieval miss must not erase a previous AI transcript or lyrics that merely need
+        # embedding with a newer embedding model.
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT text, provenance, availability_status FROM lyrics WHERE track_id=%s AND (NULLIF(btrim(text),'') IS NOT NULL OR availability_status='instrumental')",
+                (item.track_id,),
             )
+            stored = cursor.fetchone()
+        if stored:
+            return LyricsResult(
+                {"text": stored[0], "status": stored[2], **(stored[1] or {})}, store=False
+            )
+        if lyrics.get("status") == "instrumental":
+            return LyricsResult(lyrics)
+        if evidence := _instrumental_evidence(connection, item.track_id):
+            # Clearly no sung vocals: transcribing the near-silent stem only yields invented
+            # text. Stored as instrumental, so later syncs skip it.
+            return LyricsResult(
+                {"text": None, "status": "instrumental", "instrumental_evidence": evidence}
+            )
+        config = transcription_model() if transcription_enabled(connection) else None
+        if config:
+            connection.commit()
+            return _Transcription(item, config, lyrics)
+        return LyricsResult(lyrics)
 
-        # Only genuine fallbacks reach this stage. Never separate songs solely
-        # because their supplied lyrics need a new embedding.
-        # Phases (docs/batch-phases.md): separate every selected song's vocals with one
-        # Roformer, generate every song with MOSS loaded once, then repair compressed
-        # timing with the karaoke aligner loaded once, only for drafts that need it.
-        remote = current_remote()
-        ready = []
-        digests = {}
+    def _transcribe(self, context, transcriptions: list[_Transcription]):
+        """Separate, generate and repair every transcription, each phase with one model."""
+        from worker.transcription.config import transcription_enabled
+
+        connection, client, remote = self.connection, self.client, context.remote
+        ready: list[_Transcription] = []
+        digests: dict[uuid.UUID, str] = {}
+        # Only genuine fallbacks reach this phase. Never separate songs solely because their
+        # supplied lyrics need a new embedding.
         with separation_phase():
             for index, candidate in enumerate(transcriptions):
-                track_id, external_id, title, config, missing = candidate
-                report(
-                    {
-                        "phase": "preprocess",
-                        "message": f"Preparing vocals for {title}",
-                        "completed": index,
-                        "total": len(transcriptions),
-                        "unit": "tracks",
-                    }
+                item = candidate.item
+                update = {"phase": "preprocess", "total": len(transcriptions), "unit": "tracks"}
+                context.publish(
+                    {**update, "message": f"Preparing vocals for {item.label}", "completed": index}
                 )
                 try:
-                    from worker.transcription.config import transcription_enabled
-
                     if not transcription_enabled(connection):
-                        accept_lyrics(track_id, title, missing)
-                        continue
-                    if remote is None:
-                        prepare_audio(
-                            client.audio_bytes(external_id), vocals=True, check=get_check()
+                        yield ItemResult(
+                            item=item, outcome=None, output=LyricsResult(candidate.missing)
                         )
+                        continue
+                    audio = client.audio_bytes(item.external_id)
+                    if remote is None:
+                        prepare_audio(audio, vocals=True, check=context.check)
                     else:
                         # Vocals are separated on Modal; only the source audio goes up.
-                        digests[track_id] = remote.upload_audio(client.audio_bytes(external_id))
+                        digests[item.track_id] = remote.upload_audio(audio)
                     ready.append(candidate)
                     connection.commit()
-                except Exception:
+                except Exception as error:  # noqa: BLE001 - one song's audio or separation
                     connection.rollback()
-                    summary["failed"] += 1
-                    logging.getLogger(__name__).exception(
-                        "Vocal preparation failed for %s", track_id
-                    )
-                report(
-                    {
-                        "phase": "preprocess",
-                        "completed": index + 1,
-                        "total": len(transcriptions),
-                        "unit": "tracks",
-                        "summary": summary,
-                    }
-                )
+                    logger.exception("Vocal preparation failed for %s", item.track_id)
+                    yield ItemResult.failed(item, _failure("Vocal preparation failed", error))
+                context.publish({**update, "completed": index + 1})
         if remote is not None and ready:
-            separated = remote.prepare_vocals([digests[item[0]] for item in ready], vocals=True)
+            separated = remote.prepare_vocals(
+                [digests[candidate.item.track_id] for candidate in ready], vocals=True
+            )
             kept = []
             for candidate, outcome in zip(list(ready), separated):
                 if isinstance(outcome, BaseException):
-                    summary["failed"] += 1
-                    logging.getLogger(__name__).error(
-                        "Vocal separation on Modal failed for %s", candidate[0]
+                    logger.error("Vocal separation on Modal failed for %s", candidate.item.track_id)
+                    yield ItemResult.failed(
+                        candidate.item, _failure("Vocal separation failed", outcome)
                     )
                 else:
                     kept.append(candidate)
@@ -499,20 +420,23 @@ def backfill_lyrics(
         transcribers: dict[tuple, SongTranscriber] = {}
         repairs = []
         try:
-            for index, (track_id, external_id, title, config, missing) in enumerate(ready):
+            for index, candidate in enumerate(ready):
+                item, title = candidate.item, candidate.item.label
                 try:
-                    from worker.transcription.config import transcription_enabled
-
                     if not transcription_enabled(connection):
-                        accept_lyrics(track_id, title, missing)
+                        yield ItemResult(
+                            item=item, outcome=None, output=LyricsResult(candidate.missing)
+                        )
                         continue
-                    transcriber = transcribers.get(tuple(config))
+                    transcriber = transcribers.get(tuple(candidate.config))
                     if transcriber is None:
-                        transcriber = transcribers[tuple(config)] = SongTranscriber(*config)
+                        transcriber = transcribers[tuple(candidate.config)] = SongTranscriber(
+                            *candidate.config
+                        )
                         if remote is None:
                             # MOSS loads once for every song of this phase.
                             transcriber.open()
-                    report(
+                    context.publish(
                         {
                             "phase": "transcription",
                             "message": f"Transcribing lyrics for {title}",
@@ -527,93 +451,228 @@ def backfill_lyrics(
                             JOIN current_embeddings e ON e.track_id=a.track_id AND e.run_id=a.run_id
                             WHERE a.track_id=%s AND e.embedding_type='voice-gender'
                             ORDER BY a.created_at DESC LIMIT 1""",
-                            (track_id,),
+                            (item.track_id,),
                         )
                         activity_row = cursor.fetchone()
                     arguments = dict(
-                        language=str(missing.get("transcription_language") or "") or None,
-                        check=lambda: report({"phase": "transcription"}),
-                        progress=lambda detail, title=title: report(
+                        language=str(candidate.missing.get("transcription_language") or "") or None,
+                        check=lambda: context.publish({"phase": "transcription"}),
+                        progress=lambda detail, title=title: context.publish(
                             {"phase": "transcription", "message": f"{title}: {detail}"}
                         ),
-                        diagnostic_sink=diagnostic_writer(track_id),
+                        diagnostic_sink=diagnostic_writer(item.track_id),
                         vocal_activity=activity_row[0] if activity_row else None,
                     )
+                    audio = client.audio_bytes(item.external_id)
                     if remote is None:
-                        draft = transcriber.generate(client.audio_bytes(external_id), **arguments)
+                        draft = transcriber.generate(audio, **arguments)
                     else:
-                        draft = remote.transcribe_generate(
-                            client.audio_bytes(external_id), **arguments
-                        )
+                        draft = remote.transcribe_generate(audio, **arguments)
                     if needs_repair(draft):
-                        # Saved after the timing repair phase.
-                        repairs.append((track_id, title, transcriber, draft))
-                    else:
-                        accept_lyrics(track_id, title, transcriber.finish(draft))
-                except Exception:
+                        # Stored after the timing repair phase.
+                        repairs.append((item, transcriber, draft))
+                        continue
+                    lyrics = transcriber.finish(draft)
+                except Exception as error:  # noqa: BLE001 - one song's transcription
                     connection.rollback()
-                    summary["failed"] += 1
-                    logging.getLogger(__name__).exception(
-                        "Lyrics transcription failed for %s", track_id
-                    )
-                report(
-                    {
-                        "phase": "transcription",
-                        "message": f"Processed lyrics for {title}",
-                        "completed": index + 1,
-                        "total": len(ready),
-                        "unit": "tracks",
-                        "summary": summary,
-                    }
-                )
+                    logger.exception("Lyrics transcription failed for %s", item.track_id)
+                    yield ItemResult.failed(item, _failure("Transcription failed", error))
+                    continue
+                yield ItemResult(item=item, outcome=None, output=LyricsResult(lyrics))
         finally:
             for transcriber in transcribers.values():
                 transcriber.close()
 
-        if repairs:
-            # Timing repair phase: the karaoke aligner, loaded once, for drafts that need it.
-            finished = (
-                iter(remote.transcribe_finish([item[3] for item in repairs]))
-                if remote is not None
-                else None
+        if not repairs:
+            return
+        # Timing repair phase: the karaoke aligner, loaded once, for drafts that need it.
+        finished = (
+            iter(remote.transcribe_finish([draft for _, _, draft in repairs]))
+            if remote is not None
+            else None
+        )
+        try:
+            for index, (item, transcriber, draft) in enumerate(repairs):
+                context.publish(
+                    {
+                        "phase": "transcription",
+                        "message": f"Repairing timing for {item.label}",
+                        "completed": index,
+                        "total": len(repairs),
+                        "unit": "tracks",
+                    }
+                )
+                try:
+                    lyrics = transcriber.finish(draft) if finished is None else next(finished)
+                    if isinstance(lyrics, BaseException):
+                        raise lyrics
+                except Exception as error:  # noqa: BLE001 - one song's timing repair
+                    connection.rollback()
+                    logger.exception("Lyrics timing repair failed for %s", item.track_id)
+                    yield ItemResult.failed(item, _failure("Timing repair failed", error))
+                    continue
+                yield ItemResult(item=item, outcome=None, output=LyricsResult(lyrics))
+        finally:
+            if finished is None:
+                from worker.kara.pipeline import _stop_fa_kara_worker
+
+                _stop_fa_kara_worker()
+
+    def persist(self, context, item: LyricsItem, output: LyricsResult) -> tuple[str, ...]:
+        lyrics = output.lyrics
+        try:
+            if output.store and _store_lyrics(self.connection, item.track_id, lyrics) is None:
+                # A concurrent writer supplied text. Never embed our discarded candidate.
+                self.connection.commit()
+                return ()
+            if lyrics.get("text"):
+                self.embeddable.append((item.track_id, item.label, lyrics))
+                if output.store and lyrics.get("ai_generated") and lyrics.get("lines"):
+                    self.fresh.add(item.track_id)
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+        return (str(lyrics.get("status") or "unavailable"),)
+
+
+class RefinementItem(Item):
+    """A transcript made in this batch."""
+
+    track_id: uuid.UUID
+    lyrics: dict[str, object]
+
+
+class TranscriptRefinementProcessor(Processor[None, RefinementItem, dict[str, object]]):
+    """External AI second pass over a batch's new AI transcripts.
+
+    Runs after transcription has released its models and before embedding, so search,
+    translations and karaoke all use the corrected text. A failure keeps the transcript
+    (``refinement_failed``); a transcript changed meanwhile is left alone. ``refined`` maps the
+    refined songs to their new lyrics.
+    """
+
+    name = "lyrics"
+    summary_key = "lyrics"
+    total_key = None
+    activity = "Refining transcript for"
+    current_message = "Transcripts need no refinement"
+
+    def __init__(self, transcripts: list[RefinementItem]) -> None:
+        super().__init__()
+        self.transcripts = transcripts
+        self.refined: dict[uuid.UUID, dict[str, object]] = {}
+
+    def plan(self, context: ProcessingContext) -> list[RefinementItem]:
+        from core.lyrics.translations import load_settings
+        from worker.transcription.refinement import enabled
+
+        try:
+            settings, encrypted = load_settings()
+        except Exception:
+            logger.exception("Could not load External AI settings; transcripts stay unrefined")
+            return []
+        if not enabled(settings):
+            return []
+        self.settings = settings
+        self.key = credential_cipher().decrypt(bytes(encrypted)).decode() if encrypted else None
+        return list(self.transcripts)
+
+    def open(self, context, items) -> None:
+        self.stack = ExitStack()
+        self.connection = self.stack.enter_context(
+            psycopg.connect(DatabaseConfig.load().database_url)
+        )
+
+    def close(self) -> None:
+        if hasattr(self, "stack"):
+            self.stack.close()
+
+    def process(self, context, items):
+        from worker.transcription.refinement import RefinementError, refine
+
+        for index, item in enumerate(items):
+            context.check()
+            context.publish(
+                {
+                    "phase": "lyrics",
+                    "message": f"Refining transcript for {item.label}",
+                    "completed": index,
+                    "total": len(items),
+                    "unit": "tracks",
+                }
             )
+            artist = self.connection.execute(
+                "SELECT artist FROM tracks WHERE id=%s", (item.track_id,)
+            ).fetchone()
             try:
-                for index, (track_id, title, transcriber, draft) in enumerate(repairs):
-                    report(
-                        {
-                            "phase": "transcription",
-                            "message": f"Repairing timing for {title}",
-                            "completed": index,
-                            "total": len(repairs),
-                            "unit": "tracks",
-                        }
-                    )
-                    try:
-                        lyrics = transcriber.finish(draft) if finished is None else next(finished)
-                        if isinstance(lyrics, BaseException):
-                            raise lyrics
-                        accept_lyrics(track_id, title, lyrics)
-                    except Exception:
-                        connection.rollback()
-                        summary["failed"] += 1
-                        logging.getLogger(__name__).exception(
-                            "Lyrics timing repair failed for %s", track_id
-                        )
-            finally:
-                if finished is None:
-                    from worker.kara.pipeline import _stop_fa_kara_worker
+                refined = refine(
+                    self.settings,
+                    self.key,
+                    item.lyrics,
+                    title=item.label,
+                    artist=(artist[0] if artist else "") or "",
+                    languages=(
+                        detect_distribution(str(item.lyrics["text"])).get("languages") or {}
+                    ),
+                )
+            except RefinementError as error:
+                logger.warning("Transcript refinement failed for %s: %s", item.track_id, error)
+                yield ItemResult(item=item, outcome="refinement_failed")
+                continue
+            yield ItemResult(item=item, outcome=None, output=refined)
 
-                    _stop_fa_kara_worker()
+    def persist(self, context, item: RefinementItem, output: dict[str, object]) -> tuple[str, ...]:
+        distribution = detect_distribution(str(output["text"]))
+        try:
+            updated = self.connection.execute(
+                """UPDATE lyrics SET text=%s, language=%s, provenance=%s
+                   WHERE track_id=%s AND source='transcribed' AND text=%s""",
+                (
+                    output["text"],
+                    _language(distribution, output),
+                    Jsonb(_provenance(output, distribution)),
+                    item.track_id,
+                    item.lyrics["text"],
+                ),
+            ).rowcount
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+        if not updated:
+            return ()
+        self.refined[item.track_id] = output
+        return ("refined",)
 
-        fresh = [(i, *item) for i, item in enumerate(embeddable) if item[0] in fresh_transcripts]
-        if fresh:
-            _refine_transcripts(connection, fresh, summary, report)
-            for position, track_id, title, lyrics in fresh:
-                embeddable[position] = (track_id, title, lyrics)
-        if not embeddable:
-            return summary
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        report(
+
+class EmbeddingItem(Item):
+    """A song's lyrics to embed."""
+
+    track_id: uuid.UUID
+    text: str
+
+
+class LyricsEmbeddingProcessor(Processor[None, EmbeddingItem, object]):
+    """Embeds lyrics with BGE-M3, loaded once (on Modal, every text in one call).
+
+    A failed song is recorded in the run's attempt, with no lyrics or error text.
+    """
+
+    name = "lyrics"
+    summary_key = "lyrics"
+    counters = ("embedded",)
+    activity = "Embedding lyrics for"
+
+    def __init__(self, songs: list[EmbeddingItem]) -> None:
+        super().__init__()
+        self.songs = songs
+
+    def plan(self, context: ProcessingContext) -> list[EmbeddingItem]:
+        return list(self.songs)
+
+    def open(self, context, items) -> None:
+        context.publish(
             {
                 "phase": "models",
                 "message": "Loading BGE-M3 lyrics model",
@@ -622,71 +681,124 @@ def backfill_lyrics(
                 "unit": "models",
             }
         )
-        remote = current_remote()
-        model = (
-            RemoteModel(
-                LyricsEmbeddingModel.name,
-                EmbeddingConfig.load().lyrics_model_id,
-                EmbeddingConfig.load().lyrics_revision,
+        config = EmbeddingConfig.load()
+        if context.remote is not None:
+            self.model = RemoteModel(
+                LyricsEmbeddingModel.name, config.lyrics_model_id, config.lyrics_revision
             )
-            if remote
-            else LyricsEmbeddingModel(
-                EmbeddingConfig.load().lyrics_model_id,
-                EmbeddingConfig.load().lyrics_revision,
-                device,
+        else:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.model = LyricsEmbeddingModel(
+                config.lyrics_model_id, config.lyrics_revision, device
             )
+        self.stack = ExitStack()
+        self.connection = self.stack.enter_context(
+            psycopg.connect(DatabaseConfig.load().database_url)
         )
-        try:
-            run_id = _create_run(connection, model)
-            attempt_id = start_attempt(connection, run_id, len(embeddable))
-            connection.commit()
-            # On Modal, every text is embedded in one call; results stream back in order.
-            remote_outcomes = (
-                iter(remote.embed_lyrics([str(item[2]["text"]) for item in embeddable]))
-                if remote
-                else None
+        self.run_id = _create_run(self.connection, self.model)
+        self.attempt_id = start_attempt(self.connection, self.run_id, len(items))
+        self.connection.commit()
+
+    def process(self, context, items):
+        # On Modal, every text is embedded in one call; results stream back in order.
+        remote_outcomes = (
+            iter(context.remote.embed_lyrics([item.text for item in items]))
+            if context.remote is not None
+            else None
+        )
+        for item in items:
+            context.check()
+            try:
+                if remote_outcomes is None:
+                    embedded = self.model.embed(item.text)
+                else:
+                    embedded = next(remote_outcomes)
+                    if isinstance(embedded, BaseException):
+                        raise embedded
+            except Exception as error:  # noqa: BLE001 - one song's embedding
+                self._record_failure(item)
+                yield ItemResult.failed(item, _failure("Lyrics embedding failed", error))
+                continue
+            yield ItemResult(item=item, outcome="embedded", output=embedded)
+        finish_attempt(self.connection, self.attempt_id)
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE analysis_runs SET status='complete', finished_at=now() WHERE id=%s",
+                (self.run_id,),
             )
-            for index, (track_id, title, lyrics) in enumerate(embeddable):
-                try:
-                    if remote_outcomes is None:
-                        embedded = model.embed(str(lyrics["text"]))
-                    else:
-                        embedded = next(remote_outcomes)
-                        if isinstance(embedded, BaseException):
-                            raise embedded
-                    _store_embeddings(connection, track_id, run_id, embedded)
-                    record_track(connection, attempt_id, str(track_id), track_id)
-                    summary["embedded"] += 1
-                    connection.commit()
-                except Exception:
-                    connection.rollback()
-                    summary["failed"] += 1
-                    record_track(
-                        connection,
-                        attempt_id,
-                        str(track_id),
-                        track_id,
-                        error="Lyrics embedding failed; see service logs",
-                    )
-                    connection.commit()
-                report(
-                    {
-                        "phase": "lyrics",
-                        "message": f"Embedding lyrics for {title}",
-                        "completed": index + 1,
-                        "total": len(embeddable),
-                        "unit": "tracks",
-                        "summary": summary,
-                    }
-                )
-            finish_attempt(connection, attempt_id)
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "UPDATE analysis_runs SET status='complete', finished_at=now() WHERE id=%s",
-                    (run_id,),
-                )
-            connection.commit()
-        finally:
-            release_model(model)
-            del model
+        self.connection.commit()
+
+    def _record_failure(self, item: EmbeddingItem) -> None:
+        self.connection.rollback()
+        record_track(
+            self.connection,
+            self.attempt_id,
+            str(item.track_id),
+            item.track_id,
+            error="Lyrics embedding failed; see service logs",
+        )
+        self.connection.commit()
+
+    def persist(self, context, item: EmbeddingItem, output) -> None:
+        try:
+            _store_embeddings(self.connection, item.track_id, self.run_id, output)
+            record_track(self.connection, self.attempt_id, str(item.track_id), item.track_id)
+            self.connection.commit()
+        except Exception:
+            self._record_failure(item)
+            raise
+
+    def close(self) -> None:
+        if hasattr(self, "stack"):
+            self.stack.close()
+        if getattr(self, "model", None) is not None:
+            release_model(self.model)
+            self.model = None
+
+
+def lyrics_stage(context: ProcessingContext) -> dict[str, object]:
+    """The lyrics stage: retrieve and transcribe, refine new transcripts, embed.
+
+    Returns the stage's summary with the keys it always had: total, available, missing,
+    unavailable, embedded and failed, plus other statuses and refinement counts once counted.
+    """
+    retrieval = LyricsProcessor()
+    found = run_stage(retrieval, context).as_dict()
+    summary: dict[str, object] = {
+        key: found[key] for key in ("total", "available", "missing", "unavailable")
+    }
+    summary["embedded"] = 0
+    failed = int(found["failed"])
+    extra = {key: value for key, value in found.items() if key not in summary and key != "failed"}
+    embeddable = retrieval.embeddable
+    fresh = [
+        RefinementItem(key=str(track_id), label=title, track_id=track_id, lyrics=lyrics)
+        for track_id, title, lyrics in embeddable
+        if track_id in retrieval.fresh
+    ]
+    if fresh:
+        refinement = TranscriptRefinementProcessor(fresh)
+        refined = run_stage(refinement, context).as_dict()
+        failed += int(refined.pop("failed"))
+        extra.update(refined)
+        embeddable = [
+            (track_id, title, refinement.refined.get(track_id, lyrics))
+            for track_id, title, lyrics in embeddable
+        ]
+    if embeddable:
+        songs = [
+            EmbeddingItem(
+                key=str(track_id), label=title, track_id=track_id, text=str(lyrics["text"])
+            )
+            for track_id, title, lyrics in embeddable
+        ]
+        embedded = run_stage(LyricsEmbeddingProcessor(songs), context).as_dict()
+        summary["embedded"] = embedded["embedded"]
+        failed += int(embedded["failed"])
+    summary["failed"] = failed
+    summary.update(extra)
     return summary
+
+
+def _failure(message: str, error: BaseException) -> ProcessingError:
+    return ProcessingError(message, stage=type(error).__name__)

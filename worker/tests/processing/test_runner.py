@@ -185,3 +185,17 @@ def test_persist_can_add_counters():
     summary = run_stage(processor, ProcessingContext()).as_dict()
     # Every stored song counts as doubled; "large" is counted on top of it.
     assert summary == {"total": 2, "doubled": 2, "large": 1, "failed": 0}
+
+
+def test_persist_decides_what_an_item_without_outcome_counts_as():
+    class Deciding(_Doubler):
+        def process(self, context, items):
+            for item in items:
+                yield ItemResult(item=item, outcome=None, output=item.value)
+
+        def persist(self, context, item, output):
+            return ("kept",) if output > 2 else ()
+
+    processor = Deciding(_Config(), [_Song(key="a", value=2), _Song(key="b", value=4)])
+    summary = run_stage(processor, ProcessingContext()).as_dict()
+    assert summary == {"total": 2, "doubled": 0, "kept": 1, "failed": 0}

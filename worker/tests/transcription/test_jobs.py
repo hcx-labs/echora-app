@@ -52,7 +52,7 @@ def test_lyrics_stage_precedes_karaoke_even_for_karaoke_backfill(monkeypatch, li
         def process(self, context, items):
             yield from ()
 
-    stub_module(monkeypatch, "worker.lyrics.pipeline", SimpleNamespace(backfill_lyrics=lyrics))
+    stub_module(monkeypatch, "worker.lyrics.pipeline", SimpleNamespace(lyrics_stage=lyrics))
     stub_module(monkeypatch, "worker.kara.pipeline", SimpleNamespace(KaraokeProcessor=Karaoke))
     analysis_jobs.execute(
         {

@@ -37,10 +37,12 @@ class ItemResult[InputT: Item, OutputT]:
     Exactly one of ``output`` and ``error`` describes the result, except for outcomes that store
     nothing (``output`` and ``error`` both ``None``, as when an existing result is reused).
     ``outcome`` names the summary counter this item increments ("aligned", "reused", ...).
+    ``None`` leaves the count to what ``persist`` returns, for an item whose counter only storing
+    tells (lyrics a concurrent writer superseded count as nothing).
     """
 
     item: InputT
-    outcome: str
+    outcome: str | None
     output: OutputT | None = None
     error: ProcessingError | None = None
 
@@ -59,7 +61,8 @@ class Processor[ConfigT: EchoraConfig | None, InputT: Item, OutputT](ABC):
     2. ``open``: loads models and the like, once, and only when something was planned.
     3. ``process``: yields one ``ItemResult`` per planned item, in any order.
     4. ``persist``: stores each output as soon as it is yielded.
-    5. ``close``: always, after ``open``, also on failure and cancellation.
+    5. ``close``: always once ``open`` has started, also when ``open`` itself failed and on
+       cancellation; release only what was acquired.
 
     A failure that belongs to one item is yielded as ``ItemResult.failed`` and the stage goes on.
     An ``EchoraError`` escaping ``process`` fails every item that has no result yet. Any other
