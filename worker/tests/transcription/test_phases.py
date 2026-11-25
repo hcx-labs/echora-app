@@ -48,7 +48,8 @@ def test_repair_aligns_the_kept_audio_and_respects_the_two_repair_budget(monkeyp
     def compressed(found, start, end):
         return None if found and found[0].get("repaired") else {"words_per_second": 9}
 
-    def run_fa_kara(audio, text, language, separate_vocals):
+    def run_fa_kara(audio, text, language, provided_audio):
+        assert provided_audio  # the repaired span, aligned as given
         aligned_audio.append(sf.read(io.BytesIO(audio))[0][0])
         return {"lines": [], "model": "aligner", "model_revision": "r"}
 

@@ -318,15 +318,6 @@ def vocal_reference_waveform(data: bytes, check=lambda: None):
     return _cache(check).array(data, recipe, produce)
 
 
-def vocal_audio_bytes(data: bytes, check=lambda: None, *, before_separate=None) -> bytes:
-    import soundfile as sf
-
-    waveform = vocal_waveform(data, 16000, check, before_separate=before_separate)
-    buffer = io.BytesIO()
-    sf.write(buffer, waveform, 16000, format="WAV", subtype="FLOAT")
-    return buffer.getvalue()
-
-
 def melody_waveforms(data: bytes, check=lambda: None):
     """Mono 44.1 kHz vocals and mix-minus-vocals, from the same cached stereo input."""
     from worker.media.audio import decode_audio_channels

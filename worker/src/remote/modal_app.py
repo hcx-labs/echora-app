@@ -308,7 +308,7 @@ class Analysis:
         source_lines,
         settings: dict[str, object],
     ):
-        """FA-Kara alignment of one track's lyrics, on the audio FA_KARA_AUDIO_INPUT names."""
+        """FA-Kara alignment of one track's lyrics on its full mix."""
         from worker.kara.pipeline import _run_fa_kara
 
         self._adopt(settings)

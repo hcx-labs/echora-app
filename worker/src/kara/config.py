@@ -78,11 +78,6 @@ class KaraConfig(EchoraConfig, env_prefix="ECHORA_KARA_"):
         description="Weight of the text head's evidence (0: off, head not loaded).",
     )
     in_line_gap_cost: float = compute(0.2, ge=0.0, le=20.0, legacy="FA_KARA_IN_LINE_GAP_COST")
-    audio_input: Literal["mix", "vocals"] = compute(
-        "mix",
-        legacy="FA_KARA_AUDIO_INPUT",
-        description="What the aligner hears: the song as stored, or the separated vocals.",
-    )
     gap_onset_pull: bool = compute(
         False,
         legacy="FA_KARA_GAP_ONSET_PULL",

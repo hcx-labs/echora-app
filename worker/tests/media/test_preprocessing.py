@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import threading
@@ -140,9 +139,7 @@ def test_decode_contracts_cached_only_in_session(monkeypatch, tmp_path):
     assert raw.call_count == 3
 
 
-def test_shared_vocals_for_transcription_and_karaoke(monkeypatch, tmp_path):
-    import soundfile as sf
-
+def test_shared_vocals_for_transcription(monkeypatch, tmp_path):
     import worker.media.audio as audio
     import worker.media.roformer as roformer
 
@@ -157,19 +154,15 @@ def test_shared_vocals_for_transcription_and_karaoke(monkeypatch, tmp_path):
     with p.preprocessing_session():
         p.vocal_waveform(b"song", before_separate=before_separate)
         p.prepare_audio(b"song", vocals=True)
-        transcript = p.vocal_waveform(b"song", 16000)
-        encoded = p.vocal_audio_bytes(b"song", before_separate=before_separate)
+        transcript = p.vocal_waveform(b"song", 16000, before_separate=before_separate)
     before_separate.assert_called_once()
-    actual, rate = sf.read(io.BytesIO(encoded), dtype="float32")
-    assert rate == 16000
-    np.testing.assert_array_equal(transcript, actual)
     assert separate.call_count == 1
     with p.preprocessing_session():
-        p.vocal_audio_bytes(b"song")
+        np.testing.assert_array_equal(p.vocal_waveform(b"song", 16000), transcript)
     assert separate.call_count == 1
     monkeypatch.setattr(roformer, "SEPARATION_REVISION", "new-settings")
     with p.preprocessing_session():
-        p.vocal_audio_bytes(b"song")
+        p.vocal_waveform(b"song", 16000)
     assert separate.call_count == 2
 
 
@@ -226,7 +219,7 @@ def test_melody_reuses_shared_vocals_and_caches_residual(monkeypatch, tmp_path):
     with p.preprocessing_session():
         p.prepare_audio(b"song", melody=True)
         vocals, accompaniment = p.melody_waveforms(b"song")
-        p.vocal_audio_bytes(b"song")  # Karaoke/transcription reuse the same separation.
+        p.vocal_waveform(b"song", 16000)  # Transcription reuses the same separation.
     with p.preprocessing_session():
         again, residual = p.melody_waveforms(b"song")
     assert separate.call_count == decode.call_count == 1

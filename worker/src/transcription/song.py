@@ -336,7 +336,7 @@ class SongTranscriber:
                     buffer.getvalue(),
                     "\n".join(s["text"] for s in segments),
                     None,
-                    separate_vocals=False,
+                    provided_audio=True,
                 )
                 corrected = apply_aligned_times(segments, aligned["lines"], start, end)
                 if compressed_timing(corrected, start, end) is not None:

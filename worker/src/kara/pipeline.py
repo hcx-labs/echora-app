@@ -25,10 +25,8 @@ import uuid
 import psycopg
 from psycopg.types.json import Jsonb
 
-from worker.media.preprocessing import get_check, prepare_audio, vocal_audio_bytes
+from worker.media.preprocessing import get_check
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
-from worker.media.roformer import separation_phase
-from worker.media.roformer import SEPARATION_REVISION
 from core.integrations.navidrome import NavidromeClient
 from core.lyrics.backing import BACKING_VOICE, tag_bracketed_backing
 from worker.kara.furigana import ruby_segments
@@ -81,14 +79,8 @@ def current_model_revision() -> str:
     return f"local-{_checkpoint_digest(str(weights), stat.st_size, stat.st_mtime_ns)}"
 
 
-def _separates_vocals() -> bool:
-    return KaraConfig.load().audio_input == "vocals"
-
-
 def _stored_model_revision(model_revision: str) -> str:
-    # The audio input is part of the identity, so switching it makes stored alignments stale.
-    if _separates_vocals():
-        return f"{FA_KARA_REVISION}:{model_revision}:roformer:{SEPARATION_REVISION}"
+    # ":mix" names the audio the aligner hears (the full mix); stored alignments carry it.
     return f"{FA_KARA_REVISION}:{model_revision}:mix"
 
 
@@ -500,8 +492,9 @@ def _run_fa_kara(
     lyrics_text: str,
     language: str | None,
     source_lines: list[dict[str, object]] | None = None,
-    separate_vocals: bool | None = None,
+    provided_audio: bool = False,
 ) -> dict[str, object]:
+    """Align lyrics to the song's full mix, or (``provided_audio``) to audio the caller cut."""
     model_id = KaraConfig.load().model_id
     model_revision = current_model_revision()
     snapshot = (
@@ -520,19 +513,7 @@ def _run_fa_kara(
     with tempfile.TemporaryDirectory(prefix="echora-fa-kara-") as directory:
         work = Path(directory)
         audio_path = work / "i.audio"
-        # None follows FA_KARA_AUDIO_INPUT; a caller that brings its own audio passes False.
-        original_mix = separate_vocals is None and not _separates_vocals()
-        separate_vocals = _separates_vocals() if separate_vocals is None else separate_vocals
-        if separate_vocals:
-            # Keep the aligner resident on cache hits. If eviction caused a miss,
-            # release it under the cache's producer lock before separator loading.
-            prepared = vocal_audio_bytes(
-                audio, check=get_check(), before_separate=_stop_fa_kara_worker
-            )
-            audio_path.write_bytes(prepared)
-        else:
-            # The song as stored, or timing repair's own audio, which must not be separated again.
-            audio_path.write_bytes(audio)
+        audio_path.write_bytes(audio)
         line_texts = _source_line_texts(source_lines or [])
         input_text = "\n".join(line_texts) if line_texts else lyrics_text.rstrip("\r\n")
         config = KaraConfig.load()
@@ -576,15 +557,9 @@ def _run_fa_kara(
             raise RuntimeError(f"FA-Kara failed: {detail[-4000:]}")
         alignment_document = _validate_alignment_document(response["document"])
         diagnostics = alignment_document.setdefault("diagnostics", {})
-        diagnostics["audio_source"] = (
-            "roformer_vocals"
-            if separate_vocals
-            else "original_mix"
-            if original_mix
-            else "provided_audio"
-        )
-        diagnostics["separator"] = "roformer" if separate_vocals else None
-        diagnostics["separator_revision"] = SEPARATION_REVISION if separate_vocals else None
+        diagnostics["audio_source"] = "provided_audio" if provided_audio else "original_mix"
+        diagnostics["separator"] = None
+        diagnostics["separator_revision"] = None
         lines = build_lines_from_alignment_document(alignment_document)
         # Keep the model's token-derived line boundaries. The former display
         # padding expanded every line into nearby silence, which moved otherwise
@@ -770,63 +745,34 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
             yield ItemResult(item=item, outcome="aligned", output=result)
 
     def _prepare(self, context, items):
-        """Fetch (and, for vocals input, separate) every song before the aligner loads.
+        """Fetch every song (into the batch's source cache, or up to Modal) before the aligner loads.
 
         Returns the prepared songs' keys (with their Modal upload digest) and the failed songs.
         """
         prepared: dict[str, str | None] = {}
         failed = []
-        separate = _separates_vocals()
-        # One Roformer for every selected song, before the aligner loads. On the original mix
-        # this only fetches each song into the batch's source cache.
-        with separation_phase():
-            for index, item in enumerate(items):
-                update = {
-                    "phase": "preprocess",
-                    "message": f"Preparing karaoke audio for {item.label}",
-                    "total": len(items),
-                    "unit": "tracks",
-                }
-                context.publish({**update, "completed": index})
-                context.check()
-                try:
-                    source = self.client.audio_bytes(item.external_id)
-                    digest = None
-                    if context.remote is not None:
-                        # Vocals are separated on Modal; only the source audio goes up.
-                        digest = context.remote.upload_audio(source)
-                    elif separate:
-                        prepare_audio(source, vocals=True, check=context.check)
-                    prepared[item.key] = digest
-                    del source
-                except Exception as error:  # noqa: BLE001 - one song's audio
-                    logger.error(
-                        "Karaoke preprocessing failed for %s: %s", item.key, type(error).__name__
-                    )
-                    failed.append(item)
-                context.publish({**update, "completed": index + 1})
-        if context.remote is not None and separate and prepared:
-            # Like local preparation: separate the vocals of exactly the songs selected for
-            # alignment first, so the aligner then stays loaded on Modal instead of being
-            # stopped and reloaded around each song's separation.
-            separating = [item for item in items if item.key in prepared]
-            outcomes = context.remote.prepare_vocals(
-                [prepared[item.key] for item in separating], vocals=True
-            )
-            for index, (item, outcome) in enumerate(zip(separating, outcomes)):
-                if isinstance(outcome, BaseException):
-                    logger.error("Vocal separation on Modal failed for %s", item.key)
-                    del prepared[item.key]
-                    failed.append(item)
-                context.publish(
-                    {
-                        "phase": "preprocess",
-                        "message": f"Separating vocals for {item.label}",
-                        "completed": index + 1,
-                        "total": len(separating),
-                        "unit": "tracks",
-                    }
+        for index, item in enumerate(items):
+            update = {
+                "phase": "preprocess",
+                "message": f"Preparing karaoke audio for {item.label}",
+                "total": len(items),
+                "unit": "tracks",
+            }
+            context.publish({**update, "completed": index})
+            context.check()
+            try:
+                source = self.client.audio_bytes(item.external_id)
+                digest = None
+                if context.remote is not None:
+                    digest = context.remote.upload_audio(source)
+                prepared[item.key] = digest
+                del source
+            except Exception as error:  # noqa: BLE001 - one song's audio
+                logger.error(
+                    "Karaoke preprocessing failed for %s: %s", item.key, type(error).__name__
                 )
+                failed.append(item)
+            context.publish({**update, "completed": index + 1})
         return prepared, failed
 
     def persist(self, context, item: KaraokeItem, output: dict[str, object]) -> None:
