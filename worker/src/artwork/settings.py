@@ -8,6 +8,7 @@ from model storage.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
@@ -204,10 +205,8 @@ def clear_loops() -> dict[str, int]:
         except (OSError, ValueError):
             pass
     for directory in sorted(Path(MotionArtworkConfig.load().dir).glob("*/"), reverse=True):
-        try:
+        with contextlib.suppress(OSError):
             directory.rmdir()  # Only removes directories that are now empty.
-        except OSError:
-            pass
     return {"deleted": len(paths), "files_removed": removed}
 
 

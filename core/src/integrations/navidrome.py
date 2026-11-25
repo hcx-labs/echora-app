@@ -212,7 +212,7 @@ class NavidromeClient:
                     "source": "getLyricsBySongId",
                     "structured_lyrics": entries,
                 }
-        except Exception:
+        except Exception:  # noqa: BLE001 - structured lyrics are optional; fall back to getLyrics
             pass
         try:
             payload = self._request("getLyrics", songId=song_id)
@@ -226,7 +226,7 @@ class NavidromeClient:
                 "lines": [],
                 "source": "getLyrics",
             }
-        except Exception:
+        except Exception:  # noqa: BLE001 - any failure means no lyrics from Navidrome
             return {
                 "status": "unavailable",
                 "text": None,
@@ -329,7 +329,7 @@ class NavidromeClient:
                 message = payload.get("error", {}).get(
                     "message", "Navidrome returned JSON instead of audio"
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 - an unreadable error body
                 message = "Navidrome returned JSON instead of audio"
             response.close()
             raise RuntimeError(str(message))
@@ -378,7 +378,7 @@ class NavidromeClient:
                 message = payload.get("error", {}).get(
                     "message", "Navidrome returned JSON instead of audio"
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 - an unreadable error body
                 message = "Navidrome returned JSON instead of audio"
             raise RuntimeError(str(message))
         return response.content, content_type
@@ -409,7 +409,7 @@ class NavidromeClient:
                 message = payload.get("error", {}).get(
                     "message", "Navidrome returned JSON instead of audio"
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 - an unreadable error body
                 message = "Navidrome returned JSON instead of audio"
             raise RuntimeError(str(message))
         audio = response.content

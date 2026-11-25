@@ -453,15 +453,16 @@ class LyricsProcessor(Processor[None, LyricsItem, LyricsResult]):
                             (item.track_id,),
                         )
                         activity_row = cursor.fetchone()
-                    arguments = dict(
-                        language=str(candidate.missing.get("transcription_language") or "") or None,
-                        check=lambda: context.publish({"phase": "transcription"}),
-                        progress=lambda detail, title=title: context.publish(
+                    arguments = {
+                        "language": str(candidate.missing.get("transcription_language") or "")
+                        or None,
+                        "check": lambda: context.publish({"phase": "transcription"}),
+                        "progress": lambda detail, title=title: context.publish(
                             {"phase": "transcription", "message": f"{title}: {detail}"}
                         ),
-                        diagnostic_sink=diagnostic_writer(item.track_id),
-                        vocal_activity=activity_row[0] if activity_row else None,
-                    )
+                        "diagnostic_sink": diagnostic_writer(item.track_id),
+                        "vocal_activity": activity_row[0] if activity_row else None,
+                    }
                     audio = client.audio_bytes(item.external_id)
                     if remote is None:
                         draft = transcriber.generate(audio, **arguments)

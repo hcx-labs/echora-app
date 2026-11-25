@@ -1,6 +1,9 @@
+from unittest.mock import Mock
+
 import pytest
 
 from core.config import reset_config_cache
+from worker.models.download import _pin_main_ref
 
 
 @pytest.fixture(autouse=True)
@@ -8,11 +11,6 @@ def _reset_settings_cache():
     reset_config_cache()
     yield
     reset_config_cache()
-
-
-from unittest.mock import Mock
-
-from worker.models.download import _pin_main_ref
 
 
 def test_pin_main_ref_points_to_snapshot_commit(tmp_path) -> None:

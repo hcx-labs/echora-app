@@ -7,6 +7,7 @@ import os
 import platform
 import threading
 import uuid
+from pathlib import Path
 
 import essentia.standard as es
 import numpy as np
@@ -44,18 +45,17 @@ _model_lock = threading.Lock()
 
 
 def _model_directory() -> str:
-    directory = ModelsConfig.load().essentia_dir
-    return directory
+    return ModelsConfig.load().essentia_dir
 
 
 def _require_model_file(filename: str) -> str:
-    path = os.path.join(_model_directory(), filename)
-    if not os.path.exists(path):
+    path = Path(_model_directory()) / filename
+    if not path.exists():
         raise FileNotFoundError(
             f"Essentia model {filename} is missing from {ModelsConfig.load().essentia_dir}; "
             "run `python -m worker.models.download` on a machine with network access"
         )
-    return path
+    return str(path)
 
 
 def _aggregate_outputs(gender: np.ndarray, voice: np.ndarray) -> dict[str, float]:

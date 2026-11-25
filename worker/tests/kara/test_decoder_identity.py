@@ -26,7 +26,7 @@ class DecoderIdentityTests(unittest.TestCase):
                     torch.manual_seed(seed)
                     emission = torch.randn(12, 3).log_softmax(-1)
                     copied = torch.cat((emission[:, letters], emission[:, :1]), 1)
-                    kwargs = dict(minimum_frames=[1] * len(letters), blank_free_tokens=blank_free)
+                    kwargs = {"minimum_frames": [1] * len(letters), "blank_free_tokens": blank_free}
                     normal = ctc.align_with_minimum_durations(emission, groups, blank=0, **kwargs)
                     unique = ctc.align_with_minimum_durations(
                         copied, pseudo, blank=len(letters), acoustic_token_groups=groups, **kwargs
@@ -101,10 +101,10 @@ class DecoderIdentityTests(unittest.TestCase):
             calls = []
 
             def decode(*args, **kwargs):
-                calls.append(kwargs)
+                calls.append(kwargs)  # noqa: B023 - called within this iteration
                 return ctc.align_with_minimum_durations(*args, **kwargs)
 
-            overrides = dict(align_with_minimum_durations=decode)
+            overrides = {"align_with_minimum_durations": decode}
             if option == "text":
                 overrides.update(text_share=torch.zeros(2, 1), text_bonus=1.0)
             if option == "edge":

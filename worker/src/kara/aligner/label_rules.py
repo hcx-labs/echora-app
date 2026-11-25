@@ -69,6 +69,7 @@ import logging
 import os
 import re
 import unicodedata
+from pathlib import Path
 
 VERSION = "label_rules_v2"
 VERSION_V3 = "label_rules_v3_r2"  # forwarding, apostrophe eligibility, contiguous foreign runs
@@ -767,9 +768,7 @@ def word_pronunciation(word: str, language: str) -> tuple[tuple[tuple[str, bool]
     lowered = word.lower().translate(str.maketrans("’ʼ", "''"))
     vocable = vocable_label(word)
     if vocable:
-        return tuple(
-            (vocable, True),
-        ), "lexicon"
+        return (vocable, True), "lexicon"
     if language == "fr":
         match = _CLITIC.match(lowered)
         if match and len(lowered) > match.end():
@@ -1884,9 +1883,9 @@ def lid_model_path() -> str:
     import os
 
     found = os.environ.get("FA_KARA_LID_MODEL") or next(
-        (p for p in LID_CANDIDATES if os.path.exists(p)), None
+        (p for p in LID_CANDIDATES if Path(p).exists()), None
     )
-    if not found or not os.path.exists(found):
+    if not found or not Path(found).exists():
         raise RuntimeError(
             "label rules v3 need fastText lid.176.ftz: set FA_KARA_LID_MODEL "
             f"(sha256 {LID_SHA256}) or install it at {LID_CANDIDATES[0]}"
@@ -1900,7 +1899,7 @@ def _lid_model():
     import os
 
     path = lid_model_path()
-    with open(path, "rb") as source:
+    with Path(path).open("rb") as source:
         digest = hashlib.file_digest(source, "sha256").hexdigest()
     if digest != LID_SHA256 and os.environ.get("FA_KARA_LID_ANY_MODEL") != "1":
         raise RuntimeError(
@@ -2023,11 +2022,17 @@ def line_language(line: str, language: str) -> str:
             ):
                 return top
         return "auto"
-    if top == "en" and confidence >= 0.8 and len(known) >= 2 and share >= 0.75:
-        if language in PRONUNCIATION_LANGUAGES or all(
-            "LATIN" in unicodedata.name(c, "") for c in line if c.isalpha()
-        ):
-            return "en"
+    if (
+        top == "en"
+        and confidence >= 0.8
+        and len(known) >= 2
+        and share >= 0.75
+        and (
+            language in PRONUNCIATION_LANGUAGES
+            or all("LATIN" in unicodedata.name(c, "") for c in line if c.isalpha())
+        )
+    ):
+        return "en"
     return language
 
 
@@ -2080,7 +2085,7 @@ def latin_run_languages(runs, language: str, rules: LabelRules) -> dict[int, str
 
     group, status = [], None
     previous = None
-    for i, text, w in words:
+    for i, _text, w in words:
         # Whitespace and punctuation are transparent; lexical, numeric and symbol runs are
         # barriers. Never join two foreign words across an intervening non-Latin word/number.
         if previous is not None and any(

@@ -18,14 +18,13 @@ def setup(db):
             UNIQUE(library_id,source_type,external_id));
         CREATE TABLE user_track_links(user_id uuid,library_id uuid,track_id uuid,external_id text,
             UNIQUE(user_id,library_id,track_id),UNIQUE(user_id,library_id,external_id));""")
-    migration = runpy.run_path(
+    return runpy.run_path(
         str(
             Path(__file__).resolve().parents[2]
             / "src/db"
             / "migrations/versions/0047_source_membership.py"
         )
     )
-    return migration
 
 
 def test_migration_backfills_only_proven_links(database):

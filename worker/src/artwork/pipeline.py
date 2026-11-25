@@ -15,7 +15,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -111,7 +111,7 @@ def comfyui_phase(
                 # A shared ComfyUI keeps running; ask it to release the GPU for analysis.
                 try:
                     client.free()
-                except Exception:
+                except Exception:  # noqa: BLE001 - freeing memory is best-effort
                     logger.warning("Could not ask ComfyUI to free its memory")
         return
     deployment = ComfyUIConfig.load()
@@ -533,7 +533,7 @@ def prepare_prompts(
                 if cover_id not in cover_cache:
                     cover_cache[cover_id] = navidrome.cover_art(cover_id, COVER_FETCH_SIZE)
                 data, content_type = cover_cache[cover_id]
-            except Exception:
+            except Exception:  # noqa: BLE001 - a song without a readable cover is skipped
                 continue
             cover_sha = hashlib.sha256(data).hexdigest()
             row = known.get(song.id)
@@ -545,7 +545,7 @@ def prepare_prompts(
             if not lyrics:
                 try:
                     lyrics = navidrome.lyrics(song.id).get("text")
-                except Exception:
+                except Exception:  # noqa: BLE001 - lyrics only refine the prompt
                     lyrics = None
             covers.append(
                 {
@@ -603,10 +603,8 @@ def _store(cover: dict, recipe: Recipe, event: dict) -> None:
         )
         superseded = [row["path"] for row in cursor.fetchall() if row["path"]]
     for old in superseded:
-        try:
+        with suppress(OSError, ValueError):
             artwork_path(old).unlink(missing_ok=True)
-        except (OSError, ValueError):
-            pass
 
 
 def _label(cover: dict) -> str:

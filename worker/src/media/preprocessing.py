@@ -76,7 +76,9 @@ class AudioArtifactCache:
                             yield False
                             return
                         if time.monotonic() >= deadline:
-                            raise TimeoutError("Timed out waiting for an audio prerequisite")
+                            raise TimeoutError(
+                                "Timed out waiting for an audio prerequisite"
+                            ) from None
                         threading.Event().wait(PreprocessConfig.load().lock_poll_seconds)
                 yield True
             finally:
@@ -140,7 +142,7 @@ class AudioArtifactCache:
                             stream.flush()
                             os.fsync(stream.fileno())
                         self.check()
-                        os.replace(paths[-1], self.directory / f"{key}.{suffix}")
+                        paths[-1].replace(self.directory / f"{key}.{suffix}")
                 finally:
                     for path in paths:
                         path.unlink(missing_ok=True)

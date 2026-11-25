@@ -66,7 +66,7 @@ def token_or_none() -> str | None:
     """The stored token for a download, or None when there is none or it cannot be read."""
     try:
         return stored()[0]
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - an unreadable token means none
         logger.warning("Could not read the stored Hugging Face token: %s", type(error).__name__)
         return None
 

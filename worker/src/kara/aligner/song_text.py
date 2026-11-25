@@ -77,7 +77,7 @@ def lyric_tokens(token_letters, voices, lines, version=LEGACY_VERSION):
     if version not in (LEGACY_VERSION, CURRENT_VERSION):
         raise ValueError(f"Unsupported song_text_version: {version}")
     tokens = [
-        (dict(ids=ids, line=line, start=i, end=i + 1), voice)
+        ({"ids": ids, "line": line, "start": i, "end": i + 1}, voice)
         for i, (ids, voice, line) in enumerate(zip(token_letters, voices, lines))
     ]
     if any(voice not in (0, 1) for _, voice in tokens):

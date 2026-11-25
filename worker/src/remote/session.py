@@ -449,7 +449,7 @@ class ModalSession:
                         local.write(chunk)
                 try:
                     self._volume.remove_file(transfer)
-                except Exception:
+                except Exception:  # noqa: BLE001 - cleanup is best-effort
                     logger.warning("Could not remove a transferred loop from Modal")
                 event["file"] = local.name
             yield event
@@ -459,6 +459,6 @@ class ModalSession:
         for digest in self._uploaded:
             try:
                 self._volume.remove_file(f"/{digest}")
-            except Exception:
+            except Exception:  # noqa: BLE001 - cleanup is best-effort
                 logger.warning("Could not remove uploaded audio %s from Modal", digest[:12])
         self._uploaded.clear()

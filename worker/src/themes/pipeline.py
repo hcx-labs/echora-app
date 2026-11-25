@@ -244,7 +244,7 @@ class _Embedder:
         for text in texts:
             try:
                 outcomes.append(self.model.embed(text))
-            except Exception as error:  # one bad text must not fail the chunk
+            except Exception as error:  # noqa: BLE001 - one bad text must not fail the chunk
                 outcomes.append(error)
         return outcomes
 

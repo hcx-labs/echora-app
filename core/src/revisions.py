@@ -33,6 +33,13 @@ AUDIO_PROFILE_REVISION = "1"
 SUPPORTED_PROFILE_MODELS = ("muq_mulan", "mert")
 
 # Karaoke alignment (worker.kara).
+# v5: the Echora Kara model on the exact frame clock, with blank-free syllables, backing lines on
+# their own head, the in-line gap cost and the text head's bonus (v4: audio-only alignment with
+# minimum syllable durations and a +45 ms calibration).
+# v8: fast lead lines are no longer re-placed as backing lines (they overlapped their neighbours),
+# and backing lines before the first lead line are placed on the lead path.
+# v9: Echora Kara 700M MuQ (MuQ fusion that the model really uses), every line decides its own
+# language, and vocal loudness is read at each frame's true time.
 KARAOKE_PIPELINE_REVISION = "v9-echora-kara-mix"
 
 # Lyric theme descriptions (worker.themes): the first 16 hex digits of the SHA-256 of the system

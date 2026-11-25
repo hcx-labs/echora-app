@@ -169,7 +169,7 @@ def configure_representations(connection) -> None:
 
 
 def voice_config() -> dict[str, object]:
-    config = {
+    return {
         "model": "mtg-jamendo-voice-gender-v2",
         "embedding": "discogs-effnet-bsdynamic-1",
         "labels": ["instrumental", "female", "male"],
@@ -181,4 +181,3 @@ def voice_config() -> dict[str, object]:
             "voice_instrumental-discogs-effnet-1.onnx": "20155e4c439714b0c45c08644b73c8e12d9dccb173bd4ab9934bf1e5aee837ca",
         },
     }
-    return config

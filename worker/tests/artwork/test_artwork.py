@@ -743,9 +743,11 @@ def test_launch_starts_comfyui_on_demand_and_stops_it(tmp_path):
     assert f"base_path: {work / 'output'}" in (work / "batch_model_paths.yaml").read_text()
     assert "embeddings: conditioning" in (work / "batch_model_paths.yaml").read_text()
     (tmp_path / "mode").write_text("--fail")
-    with pytest.raises(ComfyUIUnavailable, match="exited during startup"):
-        with launch(str(tmp_path), sys.executable, startup_timeout_seconds=30, check=lambda: None):
-            pass
+    with (
+        pytest.raises(ComfyUIUnavailable, match="exited during startup"),
+        launch(str(tmp_path), sys.executable, startup_timeout_seconds=30, check=lambda: None),
+    ):
+        pass
     with (
         pytest.raises(ComfyUIUnavailable, match="not installed"),
         launch(

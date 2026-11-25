@@ -31,8 +31,9 @@ Licences: the ``muq`` package (code) is MIT; the MuQ-large-msd-iter weights are 
 
 from __future__ import annotations
 
+import contextlib
 import math
-import os
+from pathlib import Path
 
 import torch
 
@@ -331,7 +332,7 @@ class MuQBranch:
             if lengths_16k is not None
             else [waveform_16k.shape[1]] * waveform_16k.shape[0]
         )
-        self.wanted = set(int(layer) for layer in layers)
+        self.wanted = {int(layer) for layer in layers}
         # Gradients flow only through an attached LoRA in training mode; the base stays frozen.
         grad = self.lora is not None and self.lora.training and torch.is_grad_enabled()
         with torch.set_grad_enabled(grad):
@@ -386,10 +387,8 @@ class MuQBranch:
         ):
             x = model.preprocessing(wave, features=["melspec_2048"])
             x = model.normalize(x)
-            try:
+            with contextlib.suppress(_Captured):
                 model.conformer(model.conv(x["melspec_2048"]))
-            except _Captured:
-                pass
         out = {layer: self.captured[layer].float() for layer in self.wanted}
         self.captured = {}
         return out
@@ -399,16 +398,16 @@ def fusion_state_from_checkpoint(
     model_dir: str, prefix: str = FUSION_PREFIX
 ) -> dict[str, torch.Tensor]:
     """``fusion.*`` (or ``prefix``) tensors of a checkpoint directory (safetensors or pytorch_model.bin)."""
-    safetensors_path = os.path.join(model_dir, "model.safetensors")
+    safetensors_path = str(Path(model_dir) / "model.safetensors")
     state: dict[str, torch.Tensor] = {}
-    if os.path.isfile(safetensors_path):
+    if Path(safetensors_path).is_file():
         from safetensors import safe_open
 
         with safe_open(safetensors_path, framework="pt", device="cpu") as handle:
-            state = {k: handle.get_tensor(k) for k in handle.keys() if k.startswith(prefix)}
+            state = {k: handle.get_tensor(k) for k in handle.keys() if k.startswith(prefix)}  # noqa: SIM118 - a safetensors handle is not iterable
     else:
-        bin_path = os.path.join(model_dir, "pytorch_model.bin")
-        if os.path.isfile(bin_path):
+        bin_path = Path(model_dir) / "pytorch_model.bin"
+        if bin_path.is_file():
             full = torch.load(bin_path, map_location="cpu")
             state = {k: v for k, v in full.items() if k.startswith(prefix)}
     return state

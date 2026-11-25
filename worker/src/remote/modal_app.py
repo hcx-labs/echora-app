@@ -262,7 +262,7 @@ class Analysis:
                     diagnostic_sink=lambda attempt: events.put({"diagnostic": attempt}),
                     vocal_activity=vocal_activity,
                 )
-            except BaseException as error:  # Re-raised in the caller's stream.
+            except BaseException as error:  # noqa: BLE001 - re-raised in the caller's stream
                 outcome["error"] = error
             finally:
                 events.put(None)

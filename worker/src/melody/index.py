@@ -1,3 +1,4 @@
+# ruff: noqa: E402 - NUMBA_CACHE_DIR must be set before librosa is imported.
 from __future__ import annotations
 
 import hashlib
@@ -16,7 +17,7 @@ from worker.melody.config import MelodyConfig
 # The service package is read-only for its unprivileged runtime user. Numba must
 # compile librosa's pitch helpers into a writable cache directory.
 os.environ.setdefault("NUMBA_CACHE_DIR", "/models/torch/numba")
-os.makedirs(os.environ["NUMBA_CACHE_DIR"], exist_ok=True)
+Path(os.environ["NUMBA_CACHE_DIR"]).mkdir(parents=True, exist_ok=True)
 
 import librosa
 import numpy as np
@@ -628,7 +629,7 @@ def build_corpus(
                     connection.commit()
                     completed += 1
                     contours_stored += len(usable)
-                except Exception:
+                except Exception:  # noqa: BLE001 - one song's contours
                     connection.rollback()
                     failed += 1
         with connection.cursor() as cursor:

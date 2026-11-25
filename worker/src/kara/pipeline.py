@@ -23,6 +23,7 @@ from core.db.config import DatabaseConfig
 from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient
 from core.lyrics.backing import BACKING_VOICE, tag_bracketed_backing
+from core.revisions import KARAOKE_PIPELINE_REVISION
 from worker.kara.aligner import label_rules
 from worker.kara.aligner.request import AlignRequest
 from worker.kara.config import KaraConfig
@@ -34,14 +35,6 @@ from worker.processing import Item, ItemResult, ProcessingContext, Processor
 logger = logging.getLogger(__name__)
 
 FA_KARA_REVISION = "168ca5f01cecaa1290e31c0ce8dc44af8c7451bb"
-# v5: the Echora Kara model on the exact frame clock, with blank-free syllables, backing lines on
-# their own head, the in-line gap cost and the text head's bonus (v4: audio-only alignment with
-# minimum syllable durations and a +45 ms calibration).
-# v8: fast lead lines are no longer re-placed as backing lines (they overlapped their neighbours),
-# and backing lines before the first lead line are placed on the lead path.
-# v9: Echora Kara 700M MuQ (MuQ fusion that the model really uses), every line decides its own
-# language, and vocal loudness is read at each frame's true time.
-from core.revisions import KARAOKE_PIPELINE_REVISION
 
 DEFAULT_MODEL_ID = "hcxlabs/echora-kara-700m-muq"
 DEFAULT_MODEL_REVISION = "7c0cda150c8be886ed5ff2f903460f112cf4c7a2"
@@ -54,7 +47,7 @@ _FA_KARA_WORKER_KEY: tuple[str, ...] | None = None
 def _checkpoint_digest(weights: str, size: int, modified_ns: int) -> str:
     """Content digest of a local checkpoint's weights; cached per file version."""
     digest = hashlib.sha256()
-    with open(weights, "rb") as stream:
+    with Path(weights).open("rb") as stream:
         for block in iter(lambda: stream.read(1 << 20), b""):
             digest.update(block)
     return digest.hexdigest()[:16]

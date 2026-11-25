@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import re
 import urllib.request
 from collections import defaultdict
+from pathlib import Path
 
 from core.lyrics.config import LanguageConfig
 
@@ -116,8 +116,8 @@ def _load_ftr():
     except ImportError:
         _INDICLID_FTR = False
         return None
-    if not os.path.exists(INDICLID_FTR_PATH):
-        os.makedirs(os.path.dirname(INDICLID_FTR_PATH) or ".", exist_ok=True)
+    if not Path(INDICLID_FTR_PATH).exists():
+        Path(INDICLID_FTR_PATH).parent.mkdir(parents=True, exist_ok=True)
         try:
             import io
             import zipfile
@@ -129,14 +129,14 @@ def _load_ftr():
             inner = next(
                 name for name in archive.namelist() if name.endswith("model_baseline_roman.bin")
             )
-            with open(INDICLID_FTR_PATH, "wb") as handle:
+            with Path(INDICLID_FTR_PATH).open("wb") as handle:
                 handle.write(archive.read(inner))
-        except Exception:
+        except Exception:  # noqa: BLE001 - the IndicLID model is optional
             _INDICLID_FTR = False
             return None
     try:
         model = fasttext.load_model(INDICLID_FTR_PATH)
-    except Exception:
+    except Exception:  # noqa: BLE001 - the IndicLID model is optional
         _INDICLID_FTR = False
         return None
     _INDICLID_FTR = model
@@ -157,29 +157,28 @@ def _load_fasttext():
         import fasttext
     except ImportError:
         return None
-    if not os.path.exists(MODEL_PATH):
-        os.makedirs(os.path.dirname(MODEL_PATH) or ".", exist_ok=True)
+    if not Path(MODEL_PATH).exists():
+        Path(MODEL_PATH).parent.mkdir(parents=True, exist_ok=True)
         # Download beside the target, check it and rename: an interrupted or altered download is
         # never loaded.
         partial = f"{MODEL_PATH}.part"
         try:
             urllib.request.urlretrieve(MODEL_URL, partial)
-            with open(partial, "rb") as source:
+            with Path(partial).open("rb") as source:
                 digest = hashlib.file_digest(source, "sha256").hexdigest()
             if digest != MODEL_SHA256:
-                os.remove(partial)
+                Path(partial).unlink()
                 raise RuntimeError(f"lid.176.bin sha256 is {digest}")
-            os.replace(partial, MODEL_PATH)
-        except Exception as error:
+            Path(partial).replace(MODEL_PATH)
+        except Exception as error:  # noqa: BLE001 - without the model lyrics store no language
             # Lyrics are then stored without a language; say so rather than fail silently.
             logger.warning("language model %s unavailable: %s", MODEL_PATH, error)
             return None
     try:
         model = fasttext.load_model(MODEL_PATH)
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - without the model lyrics store no language
         logger.warning("language model %s could not be loaded: %s", MODEL_PATH, error)
         return None
-    model.get_labels  # touch to fail early on corrupt files
     _FASTTEXT_MODEL = model
     return model
 
@@ -258,10 +257,10 @@ def detect_distribution(text: str | None) -> dict[str, object]:
                 # fasttext-wheel 0.9.2's predict() is broken under NumPy 2
                 # (np.array(..., copy=False)), so use the raw pybind API.
                 pairs = model.f.predict(line.lower(), 1, 0.0, "strict")
-            except Exception:
+            except Exception:  # noqa: BLE001 - fall back to fasttext's Python API
                 try:
                     labels, probabilities = model.predict(line.lower(), k=1)
-                except Exception:
+                except Exception:  # noqa: BLE001 - an unpredictable line has no language
                     labels, probabilities = [], []
                 pairs = [(probabilities[index], labels[index]) for index in range(len(labels))]
             if pairs:
@@ -276,7 +275,7 @@ def detect_distribution(text: str | None) -> dict[str, object]:
             # Romanized Indic languages: the specialist model wins when sure.
             try:
                 pairs = ftr.f.predict(line.lower(), 1, 0.0, "strict")
-            except Exception:
+            except Exception:  # noqa: BLE001 - the specialist model is advisory
                 pairs = []
             if pairs and pairs[0][0] >= INDICLID_FTR_THRESHOLD:
                 code = pairs[0][1].replace("__label__", "")
@@ -307,7 +306,7 @@ def detect_distribution(text: str | None) -> dict[str, object]:
     if ftr is not None:
         try:
             pairs = ftr.f.predict(" ".join(lines).lower(), 1, 0.0, "strict")
-        except Exception:
+        except Exception:  # noqa: BLE001 - the specialist model is advisory
             pairs = []
         if pairs and pairs[0][0] >= INDICLID_FTR_THRESHOLD:
             mapped = INDIC_LABELS.get(str(pairs[0][1]).replace("__label__", "")[:3])

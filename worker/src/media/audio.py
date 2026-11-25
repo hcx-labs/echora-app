@@ -60,8 +60,7 @@ def _decode_audio(data: bytes, sample_rate: int) -> np.ndarray:
             "pipe:1",
         ],
         input=data,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
     if process.returncode != 0:
@@ -102,8 +101,7 @@ def _decode_audio_channels(data: bytes, sample_rate: int, channels: int) -> np.n
             "pipe:1",
         ],
         input=data,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
     if process.returncode != 0:

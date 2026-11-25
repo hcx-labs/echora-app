@@ -1,7 +1,7 @@
 import logging
 import math
-import os
 from collections.abc import Callable
+from pathlib import Path
 
 import torch
 import torchaudio
@@ -465,7 +465,7 @@ def _load_aux_heads(model: str, in_features: int) -> torch.nn.ModuleDict | None:
     from safetensors import safe_open
 
     with safe_open(path, framework="pt", device="cpu") as handle:
-        state = {k: handle.get_tensor(k) for k in handle.keys()}
+        state = {k: handle.get_tensor(k) for k in handle.keys()}  # noqa: SIM118 - a safetensors handle is not iterable
     expected = {"vad.weight", "vad.bias", "f0.weight", "f0.bias"}
     if set(state) != expected or state["vad.weight"].shape != (1, in_features):
         raise RuntimeError(f"unexpected auxiliary head layout in {path}: {sorted(state)}")
@@ -499,11 +499,11 @@ def _load_text_aligner(model_dir: str, record: dict):
 
     head = TextAligner(TextAlignerConfig(**record))
     with safe_open(
-        os.path.join(model_dir, "model.safetensors"), framework="pt", device="cpu"
+        str(Path(model_dir) / "model.safetensors"), framework="pt", device="cpu"
     ) as handle:
         state = {
             k.removeprefix("text_aligner."): handle.get_tensor(k)
-            for k in handle.keys()
+            for k in handle.keys()  # noqa: SIM118 - a safetensors handle is not iterable
             if k.startswith("text_aligner.")
         }
     head.load_state_dict(state)
@@ -516,19 +516,17 @@ def _load_edge_head(
     """The S1 edge head (``edge_head.weight`` / ``edge_head.bias``) from a checkpoint directory;
     ``prefix``/``outputs`` load another linear head the same way (the v2 ``background_head``).
     """
-    import os
-
     head = torch.nn.Linear(in_features, outputs)
-    safetensors_path = os.path.join(model_dir, "model.safetensors")
+    safetensors_path = str(Path(model_dir) / "model.safetensors")
     state: dict[str, torch.Tensor] = {}
-    if os.path.isfile(safetensors_path):
+    if Path(safetensors_path).is_file():
         from safetensors import safe_open
 
         with safe_open(safetensors_path, framework="pt", device="cpu") as handle:
-            state = {k: handle.get_tensor(k) for k in handle.keys() if k.startswith(prefix + ".")}
+            state = {k: handle.get_tensor(k) for k in handle.keys() if k.startswith(prefix + ".")}  # noqa: SIM118 - a safetensors handle is not iterable
     else:
-        bin_path = os.path.join(model_dir, "pytorch_model.bin")
-        if os.path.isfile(bin_path):
+        bin_path = Path(model_dir) / "pytorch_model.bin"
+        if bin_path.is_file():
             full = torch.load(bin_path, map_location="cpu")
             state = {k: v for k, v in full.items() if k.startswith(prefix + ".")}
     if set(state) != {f"{prefix}.weight", f"{prefix}.bias"}:
@@ -763,25 +761,24 @@ def _decode_background_blocks(
         start = max(start, background_end)
         stop = max(stop, min(frames, start + 2 * sum(map(len, groups))))
 
-        def decode(window):
-            try:
-                return align_with_minimum_durations(
-                    window,
-                    groups,
-                    blank=aligner_model.blank,
-                    minimum_frames=token_minimum_frames(groups, letter_cap, token_cap, vowels),
-                    blank_free_tokens=blank_free_tokens,
-                )
-            except RuntimeError:
-                return align_with_minimum_durations(
-                    window,
-                    groups,
-                    blank=aligner_model.blank,
-                    minimum_frames=[1] * sum(map(len, groups)),
-                    blank_free_tokens=blank_free_tokens,
-                )
-
-        spans = decode(background[start:stop].to(torch.float32))
+        window = background[start:stop].to(torch.float32)
+        try:
+            spans = align_with_minimum_durations(
+                window,
+                groups,
+                blank=aligner_model.blank,
+                minimum_frames=token_minimum_frames(groups, letter_cap, token_cap, vowels),
+                blank_free_tokens=blank_free_tokens,
+            )
+        except RuntimeError:
+            # Too dense for the duration floors: one frame per letter.
+            spans = align_with_minimum_durations(
+                window,
+                groups,
+                blank=aligner_model.blank,
+                minimum_frames=[1] * sum(map(len, groups)),
+                blank_free_tokens=blank_free_tokens,
+            )
         block["fallback"] = False
         block["spans"] = [
             [TokenSpan(s.token, s.start + start, s.end + start, s.score) for s in g] for g in spans
@@ -1296,21 +1293,21 @@ def align_audio_with_timeline(
                 for group in encoded:
                     decode_groups.append(list(range(cursor, cursor + len(group))))
                     cursor += len(group)
-            decode_options = dict(
-                blank=len(letter_of) if letter_of is not None else aligner_model.blank,
-                acoustic_token_groups=encoded,
-                edge_logits=edge_logits,
-                edge_weight=edge_weight,
-                blank_free_tokens=blank_free_tokens,
+            decode_options = {
+                "blank": len(letter_of) if letter_of is not None else aligner_model.blank,
+                "acoustic_token_groups": encoded,
+                "edge_logits": edge_logits,
+                "edge_weight": edge_weight,
+                "blank_free_tokens": blank_free_tokens,
                 # Opt-in experiment: cost per blank frame inside a line (gaps go between lines).
-                line_ranges=line_acoustic_ranges,
-                in_line_gap_cost=gap_cost,
-                optional_groups=optional_groups,
+                "line_ranges": line_acoustic_ranges,
+                "in_line_gap_cost": gap_cost,
+                "optional_groups": optional_groups,
                 # The most one in-line gap may cost in total, plus a small per-frame cost past it
                 # so a word can't jump seconds ahead.
-                in_line_gap_cap=1.0,
-                in_line_gap_free_cost=0.02,
-            )
+                "in_line_gap_cap": 1.0,
+                "in_line_gap_free_cost": 0.02,
+            }
             try:
                 initial_spans = align_with_minimum_durations(
                     decode_emission, decode_groups, minimum_frames=minimums, **decode_options
@@ -1523,7 +1520,7 @@ def align_audio_with_timeline(
     shift = timing_offset_ms / 1000.0
     frames_total = raw_emission.shape[0]
     extended = 0
-    for line_index, (first, last) in enumerate(line_acoustic_ranges):
+    for first, last in line_acoustic_ranges:
         index = next((k for k in range(last - 1, first - 1, -1) if k not in second), None)
         item = results[index] if index is not None else None
         if item is None or "original_end" not in item:

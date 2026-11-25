@@ -69,8 +69,8 @@ def test_refine_keeps_timing_and_falls_back_per_line():
             seen,
         ),
     )
-    assert [l["text"] for l in out["lines"]] == ["won", "two", "three"]
-    assert [l["start_ms"] for l in out["lines"]] == [0, 1000, 2000]
+    assert [line["text"] for line in out["lines"]] == ["won", "two", "three"]
+    assert [line["start_ms"] for line in out["lines"]] == [0, 1000, 2000]
     assert out["text"] == "won\ntwo\nthree"
     record = out["transcription"]["refinement"]
     assert (

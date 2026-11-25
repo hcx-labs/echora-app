@@ -36,10 +36,12 @@ def _catalog_contour(rng: np.random.Generator, length: int) -> tuple[np.ndarray,
 
 def bench(label: str, fn, repeat: int = 5) -> float:
     fn()  # warmup (numba compile, caches)
-    best = min(
-        (lambda start=time.perf_counter(): (fn(), time.perf_counter() - start)[1])()
-        for _ in range(repeat)
-    )
+    times = []
+    for _ in range(repeat):
+        start = time.perf_counter()
+        fn()
+        times.append(time.perf_counter() - start)
+    best = min(times)
     print(f"{label:55s} {best * 1000:9.1f} ms")
     return best
 

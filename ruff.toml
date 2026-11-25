@@ -34,6 +34,12 @@ ignore = [
     "D102", "D103", "D105", "D107",
     "D401",  # summaries may be descriptive ("The song's ..."), as in the rest of the codebase
     "E501",  # the formatter owns line length; long literals and URLs may exceed it
+    # PEP 8 asks for the Error suffix on exceptions that are errors; signals such as Cancelled,
+    # QueueFull or TokenRejected are not.
+    "N818",
+    # zip() pairs streams with their inputs in several places, where strict= would change
+    # behaviour on a short stream; each call decides.
+    "B905",
 ]
 
 [lint.pydocstyle]

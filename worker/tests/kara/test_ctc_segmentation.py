@@ -204,7 +204,7 @@ def test_optional_groups_leave_the_lead_path_only_when_they_cost_it_time():
     # Lead "a b" then "d" straight after; "(c)" is an echo sung over "d" (no frame hears c).
     emission = _emission([0, 1, 1, 0, 2, 2, 4, 4, 4, 0], vocabulary=5)
     groups = [[a], [b], [c], [d]]
-    kwargs = dict(blank=blank, minimum_frames=[1, 1, 1, 1], blank_free_tokens=True)
+    kwargs = {"blank": blank, "minimum_frames": [1, 1, 1, 1], "blank_free_tokens": True}
 
     forced = align_with_minimum_durations(emission, groups, **kwargs)
     skipped = align_with_minimum_durations(emission, groups, optional_groups={2}, **kwargs)

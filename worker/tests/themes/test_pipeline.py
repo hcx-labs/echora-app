@@ -6,13 +6,10 @@ import httpx2
 import numpy as np
 import pytest
 
-from worker.processing import ProcessingContext, run_stage
-
-T = {n: uuid.UUID(f"00000000-0000-4000-8000-00000000000{n}") for n in (1, 2, 3)}
-
 import core.lyrics.translations as translation_storage
 import worker.themes.pipeline as lyric_themes
 from core.integrations.external_ai import ExternalAISettings
+from worker.processing import ProcessingContext, run_stage
 from worker.themes.pipeline import (
     PROMPT_REVISION,
     ThemeError,
@@ -22,6 +19,8 @@ from worker.themes.pipeline import (
     parse,
     search_text,
 )
+
+T = {n: uuid.UUID(f"00000000-0000-4000-8000-00000000000{n}") for n in (1, 2, 3)}
 
 REPLY = {
     "description": "A narrator loves someone who never notices.",

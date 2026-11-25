@@ -29,7 +29,7 @@ import math
 from dataclasses import asdict, dataclass
 
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: N812 - the PyTorch convention
 from torch import nn
 
 LEAD, BACKING = 0, 1
@@ -150,9 +150,10 @@ class CrossLayer(nn.Module):
         q, k, v = F._in_projection_packed(
             query, key, value, attention.in_proj_weight, attention.in_proj_bias
         )
-        split = lambda x: x.view(x.shape[0], x.shape[1], heads, dim // heads).transpose(
-            1, 2
-        )  # [B, H, T, dh]
+
+        def split(x):  # [B, T, D] -> [B, H, T, dh]
+            return x.view(x.shape[0], x.shape[1], heads, dim // heads).transpose(1, 2)
+
         q, k, v = q_norm(split(q)), k_norm(split(k)), split(v)
         mask = None if key_padding_mask is None else ~key_padding_mask[:, None, None, :]
         out = F.scaled_dot_product_attention(

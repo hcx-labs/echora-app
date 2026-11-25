@@ -173,9 +173,11 @@ def test_cancel_check_propagates_through_session(monkeypatch, tmp_path):
     class Cancel(BaseException):
         pass
 
-    with p.preprocessing_session(lambda: (_ for _ in ()).throw(Cancel())):
-        with pytest.raises(Cancel):
-            p.cached_decode(b"song", 24000, 1, lambda: np.ones(10))
+    with (
+        p.preprocessing_session(lambda: (_ for _ in ()).throw(Cancel())),
+        pytest.raises(Cancel),
+    ):
+        p.cached_decode(b"song", 24000, 1, lambda: np.ones(10))
     assert p.active_cache() is None
 
 

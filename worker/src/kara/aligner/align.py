@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import hashlib
 import io
-import os
 import re
 import subprocess
 import time
 import unicodedata
+from pathlib import Path
 
 import soundfile as sf
 
@@ -108,7 +108,7 @@ def _read_audio(path: str):
     try:
         return sf.read(path, dtype="float32", always_2d=True)
     except sf.LibsndfileError:
-        decoded = os.path.join(os.path.dirname(path), "decoded.wav")
+        decoded = str(Path(path).parent / "decoded.wav")
         subprocess.run(
             [
                 "ffmpeg",
@@ -327,7 +327,7 @@ def align(request: AlignRequest) -> dict:
     source_diagnostics = source_diagnostic_indexes(
         source_diagnostics, [i for i, tokens in enumerate(alignment_token_lines) if tokens]
     )
-    alignment_document = {
+    return {
         "schema_version": 1,
         "alignment": {"mode": "global_ctc_audio_only", "lines": canonical_lines},
         "diagnostics": {
@@ -347,7 +347,7 @@ def align(request: AlignRequest) -> dict:
             "source_identity": {"sha256": hashlib.sha256(request.text.encode()).hexdigest()},
             "audio_identity": file_identity(request.audio_path),
             "checkpoint_identity": file_identity(hf_model_path)
-            if hf_model_path and os.path.exists(hf_model_path)
+            if hf_model_path and Path(hf_model_path).exists()
             else None,
             "max_blank_hold_seconds": MAX_BLANK_HOLD_SECONDS,
             "model_path": hf_model_path,
@@ -363,4 +363,3 @@ def align(request: AlignRequest) -> dict:
             "inference_config": request.model_dump(),
         },
     }
-    return alignment_document

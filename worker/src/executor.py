@@ -107,7 +107,7 @@ def execute(
                 context.complete(summary, status="partial" if partial else "complete")
     except jobs.JobCancelled:
         logger.info("Job %s cancelled or claim lost", job["id"])
-    except Exception:
+    except Exception:  # noqa: BLE001 - any failure fails the job, retryably
         # Do not log provider exception strings: they can contain signed URLs/credentials.
         logger.error("Job %s execution failed", job["id"])
         jobs.fail(job["id"], job["claim_token"], "Execution failed", retryable=True)
@@ -161,7 +161,7 @@ def supervise(job: dict, stop: threading.Event, lease_seconds: int) -> None:
                 return
             try:
                 owned = jobs.heartbeat(job["id"], job["claim_token"], lease_seconds)
-            except Exception:
+            except Exception:  # noqa: BLE001 - no confirmed claim: stop
                 # Fail closed: don't keep writing artifacts without a live claim.
                 logger.error("Job %s heartbeat failed", job["id"])
                 _terminate(process)
@@ -205,7 +205,7 @@ def run(
                 for maintenance in (cleanup, cleanup_calibration):
                     try:
                         maintenance()
-                    except Exception:
+                    except Exception:  # noqa: BLE001 - maintenance retries next time
                         # A bad retained file must not block unrelated analysis.
                         # Avoid exception text, which can expose private paths.
                         logger.error("Recording retention maintenance failed; will retry")

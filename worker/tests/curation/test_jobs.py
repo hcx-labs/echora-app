@@ -25,14 +25,14 @@ class Result:
 
 class Database:
     def __init__(self):
-        self.curation = dict(
-            id=uuid4(),
-            user_id=uuid4(),
-            navidrome_connection_id=uuid4(),
-            navidrome_playlist_id=None,
-            status="draft",
-            due=True,
-        )
+        self.curation = {
+            "id": uuid4(),
+            "user_id": uuid4(),
+            "navidrome_connection_id": uuid4(),
+            "navidrome_playlist_id": None,
+            "status": "draft",
+            "due": True,
+        }
         self.publication = None
         self.revisions = []
         self.events = []
@@ -80,14 +80,14 @@ class Database:
             found = p and (p["state"] != "complete" or (len(args) > 1 and p["job_id"] == args[1]))
             return Result([p] if found else [])
         if sql.startswith("INSERT INTO curation_publications"):
-            self.publication = dict(
-                id=args[0],
-                curation_id=args[1],
-                job_id=args[2],
-                state="prepared",
-                plan=deepcopy(args[3].obj),
-                playlist_id=args[4],
-            )
+            self.publication = {
+                "id": args[0],
+                "curation_id": args[1],
+                "job_id": args[2],
+                "state": "prepared",
+                "plan": deepcopy(args[3].obj),
+                "playlist_id": args[4],
+            }
             return Result([self.publication])
         if sql.startswith("UPDATE curation_publications"):
             if "state='publishing'" in sql:
@@ -129,7 +129,7 @@ def env(monkeypatch, library_helpers):
         "recipe": {"shuffle_seed": 123},
         "revision_number": 1,
         "tracks": [
-            dict(id=str(uuid4()), source_id=s, score=1, percentile=90, retained=False)
+            {"id": str(uuid4()), "source_id": s, "score": 1, "percentile": 90, "retained": False}
             for s in ["b", "a", "b"]
         ],
     }

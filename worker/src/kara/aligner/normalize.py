@@ -190,10 +190,7 @@ def normalize_numbers(text):
 def number_to_english(number_str):
     """将数字字符串转换为英文单词"""
     try:
-        if "." in number_str:
-            num = float(number_str)
-        else:
-            num = int(number_str)
+        num = float(number_str) if "." in number_str else int(number_str)
     except ValueError:
         print('Unable to process number "' + number_str + '"...')
         return tail_pron
@@ -299,10 +296,7 @@ def is_katakana(char):
 
 
 def is_kana(char):
-    for i in char:
-        if not is_hiragana(i) and not is_katakana(i) or i in ["・", "゠"]:  # , 'ー'
-            return False
-    return True
+    return all((is_hiragana(i) or is_katakana(i)) and i not in ["・", "゠"] for i in char)
 
 
 def is_number(char):
@@ -710,7 +704,7 @@ def _legacy_process_haruhi_line(line, lang="jaen", sokuon_split=False, hatsuon_s
                 if result[i].get("type") != 0 and ruby_now and ruby_now[-1] in ("っ", "ッ"):
                     try:
                         pron = postpron[0]
-                    except:
+                    except (TypeError, IndexError):  # no following syllable
                         pron = "h"  # tail_pron
                     else:
                         if pron == "c":
@@ -741,7 +735,7 @@ def _legacy_process_haruhi_line(line, lang="jaen", sokuon_split=False, hatsuon_s
                         result[i]["pron"] = "wa"
                     elif result[i]["orig"] == "へ" and line_roma_proc[i] == "e":
                         result[i]["pron"] = "e"
-                except:
+                except Exception:  # noqa: BLE001 - the は/へ correction is best-effort
                     print("Ignored errors when trying to correct ha and he...")
     elif lang == "ko":
         for char in line:
@@ -772,7 +766,10 @@ def _legacy_process_haruhi_line(line, lang="jaen", sokuon_split=False, hatsuon_s
         elif lang == "pa":
             script_test = is_gurmukhi
         else:
-            script_test = lambda char: is_devanagari(char) or is_gurmukhi(char)
+
+            def script_test(char):
+                return is_devanagari(char) or is_gurmukhi(char)
+
         for char in line:
             if script_test(char) and unicodedata.category(char)[0] in {"L", "M"}:
                 if result and result[-1].get("type") == 6:

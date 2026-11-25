@@ -145,7 +145,7 @@ def _run(operation: Operation, batch: Batch, compute: str, stack: ExitStack, con
         if stage.prepare is not None:
             try:
                 batch.prepared[stage.key] = stage.prepare(batch)
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - preparation is optional
                 # Optional: the stage itself does whatever preparation is still missing.
                 logger.error("Could not prepare %s: %s", stage.key, type(error).__name__)
     if operation.library:
