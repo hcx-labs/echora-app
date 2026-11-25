@@ -186,8 +186,8 @@ Set `OIDC_REQUIRE_VERIFIED_EMAIL=true` if your provider verifies addresses and y
 **4. Download the models.** This step needs internet access and is the slowest one.
 
 ```sh
-docker compose build analysis
-docker compose run --rm --no-deps -e HF_HUB_OFFLINE=0 analysis \
+docker compose build backend
+docker compose run --rm --no-deps -e HF_HUB_OFFLINE=0 backend \
   python -m worker.models.download
 ```
 
@@ -216,7 +216,7 @@ Optional settings and their defaults are listed in [runtime settings](docs/runti
 
 - **Adding music.** Add files to Navidrome as usual, then run a sync from Echora's **Sync** page. *New tracks only* analyzes what's missing. *Entire library* also refreshes metadata and removes songs you no longer have.
 - **What to back up.** Back up the PostgreSQL volume (`postgres-data`) and your `.env`. Model files under `data/models/` can always be downloaded again but are large, so keeping them saves time. `docker compose down` keeps your data, but `docker compose down -v` **deletes the database**.
-- **Serving it beyond your machine.** The Compose file is meant for local use. It also exposes PostgreSQL and the analysis API. Before opening Echora to a network, close those ports, put the web service behind HTTPS, update the OIDC URLs and set `COOKIE_SECURE=true`. Run a single analysis replica.
+- **Serving it beyond your machine.** The Compose file is meant for local use. It also exposes PostgreSQL and the backend API. Before opening Echora to a network, close those ports, put the web service behind HTTPS, update the OIDC URLs and set `COOKIE_SECURE=true`. Run a single analysis replica.
 - **What still uses the network.** The running service never downloads models, but it still talks to your sign-in provider, Navidrome, lyrics sources and, if configured, Last.fm and your AI endpoint.
 
 ---
@@ -249,7 +249,7 @@ If the hook reformats a file, the commit stops. Stage the formatting changes and
 | --- | --- |
 | Web tests, type check, lint, build | `npm run test:web` · `npm run typecheck` · `npm run lint` · `npm run build` |
 | Python tests | `pip install -e core -e worker -e backend`, then `pytest` in `core`, `worker` or `backend` |
-| Rebuild one container | `npm run rebuild:web` · `npm run rebuild:analysis` |
+| Rebuild one container | `npm run rebuild:web` · `npm run rebuild:backend` |
 
 Tests that need a database read `TEST_DATABASE_URL`. Point it at a throwaway, migrated database, never at your real one.
 

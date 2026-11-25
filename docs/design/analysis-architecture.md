@@ -315,15 +315,21 @@ JobCancelled (BaseException)    cooperative cancellation or a lost claim
 
 ## Images and deployment
 
-- **`echora-worker`** (from `worker/`): the current GPU analysis image's dependencies (torch,
-  Essentia, Roformer, FA-Kara, MOSS, ComfyUI support), Modal client. It runs both worker types
-  (`analysis`, `scheduled`). A CPU variant stays for CPU-only installs.
-- **`echora-backend`** (from `backend/`): FastAPI, plus the model dependencies that search needs
-  (MuQ-MuLan and BGE-M3 text encoders, the recording encoder, melody contour extraction). It runs
-  Alembic migrations at startup, as the API does today.
+Two Dockerfiles (`docker/Dockerfile.gpu`, `docker/Dockerfile.cpu`) share one dependency stage
+each and build two targets:
+
+- **`echora-worker`** (target `worker`): sync processing. The GPU image adds ComfyUI for motion
+  artwork and is the image Modal runs. It runs both worker types (`python -m worker.executor
+  analysis|scheduled`) as the `echora` user. `echora-worker-cpu` is the CPU variant.
+- **`echora-backend`** (target `backend`): the API. It carries the worker's code and model
+  dependencies, because search encodes text, contours and recordings with them, but not
+  ComfyUI. At startup it prepares the data directories, prunes superseded models, runs Alembic,
+  then serves. `echora-backend-cpu` is the CPU variant.
 - **`echora-web`**: unchanged, built from `web/`.
-- Compose and the release workflow build three images. The homelab chart needs the new image names
-  and commands; that change lives in its own repository.
+
+Compose builds the targets as the `backend`, `analysis-worker` and `scheduled-worker` services
+(the scheduled worker always uses the CPU image), and the release workflow publishes all five
+images. The homelab chart needs the new image names; that change lives in its own repository.
 
 ## Tooling
 

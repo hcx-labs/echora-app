@@ -1,7 +1,7 @@
 def test_health(anonymous):
     assert anonymous.get("/api/v1/system/health").json() == {
         "status": "ok",
-        "service": "echora-analysis",
+        "service": "echora-backend",
     }
 
 

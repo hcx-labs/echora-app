@@ -25,7 +25,7 @@ Motion artwork is a stage of ordinary analysis batches, run by the analysis work
 
    ComfyUI stops after each phase, which frees all of its GPU and system memory before the next model loads, and after the last phase before the next batch.
 
-ComfyUI is installed in the GPU analysis image at `/opt/comfyui`, in its own virtual environment so its package versions do not affect Echora's. It listens on a random local port and keeps its inputs, outputs, encodings and state in a temporary directory that is removed with each batch. The CPU image does not include it; there the stage is skipped. Each batch's summary records how long each phase took (`motion_artwork.timings`).
+ComfyUI is installed in the GPU worker image (`echora-worker`) at `/opt/comfyui`, in its own virtual environment so its package versions do not affect Echora's. It listens on a random local port and keeps its inputs, outputs, encodings and state in a temporary directory that is removed with each batch. The CPU image does not include it; there the stage is skipped. Each batch's summary records how long each phase took (`motion_artwork.timings`).
 
 If ComfyUI is missing, cannot start or has no models, the stage is skipped and recorded in the batch summary. The rest of the sync is unaffected.
 
@@ -33,7 +33,7 @@ An administrator can enter an external ComfyUI URL instead (or set `ECHORA_COMFY
 
 ## Requirements
 
-- An NVIDIA GPU and the GPU analysis image. The default loop (768 upscaled to 1536, 10 seconds) needs the whole of a 24 GB card and takes about 5 minutes per track on an RTX 3090: about 1 minute at 768 and 4 to refine at 1536. Without upscaling, 10-second loops take about 1 minute at 768, 2.5 at 1024 and 9 at 1536. 5-second loops take about half as long.
+- An NVIDIA GPU and the GPU worker image. The default loop (768 upscaled to 1536, 10 seconds) needs the whole of a 24 GB card and takes about 5 minutes per track on an RTX 3090: about 1 minute at 768 and 4 to refine at 1536. Without upscaling, 10-second loops take about 1 minute at 768, 2.5 at 1024 and 9 at 1536. 5-second loops take about half as long.
 - About 47 GB of model files and plenty of system memory. A 1536 render peaked at 57 GB of RAM on a 62 GB machine with the rest of the stack running.
 - A Hugging Face token with access to the gated `Lightricks/LTX-2.5` repository. Accept its license on Hugging Face first.
 - One analysis worker per GPU while generation is enabled. Two workers sharing a GPU could render and analyse at the same time and run out of memory.
@@ -43,7 +43,7 @@ An administrator can enter an external ComfyUI URL instead (or set `ECHORA_COMFY
 Save your Hugging Face token in **Settings → Analysis models → Model downloads** (stored encrypted, shared with Modal). Then download the models into the shared Hugging Face cache. Only the six files ComfyUI loads are fetched, at pinned revisions, not the whole repositories:
 
 ```sh
-docker compose run --rm --no-deps -e HF_HUB_OFFLINE=0 analysis \
+docker compose run --rm --no-deps -e HF_HUB_OFFLINE=0 backend \
   python -m worker.models.download --motion-artwork
 ```
 

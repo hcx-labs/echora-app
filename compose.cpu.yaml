@@ -1,10 +1,12 @@
 # docker compose -f compose.yaml -f compose.cpu.yaml up --build
 services:
-  analysis:
+  backend:
     build:
       dockerfile: docker/Dockerfile.cpu
+    image: echora-backend-cpu
     gpus: !reset []
   analysis-worker:
     build:
       dockerfile: docker/Dockerfile.cpu
+    image: echora-worker-cpu
     gpus: !reset []

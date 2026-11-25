@@ -58,7 +58,7 @@ A track that fails on Modal counts as one failed track, like a local failure, an
 The deployment is checked against three things, and only what differs is redone:
 
 - **Code.** A digest of the worker's analysis package and vendored aligner. The worker deploys its own source on top of the base image, so remote code is exactly the worker's. An Echora upgrade redeploys.
-- **Image and GPU.** Release images record the GPU analysis image of the same version (`ECHORA_MODAL_IMAGE`, set at build time), so remote dependencies match. Changing the GPU type redeploys.
+- **Image and GPU.** Release images record the GPU worker image (`echora-worker`) of the same version (`ECHORA_MODAL_IMAGE`, set at build time), so remote dependencies match. Changing the GPU type redeploys.
 - **Models.** A manifest digest of every pinned model the worker's settings require. A changed model setting (for example a new FA-Kara revision or enabling MOSS) downloads only the missing snapshots, on a CPU container so downloads do not bill GPU time, and removes superseded ones.
 
 Every compute call also carries the worker's model settings (model IDs, revisions, aligner options), and the remote side computes with exactly those, so results match what the worker would compute locally. Measured on the same song, Modal reproduces locally stored embeddings at cosine 1.00000.
@@ -70,7 +70,7 @@ Every compute call also carries the worker's model settings (model IDs, revision
 To deploy by hand, with the worker installed and a Modal token configured:
 
 ```sh
-ECHORA_MODAL_IMAGE=ghcr.io/hackslashx/echora-analysis-gpu:<version> \
+ECHORA_MODAL_IMAGE=ghcr.io/hackslashx/echora-worker:<version> \
   modal deploy -m worker.remote.modal_app
 ```
 

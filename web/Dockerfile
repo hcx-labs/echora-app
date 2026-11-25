@@ -6,7 +6,7 @@ RUN npm ci
 
 FROM node:22.22.0-bookworm-slim AS builder
 WORKDIR /app
-ENV ANALYSIS_URL=http://analysis:8000
+ENV BACKEND_URL=http://backend:8000
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/web/node_modules ./web/node_modules
 COPY . .
