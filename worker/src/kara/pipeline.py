@@ -560,6 +560,7 @@ def _run_fa_kara(
             background_decoding=config.background_decoding,
             blank_free_tokens=config.blank_free_tokens,
             inline_backing=config.inline_backing,
+            inline_text_bonus=config.inline_text_bonus,
             gap_onset_pull=config.gap_onset_pull,
             text_bonus=config.text_bonus,
             in_line_gap_cost=config.in_line_gap_cost,

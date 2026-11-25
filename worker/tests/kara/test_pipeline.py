@@ -222,6 +222,7 @@ def test_worker_aligns_the_audio_as_given_without_line_times(
         # The mix recipe: onset-true timing, no loudness-based gap pull, inline backing placement.
         assert request.timing_offset_ms == 0
         assert not request.gap_onset_pull and request.inline_backing
+        assert request.inline_text_bonus
         assert not request.optional_brackets
         assert (request.text_bonus, request.in_line_gap_cost) == (0.4, 0.2)
         return {

@@ -1136,6 +1136,8 @@ def _place_inline_backing(
     margin_seconds=0.25,
     letter_frames=2,
     lead_words_before=3,
+    text_share=None,
+    text_bonus=0.0,
 ):
     """Inline bracketed words ("I know ('til the day that I die)") re-placed on the background head.
 
@@ -1145,6 +1147,10 @@ def _place_inline_backing(
     [line start - margin, next line start + margin], free to overlap the lead; the lead groups stay.
     2026-11-09: on 32 library songs with Apple timing this moved backing words >300 ms off from 63
     to 51 of 313 and left the lead unchanged (13 songs better, 7 worse). Returns the moved groups.
+
+    ``text_share``: the text head's backing-voice log P(token | singing) [frames,
+    columns] with each flagged group's column; a word's letters then score ``text_bonus`` x its
+    share on top of what the background head hears, as on the lead path.
     """
     frames = background.shape[0]
     margin = round(margin_seconds / frame_shift)
@@ -1177,17 +1183,33 @@ def _place_inline_backing(
             lo = max(0, spans[anchor][0].start - margin, stream_end)
             w_lo, w_hi = lo, max(hi, min(frames, lo + need + 2))
             window = background[w_lo:w_hi].to(torch.float32)
+            decode_groups, decode_blank = groups, blank
+            if text_share is not None:
+                # One column per (word, letter): the letter's score plus the head's for its word.
+                columns, decode_groups = [], []
+                for i, group in zip(range(k, last + 1), groups):
+                    bonus = text_bonus * text_share[0][w_lo:w_hi, text_share[1][i]].to(window)
+                    decode_groups.append(list(range(len(columns), len(columns) + len(group))))
+                    columns.extend(window[:, letter] + bonus for letter in group)
+                window = torch.stack([*columns, window[:, blank]], dim=1)
+                decode_blank = len(columns)
             try:
                 placed = align_with_minimum_durations(
                     window,
-                    groups,
-                    blank=blank,
+                    decode_groups,
+                    blank=decode_blank,
                     minimum_frames=[letter_frames] * sum(map(len, groups)),
+                    acoustic_token_groups=groups,
                     blank_free_tokens=True,
                 )
             except RuntimeError:
                 k = last + 1
                 continue
+            # Spans carry their letters, not the columns the bonus gave them.
+            placed = [
+                [TokenSpan(letter, t.start, t.end, t.score) for letter, t in zip(group, g)]
+                for group, g in zip(groups, placed)
+            ]
             for i, g in zip(range(k, last + 1), placed):
                 spans[i] = [TokenSpan(t.token, t.start + w_lo, t.end + w_lo, t.score) for t in g]
                 moved.append(i)
@@ -1276,6 +1298,7 @@ def align_audio_with_timeline(
     fusion="off",
     fusion_model=None,
     stem_audio=None,
+    inline_text_bonus=False,
     vocal_activity_file=None,
     blank_free_tokens=False,
     background_lines=None,
@@ -1368,11 +1391,27 @@ def align_audio_with_timeline(
         acoustic_tokens = [all_tokens[i] for i in lead_indexes]
         encoded = [all_encoded[i] for i in lead_indexes]
     all_optional = optional_tokens  # in input token order, for the text head
+    # ``inline_text_bonus``: inline bracketed words are backing words to the text head, as it was
+    # trained, and its backing voice scores them on the lead path and where they are re-placed.
+    # Off, the head takes them for lead words and the re-placement has no bonus. On 30 library
+    # songs with Apple timing (2026-11-25) backing words >300 ms off went from 49 to 28 of 181
+    # and the lead stayed where it was (300 -> 303 of 8,393).
+    bonus_backing_groups = None  # lead token groups the head's backing voice scores
+    if optional_tokens is None and inline_text_bonus and inline_backing_tokens is not None:
+        all_optional = inline_backing_tokens
+        lead_flags = (
+            [inline_backing_tokens[i] for i in lead_indexes]
+            if background_plan is not None
+            else list(inline_backing_tokens)
+        )
+        bonus_backing_groups = {i for i, flag in enumerate(lead_flags) if flag} or None
     if background_plan is not None and optional_tokens is not None:
         optional_tokens = [optional_tokens[i] for i in lead_indexes]
     if optional_tokens is not None and len(optional_tokens) != len(acoustic_tokens):
         raise ValueError("optional_tokens needs one flag per acoustic token")
     optional_groups = {i for i, flag in enumerate(optional_tokens or []) if flag} or None
+    if optional_groups:
+        bonus_backing_groups = optional_groups
     line_acoustic_ranges = []
     acoustic_offset = 0
     for line in token_lines:
@@ -1496,7 +1535,7 @@ def align_audio_with_timeline(
                 # A flat zero there would make them the cheapest place to wait.
                 owner, column, optional_column = [], 0, text_share.shape[1]
                 for k, group in enumerate(encoded):
-                    if optional_groups and k in optional_groups:
+                    if bonus_backing_groups and k in bonus_backing_groups:
                         owner.extend([optional_column] * len(group))
                         optional_column += 1
                     else:
@@ -1611,9 +1650,9 @@ def align_audio_with_timeline(
                 )
                 lines.append(line_index)
                 cursor += 1
-        inline = [j for j, flag in enumerate(all_optional or []) if flag]
         # Whole backing lines are placed apart from the lead (B0), with the head's backing voice.
         whole = [i for _, flag, tokens in background_plan or [] if flag for i in tokens]
+        inline = [j for j, flag in enumerate(all_optional or []) if flag and j not in set(whole)]
         text_share = aligner_model.text_token_share(
             raw_emission, groups_all, voices, lines, backing=[*inline, *whole] or None
         )
@@ -1669,6 +1708,13 @@ def align_audio_with_timeline(
             aligner_model.blank,
             frame_shift,
             lead_words_before=inline_backing_anchor_words,
+            text_share=None
+            if not inline_text_bonus or optional_share is None or not bonus_backing_groups
+            else (
+                optional_share,
+                {group: column for column, group in enumerate(sorted(bonus_backing_groups))},
+            ),
+            text_bonus=text_bonus,
         )
 
     gap_pulled = []
@@ -1693,6 +1739,7 @@ def align_audio_with_timeline(
     diagnostics = {
         "source_timeline": "ignored",
         "stem_reading": stem_audio is not None,
+        "inline_text_bonus": bool(inline_text_bonus and bonus_backing_groups),
         "minimum_duration": duration_floor,
         "in_line_gap_cost": float(in_line_gap_cost),
         # Retired experiments, reported at their fixed values (stored documents carry the keys).
