@@ -12,10 +12,10 @@ Start with `configs/env.example`. The complete, commented catalog is `configs/ru
 PYTHONPATH=services/analysis/src services/analysis/.venv/bin/python scripts/export-runtime-settings.py > configs/runtime.env.example
 ```
 
-Browser polling uses the same defaults, exported to `apps/web/components/runtime/runtimeConfig.defaults.json`. The browser loads overrides from the API once after mount. During an API outage it keeps the generated defaults. Regenerate the fallback after changing those settings:
+Browser polling uses the same defaults, exported to `web/components/runtime/runtimeConfig.defaults.json`. The browser loads overrides from the API once after mount. During an API outage it keeps the generated defaults. Regenerate the fallback after changing those settings:
 
 ```sh
-PYTHONPATH=services/analysis/src services/analysis/.venv/bin/python scripts/export-runtime-settings.py --ui > apps/web/components/runtime/runtimeConfig.defaults.json
+PYTHONPATH=services/analysis/src services/analysis/.venv/bin/python scripts/export-runtime-settings.py --ui > web/components/runtime/runtimeConfig.defaults.json
 ```
 
 Secrets are blank in that catalog and excluded from Settings representations and serialization. Do not log the settings object or publish its complete contents. `/settings/runtime` returns only an explicit allowlist of browser polling intervals and request timeouts.

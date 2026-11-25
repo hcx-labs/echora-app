@@ -1,4 +1,4 @@
-// Run: node --test apps/web/components/player/artworkPalette.test.mjs
+// Run: node --test web/components/player/artworkPalette.test.mjs
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';

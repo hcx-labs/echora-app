@@ -145,7 +145,7 @@ services:
     restart: unless-stopped
     build:
       context: .
-      dockerfile: apps/web/Dockerfile
+      dockerfile: web/Dockerfile
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://echora:echora-local@postgres:5432/echora}
       ANALYSIS_URL: http://analysis:8000

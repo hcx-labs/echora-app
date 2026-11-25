@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
-const root = fileURLToPath(new URL("../apps/web/", import.meta.url));
+const root = fileURLToPath(new URL("../web/", import.meta.url));
 function discover(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
     const path = join(directory, entry.name);

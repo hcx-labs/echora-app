@@ -1,4 +1,4 @@
-// Run: node --test apps/web/components/jobs/durableJobs.test.mjs
+// Run: node --test web/components/jobs/durableJobs.test.mjs
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';

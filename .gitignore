@@ -23,7 +23,7 @@ build/
 htmlcov/
 
 # Navidrome plugin build artifacts
-/plugins/navidrome/dist/
+/navidrome/dist/
 
 # Runtime data and downloaded models
 data/
@@ -46,8 +46,8 @@ testdata/music/**
 
 # Private agent guidance and generated assistant instructions
 .pi/
-apps/web/AGENTS.md
-apps/web/CLAUDE.md
+web/AGENTS.md
+web/CLAUDE.md
 
 # Editors and operating systems
 .DS_Store

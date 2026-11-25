@@ -5,7 +5,7 @@ if (!["major", "minor", "patch"].includes(increment)) {
   throw new Error("Usage: node .github/scripts/bump-version.mjs <major|minor|patch>");
 }
 
-const packagePath = "apps/web/package.json";
+const packagePath = "web/package.json";
 const lockPath = "package-lock.json";
 const packageJson = JSON.parse(await readFile(packagePath, "utf8"));
 const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(packageJson.version);
@@ -29,9 +29,9 @@ if (increment === "major") {
 const version = `${major}.${minor}.${patch}`;
 packageJson.version = version;
 const packageLock = JSON.parse(await readFile(lockPath, "utf8"));
-const workspace = packageLock.packages?.["apps/web"];
+const workspace = packageLock.packages?.["web"];
 if (!workspace) {
-  throw new Error("apps/web is missing from package-lock.json");
+  throw new Error("web is missing from package-lock.json");
 }
 workspace.version = version;
 // The UI imports the package version directly; no component source needs updating.

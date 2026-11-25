@@ -138,5 +138,5 @@ def test_browser_defaults_match_settings():
     import json
     from pathlib import Path
     root = Path(__file__).resolve().parents[3]
-    defaults = root / 'apps/web/components/runtime/runtimeConfig.defaults.json'
+    defaults = root / 'web/components/runtime/runtimeConfig.defaults.json'
     assert json.loads(defaults.read_text()) == Settings.model_construct().public_ui()

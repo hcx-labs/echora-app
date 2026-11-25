@@ -25,7 +25,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("increment", choices=("patch", "minor", "major"))
     args = parser.parse_args()
-    manifest_path = Path(__file__).resolve().parents[2] / "plugins/navidrome/manifest.json"
+    manifest_path = Path(__file__).resolve().parents[2] / "navidrome/manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["version"] = increment_version(manifest["version"], args.increment)
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

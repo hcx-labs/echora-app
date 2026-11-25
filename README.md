@@ -75,7 +75,7 @@ The home page brings together recent additions, your most-played tracks from Las
 
 ### Works with the rest of your setup
 
-- **Navidrome plugin.** The [Echora plugin](plugins/navidrome/README.md) brings sonic similarity, artist radio and Echora's timed and translated lyrics to Navidrome's own apps and clients, through per-account API keys.
+- **Navidrome plugin.** The [Echora plugin](navidrome/README.md) brings sonic similarity, artist radio and Echora's timed and translated lyrics to Navidrome's own apps and clients, through per-account API keys.
 - **Several users.** People sign in through your OpenID Connect provider and each connects their own library. A track that two people own is analyzed once and shared.
 - **Administration.** Administrators approve or block accounts, choose which models run, and configure Last.fm, the external AI endpoint and the integrations from **Settings**.
 
@@ -223,7 +223,7 @@ Optional settings and their defaults are listed in [runtime settings](docs/runti
 
 ## Development
 
-The web app is Next.js and React (in `apps/web`). The analysis service is Python 3.12 and FastAPI (in `services/analysis`). They share a PostgreSQL 17 database with pgvector. The Navidrome plugin is in Go (in `plugins/navidrome`).
+The web app is Next.js and React (in `web`). The analysis service is Python 3.12 and FastAPI (in `services/analysis`). They share a PostgreSQL 17 database with pgvector. The Navidrome plugin is in Go (in `navidrome`).
 
 You need Node.js 22 or later for the web app. To work on the web app against a running backend:
 
