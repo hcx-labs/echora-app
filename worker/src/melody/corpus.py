@@ -9,9 +9,10 @@ from dataclasses import dataclass
 import numpy as np
 import psycopg
 
+from core.db.connection import connect
 from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient
-from worker.library.sources import connect, source_rows
+from worker.library.sources import source_rows
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
 
 Contours = dict[str, tuple[np.ndarray, np.ndarray]]

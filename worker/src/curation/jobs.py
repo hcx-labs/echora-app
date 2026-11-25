@@ -9,12 +9,10 @@ import json
 import uuid
 from contextlib import contextmanager
 
-import psycopg
-from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from core.curation.preview import CurationRecipe, preview_curation
-from core.db.config import require_database_url
+from core.db.connection import connect
 from core.errors import ConflictError, NotFoundError
 from core.integrations.navidrome import NavidromeClient
 from core.library.connections import load_connection
@@ -22,7 +20,7 @@ from worker.curation.config import CurationConfig
 
 
 def _connect():
-    return psycopg.connect(require_database_url(), row_factory=dict_row)
+    return connect(dict_rows=True)
 
 
 @contextmanager

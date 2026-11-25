@@ -152,7 +152,7 @@ def test_hum_parent_creates_durable_corpus_from_job_id(monkeypatch, library_help
     db = MagicMock()
     cursor = db.__enter__.return_value.cursor.return_value.__enter__.return_value
     cursor.fetchone.return_value = ("user",)
-    monkeypatch.setattr(analysis_jobs, "connect", lambda: db)
+    monkeypatch.setattr(analysis_jobs, "connect", lambda **_: db)
     monkeypatch.setattr(
         analysis_jobs, "source_rows", lambda *a: [("a", "canonical"), ("b", "other")]
     )

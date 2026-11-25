@@ -11,7 +11,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from worker.melody.config import MelodyConfig
 
 # The service package is read-only for its unprivileged runtime user. Numba must
@@ -622,7 +622,7 @@ def match_hum(
     prepared_motifs = _prepare_motifs(windows)
     if not contours:
         raise ValueError("Build the melody hum index before searching")
-    with psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection:
+    with connect(dict_rows=True) as connection:
         workers = min(MelodyConfig.load().max_workers, os.cpu_count() or 2)
         best_by_window: list[dict[uuid.UUID, tuple[float, float, str]]] = [{} for _ in windows]
         best_across_windows: dict[uuid.UUID, tuple[float, float, str]] = {}

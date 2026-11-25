@@ -23,7 +23,7 @@ import numpy as np
 import psycopg
 from psycopg.types.json import Jsonb
 
-from core.db.config import require_database_url
+from core.db.connection import connect
 from core.embeddings.representations import (
     configure_representations,
     model_settings,
@@ -128,7 +128,7 @@ def build_semantic_fusion(
     weights = fusion_weights()
     _, lyrics_revision = model_settings("bge_m3")
     _, audio_revision = model_settings("muq_mulan")
-    with psycopg.connect(require_database_url()) as connection:
+    with connect() as connection:
         configure_representations(connection)
         report({"phase": "loading", "message": "Loading paired lyrics and audio embeddings"})
         track_ids, lyrics, audio = _paired_vectors(connection)

@@ -18,7 +18,7 @@ import psycopg
 import torch
 from psycopg.types.json import Jsonb
 
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.embeddings.representations import configure_representations, voice_config
 from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient
@@ -251,7 +251,7 @@ class VoiceProcessor(Processor[None, VoiceItem, Evidence]):
         self.limit = limit
 
     def plan(self, context: ProcessingContext) -> list[VoiceItem]:
-        with psycopg.connect(DatabaseConfig.load().database_url) as connection:
+        with connect() as connection:
             library_id = resolve_library_id(connection, context.library_url)
             restriction, parameters = _id_filter(list(context.track_ids))
             configure_representations(connection)
@@ -281,7 +281,7 @@ class VoiceProcessor(Processor[None, VoiceItem, Evidence]):
         ]
 
     def open(self, context: ProcessingContext, items) -> None:
-        self.connection = psycopg.connect(DatabaseConfig.load().database_url)
+        self.connection = connect()
         self.client = NavidromeClient(*context.library)
         self.client.__enter__()
         self.model = None

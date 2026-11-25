@@ -11,7 +11,8 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.requests import PutRequest
 from backend.api.responses import ResponseModel
-from backend.library.db import connect, require_visible
+from backend.library.db import require_visible
+from core.db.connection import connect
 from core.errors import InvalidQueryError
 
 UPSERT_SQL = """INSERT INTO lyrics (track_id, source, text, language, provenance, availability_status)
@@ -54,7 +55,7 @@ class TrackLyricsUpdate(Endpoint):
         if not lyric_text:
             raise InvalidQueryError("Lyrics cannot be empty")
         language = body.language.strip().lower() if body.language else None
-        with connect() as connection, connection.cursor() as cursor:
+        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
             require_visible(cursor, user["id"], track_id, "Track is not in your library")
             cursor.execute("SELECT text, language FROM lyrics WHERE track_id=%s", (track_id,))
             existing = cursor.fetchone()

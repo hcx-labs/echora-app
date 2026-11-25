@@ -115,7 +115,7 @@ def test_profile_processor_summary_and_run(monkeypatch):
     }
     windows.fetchall.side_effect = [[window], []]
     connections = iter([planning, working])
-    monkeypatch.setattr(profiles.psycopg, "connect", lambda *a, **kw: next(connections))
+    monkeypatch.setattr(profiles, "connect", lambda **_: next(connections))
     monkeypatch.setattr(profiles, "_create_profile_run", lambda *a: run)
     monkeypatch.setattr(profiles, "derive_audio_profile", lambda *a: "profile")
     stored = []

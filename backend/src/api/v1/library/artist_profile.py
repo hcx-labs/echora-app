@@ -13,7 +13,7 @@ from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
 from backend.api.v1.library._artist_models import ArtistFacet
 from backend.library.artist_corpus import artist_embedding_corpus, artist_payload
-from backend.library.db import connect
+from core.db.connection import connect
 from core.errors import NotFoundError
 
 
@@ -51,7 +51,7 @@ class ArtistProfile(Endpoint):
         display_name = str(rows[indices[0]]["artist"])
         payload, profile = artist_payload(display_name, rows, matrix, indices)
         stored = jsonable_encoder({**payload, "model": model, "corpus_hash": corpus_hash})
-        with connect() as connection, connection.cursor() as cursor:
+        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
             cursor.execute(
                 """INSERT INTO artist_profiles
                      (artist_key, artist_name, model_name, corpus_hash, track_count, component_count, payload)

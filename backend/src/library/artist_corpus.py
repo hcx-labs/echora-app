@@ -7,7 +7,8 @@ import hashlib
 import numpy as np
 
 from backend.library.artists import fit_artist_profile, representative_indices
-from backend.library.db import connect, parse_vector
+from backend.library.db import parse_vector
+from core.db.connection import connect
 from core.errors import ConflictError, InvalidQueryError
 
 
@@ -15,7 +16,7 @@ def artist_embedding_corpus(model: str) -> tuple[list[dict[str, object]], np.nda
     """Songs with an artist (id, title, artist, album), their embeddings and the corpus hash."""
     if model not in {"muq_mulan", "mert"}:
         raise InvalidQueryError("Artist profiles support muq_mulan or mert")
-    with connect() as connection, connection.cursor() as cursor:
+    with connect(dict_rows=True) as connection, connection.cursor() as cursor:
         cursor.execute(
             """SELECT DISTINCT ON (e.track_id) t.id, t.title, t.artist, t.album,
                       e.embedding::text AS embedding, ar.id AS run_id

@@ -8,7 +8,7 @@ from fastapi import Depends, Response
 
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
-from backend.settings.plugin_integration import connect
+from core.db.connection import connect
 from core.errors import NotFoundError
 
 
@@ -20,7 +20,7 @@ class RevokePluginKey(Endpoint):
     status_code = 204
 
     def handle(self, key_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> Response:
-        with connect() as db:
+        with connect(dict_rows=True) as db:
             row = db.execute(
                 """UPDATE navidrome_api_keys SET revoked_at=coalesce(revoked_at,now())
                 WHERE id=%s AND user_id=%s RETURNING id""",

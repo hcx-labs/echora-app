@@ -118,7 +118,7 @@ def test_parent_batches_selected_work_but_reconciles_full_catalog(
     monkeypatch.setattr(analysis_jobs, "NavidromeClient", lambda *args: client)
 
     @contextmanager
-    def connect():
+    def connect(**_):
         yield "db"
 
     monkeypatch.setattr(analysis_jobs, "connect", connect)

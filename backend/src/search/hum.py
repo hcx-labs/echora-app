@@ -5,10 +5,8 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-import psycopg
-
 from backend.search.service import SearchService
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from worker.melody.index import contour_index_key, load_contours, match_hum
 
 
@@ -30,11 +28,11 @@ class HumSearch(SearchService[HumQuery, dict]):
     scope: uuid.UUID
 
     def index_key(self) -> tuple[str, int, str]:
-        with psycopg.connect(DatabaseConfig.load().database_url) as connection:
+        with connect() as connection:
             return contour_index_key(connection, self.scope)
 
     def open(self) -> None:
-        with psycopg.connect(DatabaseConfig.load().database_url) as connection:
+        with connect() as connection:
             self.contours = load_contours(connection, self.scope)
 
     def search(self, query: HumQuery) -> dict:

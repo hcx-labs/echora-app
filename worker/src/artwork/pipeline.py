@@ -20,11 +20,9 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-import psycopg
-from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.errors import InputUnavailableError
 from core.library.connections import credential_cipher
 from core.media.config import MotionArtworkConfig
@@ -52,7 +50,7 @@ COVER_FETCH_SIZE = 1536
 
 
 def _connect():
-    return psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row)
+    return connect(dict_rows=True)
 
 
 def plan_tracks(cursor, user_id, url: str, external_ids: list[str]) -> list[dict]:

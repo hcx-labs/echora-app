@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import logging
 
-import psycopg
-
-from core.db.config import require_database_url
+from core.db.connection import connect
 from core.library.config import CredentialsConfig
 from worker.models.errors import TokenRejected
 
@@ -50,7 +48,7 @@ def account(token: str) -> str:
 
 def stored() -> tuple[str | None, str | None]:
     """(token, account) as saved, or (None, None)."""
-    with psycopg.connect(require_database_url()) as db:
+    with connect() as db:
         row = db.execute(
             "SELECT hf_token_encrypted, hf_token_account FROM analysis_settings WHERE singleton"
         ).fetchone()
@@ -73,7 +71,7 @@ def save(token: str | None) -> str | None:
     token = (token or "").strip() or None
     name = account(token) if token else None
     encrypted = _cipher().encrypt(token.encode()) if token else None
-    with psycopg.connect(require_database_url()) as db:
+    with connect() as db:
         db.execute(
             """INSERT INTO analysis_settings (singleton, hf_token_encrypted, hf_token_account, updated_at)
                VALUES (true, %s, %s, now()) ON CONFLICT (singleton) DO UPDATE

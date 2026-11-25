@@ -10,7 +10,7 @@ from fastapi import Depends
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
-from backend.library.db import connect
+from core.db.connection import connect
 from core.errors import NotFoundError
 from core.lyrics.translations import load_translations
 from worker.translation.pipeline import source_lines as translation_source_lines
@@ -52,7 +52,7 @@ class TrackLyricsEndpoint(Endpoint):
     response = TrackLyrics
 
     def handle(self, track_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> dict:
-        with connect() as connection, connection.cursor() as cursor:
+        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
             cursor.execute(
                 """SELECT l.text, l.language, l.source, l.provenance, l.availability_status,
                           karaoke.lines AS karaoke_lines, karaoke.model AS karaoke_model,

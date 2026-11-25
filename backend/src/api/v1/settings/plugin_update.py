@@ -11,7 +11,8 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.requests import PutRequest
 from backend.api.v1.settings._plugin import PluginSaved
-from backend.settings.plugin_integration import RankingProfile, connect, issue_key, profile_from
+from backend.settings.plugin_integration import RankingProfile, issue_key, profile_from
+from core.db.connection import connect
 from core.errors import ConflictError, NotFoundError
 from core.lyrics.sources import lyrics_paused
 
@@ -39,7 +40,7 @@ class UpdatePluginSettings(Endpoint):
         self, body: PluginUpdate, response: Response, user: SessionUser = Depends(current_user)
     ) -> dict[str, object]:
         response.headers["Cache-Control"] = "no-store"
-        with connect() as db:
+        with connect(dict_rows=True) as db:
             # Serialize enable/key generation and connection changes for this owner.
             db.execute("SELECT id FROM users WHERE id=%s FOR UPDATE", (user["id"],))
             connection_id = body.connection_id

@@ -4,14 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-import psycopg
-
-from core.db.config import require_database_url
-
-
-def connect() -> psycopg.Connection:
-    """A connection to the Echora database."""
-    return psycopg.connect(require_database_url())
+from core.db.connection import connect
 
 
 def source_rows(user_id, url: str, ids: list[str] | None = None) -> list[tuple[str, uuid.UUID]]:

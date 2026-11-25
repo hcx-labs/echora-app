@@ -13,10 +13,7 @@ import logging
 from collections.abc import Callable
 from datetime import datetime
 
-import psycopg
-from psycopg.rows import dict_row
-
-from core.db.config import require_database_url
+from core.db.connection import connect
 from worker.remote.compute import compute_settings
 from worker.remote.config import RemoteConfig
 from worker.remote.constants import GPU_TYPES
@@ -30,7 +27,7 @@ SETUP_JOB = "modal_setup"
 
 
 def _connect():
-    return psycopg.connect(require_database_url(), row_factory=dict_row)
+    return connect(dict_rows=True)
 
 
 def load(db=None) -> dict[str, object]:

@@ -58,8 +58,7 @@ def test_cancellation_and_reuse(monkeypatch, library_helpers):
     def connect(*a, **kw):
         yield db
 
-    monkeypatch.setattr(pipeline.psycopg, "connect", connect)
-    monkeypatch.setattr(pipeline, "require_database_url", lambda: "unused")
+    monkeypatch.setattr(pipeline, "connect", connect)
     monkeypatch.setattr(
         pipeline,
         "load_translations",
@@ -102,8 +101,7 @@ def test_declined_counted_apart_from_failed(monkeypatch, library_helpers):
     def connect(*a, **kw):
         yield db
 
-    monkeypatch.setattr(pipeline.psycopg, "connect", connect)
-    monkeypatch.setattr(pipeline, "require_database_url", lambda: "unused")
+    monkeypatch.setattr(pipeline, "connect", connect)
     monkeypatch.setattr(pipeline, "load_translations", lambda *a: [])
     errors = iter([TranslationError("declined"), TranslationError("transport_failure")])
 
@@ -136,8 +134,7 @@ def test_mixed_song_translates_only_its_foreign_lines(monkeypatch, library_helpe
     def connect(*a, **kw):
         yield db
 
-    monkeypatch.setattr(pipeline.psycopg, "connect", connect)
-    monkeypatch.setattr(pipeline, "require_database_url", lambda: "unused")
+    monkeypatch.setattr(pipeline, "connect", connect)
     monkeypatch.setattr(pipeline, "load_translations", lambda *a: [])
     # The rule flags the Urdu lines and the vocable; the model leaves the vocable as it is.
     monkeypatch.setattr(pipeline, "foreign_lines", lambda lines, language, sources: [1, 2, 3])
@@ -186,8 +183,7 @@ def test_mixed_needs_two_foreign_lines(monkeypatch, library_helpers):
     def connect(*a, **kw):
         yield db
 
-    monkeypatch.setattr(pipeline.psycopg, "connect", connect)
-    monkeypatch.setattr(pipeline, "require_database_url", lambda: "unused")
+    monkeypatch.setattr(pipeline, "connect", connect)
     monkeypatch.setattr(pipeline, "foreign_lines", lambda *a: [1])
     translate = MagicMock()
     monkeypatch.setattr(pipeline, "translate", translate)

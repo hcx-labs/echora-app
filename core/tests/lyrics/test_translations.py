@@ -34,7 +34,7 @@ def database(monkeypatch):
     with psycopg.connect(url, autocommit=True) as db:
         db.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
     scoped = make_conninfo(url, options=f"-c search_path={schema}")
-    monkeypatch.setattr(storage, "require_database_url", lambda: scoped)
+    monkeypatch.setattr("core.db.connection.require_database_url", lambda: scoped)
     versions = Path(__file__).resolve().parents[2] / "src/db/migrations/versions"
     migration = runpy.run_path(str(versions / "0051_external_ai_translations.py"))
     later = [runpy.run_path(str(next(versions.glob(f"{name}_*.py")))) for name in LATER]

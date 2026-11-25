@@ -27,7 +27,7 @@ def test_audio_profile_rebuild_lists_each_song_once(client, user, enqueue, monke
     connection = MagicMock()
     cursor = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
     cursor.fetchall.return_value = [("t2", "mert"), ("t1", "mert"), ("t2", "muq_mulan")]
-    monkeypatch.setattr(rebuild.psycopg, "connect", lambda url: connection)
+    monkeypatch.setattr(rebuild, "connect", lambda **_: connection)
     assert client.post("/api/v1/sync/audio-profiles").status_code == 202
     assert enqueue.call_args.kwargs == {
         "payload": {"track_ids": ["t1", "t2"]},

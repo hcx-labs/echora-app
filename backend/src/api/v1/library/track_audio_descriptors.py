@@ -10,7 +10,8 @@ from fastapi import Depends
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
-from backend.library.db import connect, require_visible
+from backend.library.db import require_visible
+from core.db.connection import connect
 from worker.library.descriptors import DESCRIPTOR_REVISION
 
 VOCAL_ACTIVITY_SQL = """SELECT activity.activity, activity.run_id
@@ -43,7 +44,7 @@ class TrackAudioDescriptors(Endpoint):
     response = AudioDescriptors
 
     def handle(self, track_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> dict:
-        with connect() as connection, connection.cursor() as cursor:
+        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
             require_visible(cursor, user["id"], track_id, "Track not found")
             cursor.execute(DESCRIPTORS_SQL, (track_id, DESCRIPTOR_REVISION))
             descriptors = cursor.fetchone()

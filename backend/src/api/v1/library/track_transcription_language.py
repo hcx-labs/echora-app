@@ -11,7 +11,8 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.requests import PutRequest
 from backend.api.responses import ResponseModel
-from backend.library.db import connect, require_visible
+from backend.library.db import require_visible
+from core.db.connection import connect
 from core.errors import ConflictError
 
 UPSERT_SQL = """INSERT INTO lyrics (track_id, source, text, provenance, availability_status)
@@ -51,7 +52,7 @@ class TrackTranscriptionLanguage(Endpoint):
         user: SessionUser = Depends(current_user),
     ) -> dict:
         language = body.language.strip()
-        with connect() as connection, connection.cursor() as cursor:
+        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
             require_visible(cursor, user["id"], track_id, "Track is not in your library")
             # The track is transcribed by the next sync that runs where generation is on.
             cursor.execute(

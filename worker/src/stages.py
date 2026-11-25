@@ -14,8 +14,9 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from core.compute import location
+from core.db.connection import connect
 from core.library.membership import attach_user_library, user_audio_track_ids
-from worker.library.sources import connect, source_rows
+from worker.library.sources import source_rows
 from worker.processing import ProcessingContext, Processor, run_stage
 from worker.remote.session import current as remote_session
 

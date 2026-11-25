@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import psycopg
 from fastapi import Depends
 
 from backend.api.deps import SessionUser
 from backend.api.endpoint import Endpoint
 from backend.api.v1.settings._deps import admin_required
 from backend.api.v1.settings._models import ModelSwitch, SwitchState
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 
 
 class TranscriptionSwitch(Endpoint):
@@ -29,7 +28,7 @@ class TranscriptionSwitch(Endpoint):
             else "transcription_processing_enabled"
         )
         with (
-            psycopg.connect(DatabaseConfig.load().database_url) as connection,
+            connect() as connection,
             connection.cursor() as cursor,
         ):
             cursor.execute(

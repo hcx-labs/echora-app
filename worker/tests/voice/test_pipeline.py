@@ -78,7 +78,7 @@ def test_voice_scope_and_cleanup_on_cancellation(monkeypatch, ids):
     connection = MagicMock()
     connection.__enter__.return_value = connection
     connection.cursor.return_value.__enter__.return_value = cursor
-    monkeypatch.setattr(pipeline.psycopg, "connect", lambda *a: connection)
+    monkeypatch.setattr(pipeline, "connect", lambda **_: connection)
     monkeypatch.setattr(pipeline, "resolve_library_id", lambda *a: "library")
     monkeypatch.setattr(pipeline, "configure_representations", MagicMock())
     monkeypatch.setattr(pipeline, "_create_run", lambda *a: "run")
@@ -109,7 +109,7 @@ def test_unknown_library_selects_nothing(monkeypatch):
 
     connection = MagicMock()
     connection.__enter__.return_value = connection
-    monkeypatch.setattr(pipeline.psycopg, "connect", lambda *a: connection)
+    monkeypatch.setattr(pipeline, "connect", lambda **_: connection)
 
     def unknown(*a):
         raise ValueError("unknown library")

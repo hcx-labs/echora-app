@@ -16,7 +16,7 @@ import psycopg
 import torch
 from psycopg.types.json import Jsonb
 
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.embeddings.audio_models import (
     AudioEmbeddingModel,
     EmbeddingResult,
@@ -866,7 +866,7 @@ def ingest_navidrome(
             setattr(summary, key, getattr(summary, key) + value)
 
     with (
-        psycopg.connect(DatabaseConfig.load().database_url) as connection,
+        connect() as connection,
         NavidromeClient(url, username, password) as navidrome,
     ):
         configure_representations(connection)

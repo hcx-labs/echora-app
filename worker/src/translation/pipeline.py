@@ -6,10 +6,7 @@ import logging
 import re
 import uuid
 
-import psycopg
-from psycopg.rows import dict_row
-
-from core.db.config import require_database_url
+from core.db.connection import connect
 from core.integrations.external_ai import LanguagePair
 from core.library.connections import credential_cipher
 from core.lyrics.translations import (
@@ -118,7 +115,7 @@ class TranslationProcessor(Processor[None, TranslationItem, list[dict]]):
             return []
         self.key = credential_cipher().decrypt(bytes(encrypted)).decode() if encrypted else None
         namespace = uuid.uuid5(uuid.NAMESPACE_URL, context.library_url.rstrip("/"))
-        with psycopg.connect(require_database_url(), row_factory=dict_row) as db:
+        with connect(dict_rows=True) as db:
             tracks = db.execute(
                 """SELECT DISTINCT l.track_id, l.text, l.language, l.provenance
                 FROM lyrics l JOIN user_track_links u ON u.track_id=l.track_id
@@ -221,7 +218,7 @@ class TranslationProcessor(Processor[None, TranslationItem, list[dict]]):
 
     @staticmethod
     def _lyrics_changed(item: TranslationItem) -> bool:
-        with psycopg.connect(require_database_url(), row_factory=dict_row) as db:
+        with connect(dict_rows=True) as db:
             latest = db.execute(
                 "SELECT text, provenance FROM lyrics WHERE track_id=%s", (item.track_id,)
             ).fetchone()

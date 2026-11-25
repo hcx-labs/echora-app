@@ -11,7 +11,8 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.requests import PutRequest
 from backend.api.responses import ResponseModel
-from backend.library.db import connect, require_visible
+from backend.library.db import require_visible
+from core.db.connection import connect
 
 UPSERT_SQL = """INSERT INTO lyrics (track_id, source, text, provenance, availability_status)
    VALUES (%s,'none',NULL,jsonb_build_object('manual_status',%s::text,'edited_at',now()::text),%s)
@@ -49,7 +50,7 @@ class TrackLyricsStatus(Endpoint):
         body: LyricsStatusUpdate,
         user: SessionUser = Depends(current_user),
     ) -> dict:
-        with connect() as connection, connection.cursor() as cursor:
+        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
             require_visible(cursor, user["id"], track_id, "Track is not in your library")
             cursor.execute(UPSERT_SQL, (track_id, body.status, body.status))
             cursor.execute("DELETE FROM karaoke_lyrics_variants WHERE track_id=%s", (track_id,))

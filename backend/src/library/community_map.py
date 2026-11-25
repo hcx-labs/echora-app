@@ -17,7 +17,8 @@ from fastapi.encoders import jsonable_encoder
 from psycopg.types.json import Jsonb
 from sklearn.metrics import adjusted_rand_score, silhouette_score
 
-from backend.library.db import connect, parse_vector
+from backend.library.db import parse_vector
+from core.db.connection import connect
 from core.errors import InvalidQueryError
 
 COMMUNITY_SNAPSHOT_REVISION = 1
@@ -124,7 +125,7 @@ def library_map(
         semantic_weight = 0.5 if semantic_weight is None else semantic_weight
         if not 0 <= semantic_weight <= 1:
             raise InvalidQueryError("semantic_weight must be between 0 and 1")
-    with connect() as connection, connection.cursor() as cursor:
+    with connect(dict_rows=True) as connection, connection.cursor() as cursor:
         if model == "blend":
             cursor.execute(
                 """
@@ -218,7 +219,7 @@ def library_map(
         ]
     )
     corpus_hash = hashlib.sha256(corpus_material.encode()).hexdigest()
-    with connect() as connection, connection.cursor() as cursor:
+    with connect(dict_rows=True) as connection, connection.cursor() as cursor:
         cursor.execute(
             """SELECT id, payload, created_at FROM community_snapshots
                WHERE model_name=%s AND semantic_weight=%s AND corpus_hash=%s AND algorithm_revision=%s""",
@@ -400,7 +401,7 @@ def library_map(
         "silhouette": clustering["silhouette"],
         "seed_stability_ari": clustering["seed_stability_ari"],
     }
-    with connect() as connection, connection.cursor() as cursor:
+    with connect(dict_rows=True) as connection, connection.cursor() as cursor:
         cursor.execute(
             """INSERT INTO community_snapshots
                  (model_name, semantic_weight, corpus_hash, algorithm_revision, track_count, parameters, metrics, payload)

@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import psycopg
 from fastapi import Depends
-from psycopg.rows import dict_row
 
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 
 
 class HumIndexState(ResponseModel):
@@ -30,7 +28,7 @@ class HumIndexStatus(Endpoint):
 
     def handle(self, user: SessionUser = Depends(current_user)) -> dict:
         with (
-            psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
+            connect(dict_rows=True) as connection,
             connection.cursor() as cursor,
         ):
             cursor.execute(

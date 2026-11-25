@@ -12,11 +12,9 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import numpy as np
-import psycopg
-from psycopg.rows import dict_row
 
 from backend.search.service import SearchService, search_now
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.errors import ConflictError
 
 _FILTERS = {
@@ -48,7 +46,7 @@ class _CorpusService(SearchService[None, Corpus]):
         Any added, replaced or unlinked embedding, or a switch of the active representation,
         changes it.
         """
-        with psycopg.connect(DatabaseConfig.load().database_url) as connection:
+        with connect() as connection:
             (digest,) = connection.execute(
                 f"""SELECT coalesce(md5(string_agg(e.track_id::text || ':' || e.run_id::text, ','
                                                 ORDER BY e.track_id, e.run_id)), '')
@@ -62,7 +60,7 @@ class _CorpusService(SearchService[None, Corpus]):
 
     def open(self) -> None:
         with (
-            psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
+            connect(dict_rows=True) as connection,
             connection.cursor() as cursor,
         ):
             cursor.execute(

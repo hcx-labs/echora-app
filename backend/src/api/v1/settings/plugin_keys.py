@@ -9,7 +9,8 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.requests import PostRequest
 from backend.api.v1.settings._plugin import GeneratedKey
-from backend.settings.plugin_integration import connect, issue_key, profile_from
+from backend.settings.plugin_integration import issue_key, profile_from
+from core.db.connection import connect
 
 
 class KeyCreate(PostRequest):
@@ -32,7 +33,7 @@ class CreatePluginKey(Endpoint):
         self, body: KeyCreate, response: Response, user: SessionUser = Depends(current_user)
     ) -> dict[str, object]:
         response.headers["Cache-Control"] = "no-store"
-        with connect() as db:
+        with connect(dict_rows=True) as db:
             db.execute("SELECT id FROM users WHERE id=%s FOR UPDATE", (user["id"],))
             row = db.execute(
                 "SELECT * FROM navidrome_integrations WHERE user_id=%s", (user["id"],)

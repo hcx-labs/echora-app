@@ -13,11 +13,10 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-import psycopg
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.media.config import MotionArtworkConfig
 from worker.artwork.config import ComfyUIConfig
 from worker.artwork.render import (
@@ -118,7 +117,7 @@ class MotionArtworkSettings(BaseModel):
 
 
 def _connect():
-    return psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row)
+    return connect(dict_rows=True)
 
 
 def load_settings(cursor) -> MotionArtworkSettings:

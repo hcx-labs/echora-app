@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-import psycopg
 from fastapi import Depends
-from psycopg.rows import dict_row
 
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
@@ -15,7 +13,7 @@ from core.curation.journeys import (
     select_journey,
     spherical_targets,
 )
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.errors import InvalidQueryError, NotFoundError
 
 
@@ -31,7 +29,7 @@ class JourneyPreview(Endpoint):
         if request.start_track_id == request.end_track_id:
             raise InvalidQueryError("Journey endpoints must be different tracks")
         with (
-            psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
+            connect(dict_rows=True) as connection,
             connection.cursor() as cursor,
         ):
             cursor.execute(

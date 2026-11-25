@@ -8,10 +8,11 @@ from dataclasses import dataclass
 
 import psycopg
 
+from core.db.connection import connect
 from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient
 from worker.library.fingerprints import compute_chromaprint, store_fingerprint
-from worker.library.sources import connect, source_rows
+from worker.library.sources import source_rows
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
 
 

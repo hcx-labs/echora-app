@@ -8,7 +8,7 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
 from backend.api.v1.library._models import NameCount
-from backend.library.db import connect
+from core.db.connection import connect
 
 
 class Facets(ResponseModel):
@@ -34,7 +34,7 @@ class FacetsEndpoint(Endpoint):
         user: SessionUser = Depends(current_user),
     ) -> dict:
         limit = min(max(limit, 1), 50)
-        with connect() as connection, connection.cursor() as cursor:
+        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
             cursor.execute(
                 """SELECT artist AS name, count(*) AS tracks FROM tracks t
                    WHERE artist IS NOT NULL AND artist ILIKE %s

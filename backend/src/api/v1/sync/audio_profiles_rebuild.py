@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import psycopg
 from fastapi import Depends
 
 import core.jobs.queue as jobs
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import JobSnapshot
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.revisions import SUPPORTED_PROFILE_MODELS
 
 
@@ -23,7 +22,7 @@ class AudioProfilesRebuild(Endpoint):
 
     def handle(self, user: SessionUser = Depends(current_user)) -> dict:
         with (
-            psycopg.connect(DatabaseConfig.load().database_url) as connection,
+            connect() as connection,
             connection.cursor() as cursor,
         ):
             cursor.execute(

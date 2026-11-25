@@ -10,7 +10,7 @@ import re
 from xml.etree import ElementTree as ET
 
 from backend.plugin.scope import library_namespace
-from backend.settings.plugin_integration import connect
+from core.db.connection import connect
 from core.lyrics.backing import BACKING_VOICE, separate_text, separate_voices, tag_bracketed_backing
 from core.lyrics.sources import lyrics_paused
 from core.lyrics.translations import source_checksum
@@ -262,7 +262,7 @@ def lyrics_response(row, translations, profile):
 def load_lyrics(principal, source_id):
     if not principal["profile"].serve_lyrics:
         return {"lyrics": []}
-    with connect() as db:
+    with connect(dict_rows=True) as db:
         if lyrics_paused(db, principal["url"]):
             # Empty is Navidrome's normal provider fallback signal. Never change
             # the saved preference or revoke the key to suppress lyrics alone.

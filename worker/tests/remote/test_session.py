@@ -415,7 +415,7 @@ def ingest_batch(monkeypatch):
         "store_track_contours": Mock(return_value=2),
     }.items():
         monkeypatch.setattr(ingest, name, value)
-    monkeypatch.setattr(ingest.psycopg, "connect", Mock(return_value=connection))
+    monkeypatch.setattr(ingest, "connect", Mock(return_value=connection))
     monkeypatch.setattr(ingest, "NavidromeClient", Mock(return_value=client))
     monkeypatch.setattr(ingest.torch.cuda, "is_available", lambda: False)
     # A Modal batch must never load an embedding model locally.
@@ -520,7 +520,7 @@ def test_modal_batch_classifies_voice_remotely(monkeypatch):
         "shared_voice_model": Mock(side_effect=AssertionError("local model in Modal batch")),
     }.items():
         monkeypatch.setattr(voice_pipeline, name, value)
-    monkeypatch.setattr(voice_pipeline.psycopg, "connect", Mock(return_value=connection))
+    monkeypatch.setattr(voice_pipeline, "connect", Mock(return_value=connection))
     remote = Mock()
     remote.upload_audio.side_effect = lambda audio: sha256(audio).hexdigest()
     remote.voice.side_effect = lambda digests: [
@@ -556,7 +556,7 @@ def test_modal_batch_aligns_karaoke_remotely(monkeypatch):
         "_stop_fa_kara_worker": Mock(),
     }.items():
         monkeypatch.setattr(karaoke_pipeline, name, value)
-    monkeypatch.setattr(karaoke_pipeline.psycopg, "connect", Mock(return_value=connection))
+    monkeypatch.setattr(karaoke_pipeline, "connect", Mock(return_value=connection))
     aligned = {
         "lines": [],
         "alignment_document": {},
@@ -720,7 +720,7 @@ def test_saved_token_is_verified_and_encrypted(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
     reset_config_cache()
     db = MagicMock()
-    monkeypatch.setattr(huggingface_token.psycopg, "connect", lambda url: nullcontext(db))
+    monkeypatch.setattr(huggingface_token, "connect", lambda **_: nullcontext(db))
     monkeypatch.setattr(
         huggingface_token, "account", lambda token: "hcX02" if token == "hf_good" else 1 / 0
     )

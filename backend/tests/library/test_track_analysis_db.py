@@ -8,7 +8,6 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-import backend.library.db as library_db
 from backend.api.v1.library.track_audio_descriptors import TrackAudioDescriptors
 from backend.api.v1.library.track_visual_features import TrackVisualFeatures
 from backend.api.v1.library.track_waveform import TrackWaveform
@@ -75,7 +74,7 @@ def visible(db, monkeypatch):
         finally:
             db.row_factory = previous
 
-    monkeypatch.setattr(library_db.psycopg, "connect", same_connection)
+    monkeypatch.setattr(psycopg, "connect", same_connection)
     return {"id": user}, track
 
 

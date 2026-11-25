@@ -24,8 +24,8 @@ from backend.library.artists import (
 )
 from backend.plugin.scope import library_namespace
 from backend.search.service import SearchService, search_now
-from backend.settings.plugin_integration import connect
 from core.curation.journeys import normalize_rows, select_journey, spherical_targets
+from core.db.connection import connect
 from core.errors import ConflictError, NotFoundError
 
 DIMENSIONS = {"muq": 512, "mert": 768, "lyrics": 1024}
@@ -94,7 +94,7 @@ class PluginCorpus(SearchService[None, Corpus]):
 
     def index_key(self) -> str:
         user_id, namespace = self.scope
-        with connect() as db:
+        with connect(dict_rows=True) as db:
             return db.execute(
                 f"""SELECT md5(coalesce(string_agg(ROW({_KEY_COLUMNS})::text, ','
                                    ORDER BY t.id, ts.external_id), '')) AS key
@@ -104,7 +104,7 @@ class PluginCorpus(SearchService[None, Corpus]):
 
     def open(self) -> None:
         user_id, namespace = self.scope
-        with connect() as db:
+        with connect(dict_rows=True) as db:
             rows = db.execute(
                 f"""SELECT {_COLUMNS},
                        muq.embedding::text AS muq, mert.embedding::text AS mert,

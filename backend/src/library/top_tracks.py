@@ -6,8 +6,8 @@ import threading
 import time
 import uuid
 
-from backend.library.db import connect
 from core.curation.listening import navidrome_play_counts
+from core.db.connection import connect
 from core.integrations.navidrome import NavidromeClient
 from core.library.connections import load_connection
 
@@ -36,7 +36,7 @@ def navidrome_ranking(user_id: str, connection_id: str) -> list[tuple[str, int]]
 
 def library_track_rows(user_id: object) -> list[dict[str, object]]:
     """Every song of the user's library with its Navidrome source id and cover."""
-    with connect() as connection, connection.cursor() as cursor:
+    with connect(dict_rows=True) as connection, connection.cursor() as cursor:
         cursor.execute(
             """SELECT t.id::text AS id, t.title, t.artist, t.album, t.duration_seconds,
                       source.external_id AS source_id, source.cover_art

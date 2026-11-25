@@ -11,7 +11,7 @@ from fastapi.encoders import jsonable_encoder
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
-from backend.library.db import connect
+from core.db.connection import connect
 from core.errors import InvalidQueryError, NotFoundError
 from core.revisions import SUPPORTED_PROFILE_MODELS
 
@@ -48,7 +48,7 @@ class TrackAudioProfile(Endpoint):
     ) -> dict:
         if model not in SUPPORTED_PROFILE_MODELS:
             raise InvalidQueryError("Audio profiles support muq_mulan or mert")
-        with connect() as connection, connection.cursor() as cursor:
+        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
             cursor.execute(
                 """SELECT tap.*, profile_run.model_revision AS profile_revision,
                           profile_run.config AS profile_config, profile_run.created_at AS profile_created_at,

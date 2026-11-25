@@ -4,16 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-import psycopg
-from psycopg.rows import dict_row
-
-from core.db.config import DatabaseConfig
 from core.errors import NotFoundError
-
-
-def connect() -> psycopg.Connection:
-    """A connection with dict rows."""
-    return psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row)
 
 
 def require_visible(cursor, user_id, track_id: uuid.UUID, detail: str) -> None:

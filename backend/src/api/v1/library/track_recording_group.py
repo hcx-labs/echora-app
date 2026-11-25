@@ -11,7 +11,7 @@ from fastapi import Depends
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
-from backend.library.db import connect
+from core.db.connection import connect
 
 
 class RecordingGroup(ResponseModel):
@@ -41,7 +41,7 @@ class TrackRecordingGroup(Endpoint):
     response = TrackRecordingGroupState
 
     def handle(self, track_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> dict:
-        with connect() as connection, connection.cursor() as cursor:
+        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
             cursor.execute(
                 """SELECT rg.id, rg.status, rg.canonical_track_id, rg.created_at, rg.updated_at
                    FROM recording_group_members member JOIN recording_groups rg ON rg.id=member.group_id

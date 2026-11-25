@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import psycopg
 from fastapi import Depends
-from psycopg.rows import dict_row
 
 from backend.api.deps import SessionUser
 from backend.api.endpoint import Endpoint
 from backend.api.v1.settings._deps import admin_required
 from backend.api.v1.settings._models import ModelSwitch, SwitchWithBacklog
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.revisions import MELODY_CONTOUR_REVISION
 
 
@@ -27,7 +25,7 @@ class HumSwitch(Endpoint):
     ) -> dict[str, object]:
         column = "hum_modal_enabled" if request.location == "modal" else "hum_processing_enabled"
         with (
-            psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
+            connect(dict_rows=True) as connection,
             connection.cursor() as cursor,
         ):
             cursor.execute(

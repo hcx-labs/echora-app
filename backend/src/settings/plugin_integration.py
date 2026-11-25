@@ -13,12 +13,10 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-import psycopg
 from fastapi import Header, HTTPException
-from psycopg.rows import dict_row
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 
 
 class RankingProfile(BaseModel):
@@ -33,10 +31,6 @@ class RankingProfile(BaseModel):
     include_translations: bool = True
     lyrics_format: Literal["ttml", "lrc"] = "ttml"
     key_expiry_days: int = Field(default=90, ge=1, le=3650)
-
-
-def connect() -> psycopg.Connection:
-    return psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row)
 
 
 def digest(token: str) -> str:
@@ -79,7 +73,7 @@ def authenticate(authorization: str | None = Header(default=None)) -> dict[str, 
     )
     if not authorization or not authorization.startswith("Bearer "):
         raise unauthorized
-    with connect() as db:
+    with connect(dict_rows=True) as db:
         row = db.execute(
             """SELECT k.id AS key_id,k.user_id,k.connection_id,n.url,i.profile
             FROM navidrome_api_keys k

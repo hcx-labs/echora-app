@@ -37,7 +37,7 @@ def setup(monkeypatch, provider, stored=None):
     connection.cursor.side_effect = lambda: nullcontext(cursor)
     monkeypatch.setenv("DATABASE_URL", "unused")
     reset_config_cache()
-    monkeypatch.setattr(lp.psycopg, "connect", lambda _: nullcontext(connection))
+    monkeypatch.setattr(lp, "connect", lambda **_: nullcontext(connection))
     client = Mock()
 
     def lyrics(key):

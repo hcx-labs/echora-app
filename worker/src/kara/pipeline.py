@@ -18,10 +18,9 @@ import unicodedata
 import uuid
 from pathlib import Path
 
-import psycopg
 from psycopg.types.json import Jsonb
 
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient
 from core.lyrics.backing import BACKING_VOICE, tag_bracketed_backing
@@ -625,7 +624,7 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
     current_message = "Karaoke alignment already current"
 
     def plan(self, context: ProcessingContext) -> list[KaraokeItem]:
-        with psycopg.connect(DatabaseConfig.load().database_url) as connection:
+        with connect() as connection:
             self.library_id = resolve_library_id(connection, context.library_url)
             model_revision = _stored_model_revision(current_model_revision())
             planned = plan_karaoke(
@@ -672,7 +671,7 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
             context.check()
         self.locked = True
         context.check()
-        self.connection = psycopg.connect(DatabaseConfig.load().database_url)
+        self.connection = connect()
         self.client = NavidromeClient(*context.library)
         self.client.__enter__()
 

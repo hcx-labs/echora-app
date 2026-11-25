@@ -24,12 +24,10 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-import psycopg
 from openai import APIConnectionError, APIError, OpenAI, omit
-from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from core.db.config import require_database_url
+from core.db.connection import connect
 from core.embeddings.config import EmbeddingConfig
 from core.integrations.claude import ClaudeError, complete_json
 from core.integrations.external_ai import ExternalAISettings
@@ -167,7 +165,7 @@ def describe(
 def _pending(user_id, url, external_ids) -> list[dict]:
     """Tracks whose lyrics have no current description (failures retried after a week)."""
     namespace = uuid.uuid5(uuid.NAMESPACE_URL, url.rstrip("/"))
-    with psycopg.connect(require_database_url(), row_factory=dict_row) as db:
+    with connect(dict_rows=True) as db:
         return db.execute(
             """SELECT DISTINCT l.track_id, l.text, t.title
                FROM lyrics l JOIN tracks t ON t.id=l.track_id
@@ -188,7 +186,7 @@ def _pending(user_id, url, external_ids) -> list[dict]:
 def _save(track_id, checksum, model, *, description=None, themes=(), vector=None, code=None):
     from worker.lyrics.pipeline import _vector_literal
 
-    with psycopg.connect(require_database_url()) as db:
+    with connect() as db:
         db.execute(
             """INSERT INTO track_lyric_themes (track_id, source_checksum, prompt_revision, model,
                  status, error_code, description, themes, embedding, embedding_model, updated_at)

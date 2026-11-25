@@ -13,11 +13,10 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import psycopg
-from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from sklearn.metrics import adjusted_rand_score
 
-from core.db.config import require_database_url
+from core.db.connection import connect
 from core.embeddings.representations import (
     DEFAULT_PARAMETERS,
     AudioProfileParameters,
@@ -574,7 +573,7 @@ class AudioProfileProcessor(Processor[None, ProfileItem, TrackAudioProfile]):
     def plan(self, context: ProcessingContext) -> list[ProfileItem]:
         from core.embeddings.representations import configure_representations
 
-        with psycopg.connect(require_database_url(), row_factory=dict_row) as connection:
+        with connect(dict_rows=True) as connection:
             configure_representations(connection)
             # Get or create: the run of the current profile parameters.
             self.run_id = _create_profile_run(connection, self.model_name, self.parameters)
@@ -616,7 +615,7 @@ class AudioProfileProcessor(Processor[None, ProfileItem, TrackAudioProfile]):
         ]
 
     def open(self, context, items) -> None:
-        self.connection = psycopg.connect(require_database_url(), row_factory=dict_row)
+        self.connection = connect(dict_rows=True)
 
     def process(self, context, items):
         for item in items:

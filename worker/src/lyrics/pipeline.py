@@ -14,7 +14,7 @@ import psycopg
 import torch
 from psycopg.types.json import Jsonb
 
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.embeddings.audio_models import release_model
 from core.embeddings.config import EmbeddingConfig
 from core.embeddings.representations import configure_representations, embedding_config
@@ -239,7 +239,7 @@ class LyricsProcessor(Processor[None, LyricsItem, LyricsResult]):
 
     def plan(self, context: ProcessingContext) -> list[LyricsItem]:
         ids = list(context.track_ids)
-        with psycopg.connect(DatabaseConfig.load().database_url) as connection:
+        with connect() as connection:
             self.library_id = resolve_library_id(connection, context.library_url)
             configure_representations(connection)
             planned = plan_lyrics(connection, ids, library_id=self.library_id).lyrics_external_ids
@@ -265,9 +265,7 @@ class LyricsProcessor(Processor[None, LyricsItem, LyricsResult]):
 
     def open(self, context, items) -> None:
         self.stack = ExitStack()
-        self.connection = self.stack.enter_context(
-            psycopg.connect(DatabaseConfig.load().database_url)
-        )
+        self.connection = self.stack.enter_context(connect())
         self.client = self.stack.enter_context(NavidromeClient(*context.library))
 
     def close(self) -> None:
@@ -582,9 +580,7 @@ class TranscriptRefinementProcessor(Processor[None, RefinementItem, dict[str, ob
 
     def open(self, context, items) -> None:
         self.stack = ExitStack()
-        self.connection = self.stack.enter_context(
-            psycopg.connect(DatabaseConfig.load().database_url)
-        )
+        self.connection = self.stack.enter_context(connect())
 
     def close(self) -> None:
         if hasattr(self, "stack"):
@@ -695,9 +691,7 @@ class LyricsEmbeddingProcessor(Processor[None, EmbeddingItem, object]):
                 config.lyrics_model_id, config.lyrics_revision, device
             )
         self.stack = ExitStack()
-        self.connection = self.stack.enter_context(
-            psycopg.connect(DatabaseConfig.load().database_url)
-        )
+        self.connection = self.stack.enter_context(connect())
         self.run_id = _create_run(self.connection, self.model)
         self.attempt_id = start_attempt(self.connection, self.run_id, len(items))
         self.connection.commit()

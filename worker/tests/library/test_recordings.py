@@ -14,7 +14,7 @@ def test_fingerprints_missing_songs_and_counts_matches(monkeypatch):
     cursor = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
     # A has a fingerprint already; B and C need one.
     cursor.fetchone.side_effect = [None, (200.0,), (180.0,)]
-    monkeypatch.setattr(recordings, "connect", lambda: connection)
+    monkeypatch.setattr(recordings, "connect", lambda **_: connection)
     monkeypatch.setattr(recordings, "source_rows", lambda *a: [("a", A), ("b", B), ("c", C)])
 
     class Client:

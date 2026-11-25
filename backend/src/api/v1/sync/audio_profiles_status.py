@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import psycopg
 from fastapi import Depends
-from psycopg.rows import dict_row
 
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.v1.sync._models import AudioProfileCoverage
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.revisions import AUDIO_PROFILE_REVISION, SUPPORTED_PROFILE_MODELS
 
 
@@ -23,7 +21,7 @@ class AudioProfilesStatus(Endpoint):
     def handle(self, user: SessionUser = Depends(current_user)) -> dict:
         models: dict[str, dict[str, int]] = {}
         with (
-            psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
+            connect(dict_rows=True) as connection,
             connection.cursor() as cursor,
         ):
             for model_name in SUPPORTED_PROFILE_MODELS:

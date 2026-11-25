@@ -49,7 +49,7 @@ def database(monkeypatch):
     # A's contours are already in the run; B needs extracting; C's audio is unreachable.
     cursor.fetchone.side_effect = [(3,), (0,), (0,)]
     connections = iter([planning, connection])
-    monkeypatch.setattr(corpus, "connect", lambda: next(connections))
+    monkeypatch.setattr(corpus, "connect", lambda **_: next(connections))
     monkeypatch.setattr(corpus, "source_rows", lambda *a: [("a", A), ("b", B), ("c", C)])
     monkeypatch.setattr(corpus, "NavidromeClient", Client)
     stored = []
@@ -88,6 +88,6 @@ def test_remote_batches_extract_on_modal(database):
 def test_unknown_corpus_fails_the_job(monkeypatch):
     planning = MagicMock()
     planning.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchone.return_value = None
-    monkeypatch.setattr(corpus, "connect", lambda: planning)
+    monkeypatch.setattr(corpus, "connect", lambda **_: planning)
     with pytest.raises(ValueError, match="Unknown hum corpus"):
         run_stage(corpus.MelodyCorpusProcessor(), corpus_context())

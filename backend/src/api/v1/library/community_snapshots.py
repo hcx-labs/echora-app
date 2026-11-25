@@ -11,7 +11,7 @@ from fastapi import Depends
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
-from backend.library.db import connect
+from core.db.connection import connect
 
 
 class CommunitySnapshotSummary(ResponseModel):
@@ -43,7 +43,7 @@ class CommunitySnapshots(Endpoint):
 
     def handle(self, limit: int = 20, user: SessionUser = Depends(current_user)) -> dict:
         limit = min(max(limit, 1), 100)
-        with connect() as connection, connection.cursor() as cursor:
+        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
             cursor.execute(
                 """SELECT id, model_name, semantic_weight, corpus_hash, algorithm_revision,
                           track_count, parameters, metrics, created_at

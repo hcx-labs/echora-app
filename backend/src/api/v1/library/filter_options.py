@@ -8,7 +8,7 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
 from backend.api.v1.library._models import NameCount
-from backend.library.db import connect
+from core.db.connection import connect
 
 
 class FilterOptions(ResponseModel):
@@ -29,7 +29,7 @@ class FilterOptionsEndpoint(Endpoint):
     response = FilterOptions
 
     def handle(self, user: SessionUser = Depends(current_user)) -> dict:
-        with connect() as db:
+        with connect(dict_rows=True) as db:
             rows = db.execute(
                 """WITH visible AS MATERIALIZED (
                 SELECT DISTINCT track_id FROM user_track_links WHERE user_id=%s

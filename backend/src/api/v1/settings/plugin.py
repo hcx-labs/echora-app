@@ -7,7 +7,8 @@ from fastapi import Depends, Response
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.v1.settings._plugin import PluginSettingsView
-from backend.settings.plugin_integration import connect, profile_from
+from backend.settings.plugin_integration import profile_from
+from core.db.connection import connect
 from core.lyrics.sources import lyrics_paused
 
 
@@ -22,7 +23,7 @@ class PluginSettings(Endpoint):
         self, response: Response, user: SessionUser = Depends(current_user)
     ) -> dict[str, object]:
         response.headers["Cache-Control"] = "no-store"
-        with connect() as db:
+        with connect(dict_rows=True) as db:
             row = db.execute(
                 "SELECT * FROM navidrome_integrations WHERE user_id=%s", (user["id"],)
             ).fetchone()

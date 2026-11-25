@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import uuid
 
-import psycopg
 from fastapi import Depends
 
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.v1.sync._models import SyncStatus
 from backend.sync.connections import owned_connection
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.errors import IntegrationError
 from core.integrations.navidrome import NavidromeClient
 from core.library.membership import relink_renumbered_sources
@@ -34,7 +33,7 @@ class ConnectionSyncStatus(Endpoint):
             raise IntegrationError("Could not scan the Navidrome library") from error
         namespace = uuid.uuid5(uuid.NAMESPACE_URL, credentials[0].rstrip("/"))
         with (
-            psycopg.connect(DatabaseConfig.load().database_url) as connection,
+            connect() as connection,
             connection.cursor() as cursor,
         ):
             # Heal a renumbered library here too, so it never shows as unanalyzed.

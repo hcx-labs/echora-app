@@ -10,8 +10,9 @@ from fastapi import Depends
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
-from backend.library.db import connect, require_visible
+from backend.library.db import require_visible
 from backend.library.melody_preview import melody_preview
+from core.db.connection import connect
 from worker.library.waveforms import WAVEFORM_REVISION
 
 
@@ -34,7 +35,7 @@ class TrackWaveform(Endpoint):
     response = Waveform
 
     def handle(self, track_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> dict:
-        with connect() as connection, connection.cursor() as cursor:
+        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
             require_visible(cursor, user["id"], track_id, "Track not found")
             cursor.execute(
                 "SELECT revision, duration_seconds, peaks FROM track_waveforms WHERE track_id=%s AND revision=%s",

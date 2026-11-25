@@ -11,8 +11,9 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
 from backend.api.v1.library.track_audio_descriptors import DESCRIPTORS_SQL, VOCAL_ACTIVITY_SQL
-from backend.library.db import connect, require_visible
+from backend.library.db import require_visible
 from backend.library.melody_preview import melody_preview
+from core.db.connection import connect
 from core.revisions import MELODY_CONTOUR_REVISION
 from worker.library.descriptors import DESCRIPTOR_REVISION
 from worker.library.visual_features import VISUAL_FEATURE_REVISION
@@ -45,7 +46,7 @@ class TrackVisualFeatures(Endpoint):
     response = VisualFeatures
 
     def handle(self, track_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> dict:
-        with connect() as connection, connection.cursor() as cursor:
+        with connect(dict_rows=True) as connection, connection.cursor() as cursor:
             require_visible(cursor, user["id"], track_id, "Track not found")
             cursor.execute(
                 """SELECT revision, status, duration_seconds, hop_seconds, features, created_at
