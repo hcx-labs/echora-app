@@ -19,7 +19,7 @@ def execution(monkeypatch):
     connection.__enter__.return_value = connection
     client = MagicMock()
     client.__enter__.return_value = client
-    monkeypatch.setattr(ingest.psycopg, "connect", Mock(return_value=connection))
+    monkeypatch.setattr(ingest, "connect", Mock(return_value=connection))
     monkeypatch.setattr(ingest, "NavidromeClient", Mock(return_value=client))
     monkeypatch.setattr(ingest, "configure_representations", Mock())
     monkeypatch.setattr(ingest, "_library", Mock(return_value=uuid4()))

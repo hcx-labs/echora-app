@@ -14,10 +14,10 @@ from core.curation.listening import (
     match_top_tracks,
     top_tracks,
 )
-from core.db.models import UserPreference
 from core.db.session import session_scope
 from core.errors import IntegrationError, InvalidQueryError
 from core.library.connections import credential_cipher
+from core.users import store as users
 
 
 class TopTrack(ResponseModel):
@@ -61,7 +61,7 @@ class TopTracksEndpoint(Endpoint):
         if period not in TOP_TRACK_PERIODS:
             raise InvalidQueryError("Unknown listening period")
         with session_scope() as session:
-            preference = session.get(UserPreference, user["id"])
+            preference = users.preference(session, user["id"])
             username = preference.lastfm_username if preference else None
             encrypted_key = (
                 bytes(preference.lastfm_api_key_encrypted)

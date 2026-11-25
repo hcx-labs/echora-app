@@ -4,17 +4,14 @@ from __future__ import annotations
 
 import uuid
 
-import psycopg
-from psycopg.rows import dict_row
-
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.revisions import SUPPORTED_PROFILE_MODELS
 
 
 def attach_user_library(user_id: uuid.UUID, source_url: str) -> None:
     namespace = uuid.uuid5(uuid.NAMESPACE_URL, source_url.rstrip("/"))
     with (
-        psycopg.connect(DatabaseConfig.load().database_url) as connection,
+        connect() as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -32,7 +29,7 @@ def reconcile_user_tracks(
 
     namespace = uuid.uuid5(uuid.NAMESPACE_URL, source_url.rstrip("/"))
     with (
-        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
+        connect(dict_rows=True) as connection,
         connection.cursor() as cursor,
     ):
         # A first full catalog can precede all source/identity discovery.
@@ -49,7 +46,7 @@ def reconcile_user_tracks(
 
 def user_audio_track_ids(user_id: uuid.UUID) -> list[uuid.UUID]:
     with (
-        psycopg.connect(DatabaseConfig.load().database_url) as connection,
+        connect() as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(

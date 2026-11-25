@@ -68,6 +68,7 @@ core/src/
     embeddings/    MuQ-MuLan, MERT, BGE-M3 encoders (tracks in the worker, text queries in the backend)
     recordings/    recording fingerprint encoder and matcher
     lyrics/        lyrics documents, language detection, storage formats
+  <domain>/store.py  each domain's queries; the backend and worker call these, never SQL
 ```
 
 ### worker (`worker`)
@@ -413,3 +414,32 @@ Each branch is based on the previous one and keeps every test suite green.
    - **Order.** One domain at a time, each with its own tests. The schema, migrations and stored
      formats do not change. Branch 2 prepares this: each processor's queries sit behind its
      `plan()` and `persist()` helpers, so moving them into a store is mechanical.
+
+   As built:
+
+   - **Connections.** `core.db.connection.connect(dict_rows=False, autocommit=False)` is the only
+     way to open a psycopg connection (a test rejects `psycopg.connect(` anywhere else). ORM code
+     uses `core.db.session.session_scope()` as before.
+   - **Stores.** `core/<domain>/store.py` for library (with `library/browse.py` for the track
+     browser's filters), lyrics, embeddings, settings, users, plugin, curation, artwork, analysis
+     (run and attempt bookkeeping), recordings, profiles, voice, melody and planning. A store function takes the connection (or ORM `Session`) first and never
+     commits: the caller owns the transaction, so a multi-statement change stays one transaction
+     exactly as before. Reads go through `fetch_one`/`fetch_all`, which return dict rows whatever
+     row factory the caller's connection has. Rows are `TypedDict`s or plain dicts, not pydantic
+     models, so every response and job summary is byte-identical. Stores raise `core.errors`
+     exceptions (`NotFoundError` from `require_*` lookups).
+   - **Session or connection.** Tables that already had ORM models (users, preferences, sessions,
+     OIDC settings and allowlist, Navidrome connections, curations) are queried through the ORM
+     in their stores. Everything else stays SQL, moved verbatim: the settings singletons use
+     column-list upserts that a model would not simplify, and adding models no code uses would be
+     dead code. `core/tests/db/test_models.py` migrates an empty database to head and checks
+     every model's tables, columns, types and nullability against it.
+   - **Layering.** `backend/tests/test_layering.py` and `worker/tests/test_layering.py` fail on
+     SQL, cursors, psycopg or SQLAlchemy query imports and ORM session queries under `src/`. The
+     worker's test allows `import psycopg` in the stage modules that annotate the connection
+     they pass to stores, and fails when an allowlist entry goes stale.
+     Modules in `core` that already held their domain's SQL (`jobs/queue.py`,
+     `lyrics/translations.py`, `library/relink.py`, `library/visibility.py`,
+     `library/membership.py`, `curation/preview.py`, `features.py`) are left where they are.
+   - **Not adopted.** Connection pooling: requests and jobs still open a connection per use, as
+     before. A pool shared with the executor's forked processes is its own change.

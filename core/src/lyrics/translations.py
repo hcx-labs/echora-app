@@ -8,11 +8,9 @@ translations, and the API, which serves them.
 import hashlib
 import json
 
-import psycopg
-from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from core.db.config import require_database_url
+from core.db.connection import connect
 from core.errors import EchoraError
 from core.integrations.external_ai import ExternalAISettings, LanguagePair
 
@@ -49,7 +47,7 @@ def validate_lines(value, count: int) -> list[dict]:
 
 
 def load_settings():
-    with psycopg.connect(require_database_url(), row_factory=dict_row) as db:
+    with connect(dict_rows=True) as db:
         row = db.execute("SELECT * FROM external_ai_settings WHERE singleton").fetchone()
     if row is None:
         return ExternalAISettings(), None
@@ -59,7 +57,7 @@ def load_settings():
 
 
 def save_settings(settings, encrypted_key, *, replace_key):
-    with psycopg.connect(require_database_url()) as db:
+    with connect() as db:
         row = db.execute(
             """
             INSERT INTO external_ai_settings (singleton, enabled, provider, url, model, prompt, language_pairs,
@@ -105,7 +103,7 @@ def save_translation(
     if provenance not in {"ai", "provider"}:
         raise ValueError("Invalid provenance")
     lines = validate_lines(translated_lines, len(source_lines))
-    with psycopg.connect(require_database_url()) as db:
+    with connect() as db:
         db.execute(
             """
             INSERT INTO lyric_translations
@@ -132,7 +130,7 @@ def save_translation(
 def load_translations(track_id, source_lines: list[str]):
     """Refresh staleness against resolved source text before exposing translations."""
     checksum = source_checksum(source_lines)
-    with psycopg.connect(require_database_url(), row_factory=dict_row) as db:
+    with connect(dict_rows=True) as db:
         db.execute(
             """UPDATE lyric_translations SET status='stale', updated_at=now()
                       WHERE track_id=%s AND source_checksum<>%s AND status='ready'""",
@@ -169,7 +167,7 @@ def save_section(values, encrypted_key=None, *, replace_key=False):
         values["language_pairs"] = Jsonb(values["language_pairs"])
     if replace_key:
         values["api_key_encrypted"] = encrypted_key
-    with psycopg.connect(require_database_url(), row_factory=dict_row) as db:
+    with connect(dict_rows=True) as db:
         db.execute(
             "INSERT INTO external_ai_settings (prompt) VALUES (%s) ON CONFLICT DO NOTHING",
             (DEFAULT_PROMPT,),
@@ -189,7 +187,7 @@ def save_section(values, encrypted_key=None, *, replace_key=False):
 
 def clear_translations():
     """Delete translations only. Active job completion must precede deletion."""
-    with psycopg.connect(require_database_url()) as db:
+    with connect() as db:
         # Block new job inserts until the check and deletion commit together.
         db.execute("LOCK TABLE jobs IN SHARE ROW EXCLUSIVE MODE")
         active = db.execute("""SELECT 1 FROM jobs WHERE status IN ('queued','running','waiting')

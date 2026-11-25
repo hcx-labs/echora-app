@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from fastapi import Depends
-from sqlalchemy import text
 
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
-from core.db.models import NavidromeConnection, User, UserPreference
+from core.db.connection import connect
 from core.db.session import session_scope
 from core.errors import NotFoundError
+from core.settings import store as settings
+from core.users import store as users
 
 
 class Profile(ResponseModel):
@@ -70,24 +71,15 @@ class GetSettings(Endpoint):
 
     def handle(self, user: SessionUser = Depends(current_user)) -> dict[str, object]:
         with session_scope() as session:
-            stored_user = session.get(User, user["id"])
-            preference = session.get(UserPreference, user["id"])
-            connection = (
-                session.get(NavidromeConnection, preference.navidrome_connection_id)
-                if preference and preference.navidrome_connection_id
-                else None
+            stored_user = users.user(session, user["id"])
+            preference = users.preference(session, user["id"])
+            connection = users.navidrome_connection(
+                session, preference.navidrome_connection_id if preference else None
             )
             if stored_user is None or preference is None:
                 raise NotFoundError("User settings are unavailable")
-            switches = session.execute(
-                text(
-                    """SELECT karaoke_processing_enabled, hum_processing_enabled,
-                          transcription_processing_enabled, karaoke_modal_enabled,
-                          hum_modal_enabled, transcription_modal_enabled,
-                          hf_token_account, hf_token_encrypted IS NOT NULL
-                   FROM analysis_settings WHERE singleton=true"""
-                )
-            ).one_or_none()
+            with connect() as db:
+                switches = settings.model_switches(db)
             return {
                 "profile": {
                     "username": stored_user.username,
@@ -116,12 +108,14 @@ class GetSettings(Endpoint):
 def _models(row) -> dict[str, object]:
     """Karaoke, hum and the Modal karaoke/hum switches default to on without a settings row."""
     return {
-        "karaoke_processing_enabled": True if row is None else bool(row[0]),
-        "hum_processing_enabled": True if row is None else bool(row[1]),
-        "transcription_processing_enabled": bool(row and row[2]),
-        "karaoke_modal_enabled": True if row is None else bool(row[3]),
-        "hum_modal_enabled": True if row is None else bool(row[4]),
-        "transcription_modal_enabled": bool(row and row[5]),
-        "huggingface_account": row[6] if row else None,
-        "has_huggingface_token": bool(row and row[7]),
+        "karaoke_processing_enabled": True
+        if row is None
+        else bool(row["karaoke_processing_enabled"]),
+        "hum_processing_enabled": True if row is None else bool(row["hum_processing_enabled"]),
+        "transcription_processing_enabled": bool(row and row["transcription_processing_enabled"]),
+        "karaoke_modal_enabled": True if row is None else bool(row["karaoke_modal_enabled"]),
+        "hum_modal_enabled": True if row is None else bool(row["hum_modal_enabled"]),
+        "transcription_modal_enabled": bool(row and row["transcription_modal_enabled"]),
+        "huggingface_account": row["hf_token_account"] if row else None,
+        "has_huggingface_token": bool(row and row["has_huggingface_token"]),
     }

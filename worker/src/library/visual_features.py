@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import librosa
 import numpy as np
-from psycopg.types.json import Jsonb
 
+from core.library import store
 from core.revisions import VISUAL_FEATURE_REVISION
 from worker.media.audio import decode_audio
 
@@ -259,31 +259,16 @@ def analyze_visual_features(audio: bytes) -> dict[str, object]:
 def store_visual_features(connection, track_id, features: dict[str, object]) -> dict[str, object]:
     """Store what ``analyze_visual_features`` measured."""
     if features.get("status") == "unsupported":
-        duration = features["duration_seconds"]
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """INSERT INTO track_visual_features
-                     (track_id, revision, status, duration_seconds, hop_seconds, features)
-                   VALUES (%s, %s, 'unsupported', %s, %s, '{}'::jsonb)
-                   ON CONFLICT (track_id) DO UPDATE SET revision=EXCLUDED.revision,
-                     status=EXCLUDED.status, duration_seconds=EXCLUDED.duration_seconds,
-                     hop_seconds=EXCLUDED.hop_seconds, features=EXCLUDED.features, created_at=now()""",
-                (track_id, VISUAL_FEATURE_REVISION, duration, HOP_SECONDS),
-            )
-        return features
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO track_visual_features (track_id, revision, status, duration_seconds, hop_seconds, features)
-               VALUES (%s, %s, 'complete', %s, %s, %s)
-               ON CONFLICT (track_id) DO UPDATE SET revision=EXCLUDED.revision,
-                 status=EXCLUDED.status, duration_seconds=EXCLUDED.duration_seconds,
-                 hop_seconds=EXCLUDED.hop_seconds, features=EXCLUDED.features, created_at=now()""",
-            (
-                track_id,
-                VISUAL_FEATURE_REVISION,
-                features["duration_seconds"],
-                HOP_SECONDS,
-                Jsonb(features),
-            ),
+        store.save_unsupported_visual_features(
+            connection, track_id, VISUAL_FEATURE_REVISION, features["duration_seconds"], HOP_SECONDS
         )
+        return features
+    store.save_visual_features(
+        connection,
+        track_id,
+        VISUAL_FEATURE_REVISION,
+        features["duration_seconds"],
+        HOP_SECONDS,
+        features,
+    )
     return features

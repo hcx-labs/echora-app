@@ -8,7 +8,7 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.v1.curations._models import CurationCreateRequest, CurationSaved
 from backend.api.v1.curations._shared import recipe_columns, refresh, saved, unique_name
-from core.db.models import Curation
+from core.curation import store
 from core.db.session import session_scope
 from core.errors import ConflictError
 
@@ -29,10 +29,7 @@ class CreateCuration(Endpoint):
         if connection_id is None:
             raise ConflictError("No Navidrome connection is configured")
         with unique_name(), session_scope() as session:
-            curation = Curation(
-                user_id=user["id"], navidrome_connection_id=connection_id, **recipe_columns(request)
+            curation_id = store.add_curation(
+                session, user["id"], connection_id, recipe_columns(request)
             )
-            session.add(curation)
-            session.flush()
-            curation_id = curation.id
         return saved(request, curation_id, refresh(curation_id, user["id"]))

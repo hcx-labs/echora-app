@@ -103,7 +103,7 @@ def test_explicit_source_hashes_before_single_bound_plan_even_when_complete(monk
     client.__enter__.return_value = client
     client.tracks.return_value = [song()]
     client.audio_bytes.return_value = b"new bytes"
-    monkeypatch.setattr(ingest.psycopg, "connect", lambda *a, **kw: connection)
+    monkeypatch.setattr(ingest, "connect", lambda **_: connection)
     monkeypatch.setenv("DATABASE_URL", "unused")
     reset_config_cache()
     monkeypatch.setattr(ingest, "NavidromeClient", lambda *a: client)

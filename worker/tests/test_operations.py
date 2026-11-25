@@ -150,9 +150,10 @@ def test_hum_parent_creates_durable_corpus_from_job_id(monkeypatch, library_help
     hum = SimpleNamespace(DEFAULT_CORPUS_SIZE=100)
     stub_module(monkeypatch, "worker.melody.index", hum)
     db = MagicMock()
-    cursor = db.__enter__.return_value.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = ("user",)
-    monkeypatch.setattr(analysis_jobs, "connect", lambda: db)
+    connection = db.__enter__.return_value
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value = {"user_id": "user"}
+    monkeypatch.setattr(analysis_jobs, "connect", lambda **_: db)
     monkeypatch.setattr(
         analysis_jobs, "source_rows", lambda *a: [("a", "canonical"), ("b", "other")]
     )
@@ -164,7 +165,7 @@ def test_hum_parent_creates_durable_corpus_from_job_id(monkeypatch, library_help
         "payload": {"track_limit": 1},
     }
     assert analysis_jobs.execute(job, context()) is None
-    assert cursor.execute.call_args_list[0].args[1] == ("parent", "user", 1)
+    assert connection.execute.call_args_list[0].args[1] == ("parent", "user", 1)
     assert jobs.expand.call_args.args[2] == [
         {
             "operation": "hum_corpus",

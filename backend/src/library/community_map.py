@@ -14,11 +14,12 @@ from collections import Counter
 import igraph as ig
 import numpy as np
 from fastapi.encoders import jsonable_encoder
-from psycopg.types.json import Jsonb
 from sklearn.metrics import adjusted_rand_score, silhouette_score
 
-from backend.library.db import connect, parse_vector
+from core.db.connection import connect
+from core.embeddings import store as embeddings
 from core.errors import InvalidQueryError
+from core.library import store as library
 
 COMMUNITY_SNAPSHOT_REVISION = 1
 
@@ -124,88 +125,33 @@ def library_map(
         semantic_weight = 0.5 if semantic_weight is None else semantic_weight
         if not 0 <= semantic_weight <= 1:
             raise InvalidQueryError("semantic_weight must be between 0 and 1")
-    with connect() as connection, connection.cursor() as cursor:
+    with connect() as connection:
         if model == "blend":
-            cursor.execute(
-                """
-                WITH semantic AS (
-                  SELECT DISTINCT ON (e.track_id) e.track_id, e.embedding::text AS embedding,
-                         ar.id AS run_id, ar.model_revision, ar.created_at
-                  FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
-                  WHERE e.embedding_type='audio-track' AND ar.model_name='muq_mulan'
-                  ORDER BY e.track_id, ar.created_at DESC
-                ), acoustic AS (
-                  SELECT DISTINCT ON (e.track_id) e.track_id, e.embedding::text AS embedding,
-                         ar.id AS run_id, ar.model_revision, ar.created_at
-                  FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
-                  WHERE e.embedding_type='audio-track' AND ar.model_name='mert'
-                  ORDER BY e.track_id, ar.created_at DESC
-                )
-                SELECT t.id, t.title, t.artist, t.album, t.duration_seconds, t.genres,
-                       semantic.embedding AS semantic_embedding, acoustic.embedding AS acoustic_embedding,
-                       semantic.run_id::text || ':' || acoustic.run_id::text AS run_id,
-                       semantic.model_revision || ':' || acoustic.model_revision AS model_revision,
-                       greatest(semantic.created_at, acoustic.created_at) AS run_created_at,
-                       max(ts.external_id) AS source_id, max(ts.source_data->>'coverArt') AS cover_art
-                FROM semantic JOIN acoustic USING (track_id) JOIN tracks t ON t.id=semantic.track_id
-                LEFT JOIN track_sources ts ON ts.track_id=t.id
-                  AND EXISTS (SELECT 1 FROM user_track_links source_links
-                              WHERE source_links.user_id=%s AND source_links.library_id=ts.library_id
-                                AND source_links.track_id=ts.track_id AND source_links.external_id=ts.external_id)
-                WHERE EXISTS (SELECT 1 FROM user_track_links visible_links
-                              WHERE visible_links.track_id=t.id AND visible_links.user_id=%s)
-                GROUP BY t.id, semantic.embedding, acoustic.embedding, semantic.run_id, acoustic.run_id,
-                         semantic.model_revision, acoustic.model_revision, semantic.created_at, acoustic.created_at
-                ORDER BY t.id LIMIT %s
-                """,
-                (user_id, user_id, limit),
-            )
+            rows = embeddings.blend_map_corpus(connection, user_id, limit)
         else:
-            cursor.execute(
-                """
-                WITH selected_embeddings AS (
-                  SELECT DISTINCT ON (e.track_id) e.track_id, e.embedding::text AS embedding,
-                         ar.id AS run_id, ar.model_revision, ar.created_at AS run_created_at
-                  FROM current_embeddings e JOIN analysis_runs ar ON ar.id = e.run_id
-                  WHERE e.embedding_type = %s AND ar.model_name = %s AND e.window_index IS NULL
-                  ORDER BY e.track_id, ar.created_at DESC
-                )
-                SELECT t.id, t.title, t.artist, t.album, t.duration_seconds, t.genres,
-                       selected_embeddings.embedding, selected_embeddings.run_id,
-                       selected_embeddings.model_revision, selected_embeddings.run_created_at,
-                       max(ts.external_id) AS source_id, max(ts.source_data->>'coverArt') AS cover_art
-                FROM selected_embeddings JOIN tracks t ON t.id = selected_embeddings.track_id
-                LEFT JOIN track_sources ts ON ts.track_id = t.id
-                  AND EXISTS (SELECT 1 FROM user_track_links source_links
-                              WHERE source_links.user_id=%s AND source_links.library_id=ts.library_id
-                                AND source_links.track_id=ts.track_id AND source_links.external_id=ts.external_id)
-                WHERE EXISTS (SELECT 1 FROM user_track_links visible_links
-                              WHERE visible_links.track_id=t.id AND visible_links.user_id=%s)
-                GROUP BY t.id, selected_embeddings.embedding, selected_embeddings.run_id,
-                         selected_embeddings.model_revision, selected_embeddings.run_created_at
-                ORDER BY t.id LIMIT %s
-                """,
-                (
-                    "lyrics" if model == "lyrics" else "audio-track",
-                    "bge_m3" if model == "lyrics" else model,
-                    user_id,
-                    user_id,
-                    limit,
-                ),
+            rows = embeddings.map_corpus(
+                connection,
+                user_id,
+                "lyrics" if model == "lyrics" else "audio-track",
+                "bge_m3" if model == "lyrics" else model,
+                limit,
             )
-        rows = cursor.fetchall()
     if not rows:
         return {"points": [], "model": model}
     if model == "blend":
-        semantic = np.stack([parse_vector(row.pop("semantic_embedding")) for row in rows])
-        acoustic = np.stack([parse_vector(row.pop("acoustic_embedding")) for row in rows])
+        semantic = np.stack(
+            [embeddings.parse_vector(row.pop("semantic_embedding")) for row in rows]
+        )
+        acoustic = np.stack(
+            [embeddings.parse_vector(row.pop("acoustic_embedding")) for row in rows]
+        )
         semantic /= np.maximum(np.linalg.norm(semantic, axis=1, keepdims=True), 1e-8)
         acoustic /= np.maximum(np.linalg.norm(acoustic, axis=1, keepdims=True), 1e-8)
         matrix = np.concatenate(
             [np.sqrt(semantic_weight) * semantic, np.sqrt(1 - semantic_weight) * acoustic], axis=1
         )
     else:
-        matrix = np.stack([parse_vector(row.pop("embedding")) for row in rows])
+        matrix = np.stack([embeddings.parse_vector(row.pop("embedding")) for row in rows])
     effective_weight = float(
         semantic_weight if model == "blend" else (1 if model == "muq_mulan" else 0)
     )
@@ -218,13 +164,10 @@ def library_map(
         ]
     )
     corpus_hash = hashlib.sha256(corpus_material.encode()).hexdigest()
-    with connect() as connection, connection.cursor() as cursor:
-        cursor.execute(
-            """SELECT id, payload, created_at FROM community_snapshots
-               WHERE model_name=%s AND semantic_weight=%s AND corpus_hash=%s AND algorithm_revision=%s""",
-            (model, effective_weight, corpus_hash, COMMUNITY_SNAPSHOT_REVISION),
+    with connect() as connection:
+        cached = library.cached_community_snapshot(
+            connection, model, effective_weight, corpus_hash, COMMUNITY_SNAPSHOT_REVISION
         )
-        cached = cursor.fetchone()
     if cached:
         payload = dict(cached["payload"])
         payload["snapshot_id"] = str(cached["id"])
@@ -400,26 +343,18 @@ def library_map(
         "silhouette": clustering["silhouette"],
         "seed_stability_ari": clustering["seed_stability_ari"],
     }
-    with connect() as connection, connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO community_snapshots
-                 (model_name, semantic_weight, corpus_hash, algorithm_revision, track_count, parameters, metrics, payload)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-               ON CONFLICT (model_name, semantic_weight, corpus_hash, algorithm_revision)
-               DO UPDATE SET payload=EXCLUDED.payload, parameters=EXCLUDED.parameters, metrics=EXCLUDED.metrics
-               RETURNING id, created_at""",
-            (
-                model,
-                effective_weight,
-                corpus_hash,
-                COMMUNITY_SNAPSHOT_REVISION,
-                len(rows),
-                Jsonb(parameters),
-                Jsonb(metrics),
-                Jsonb(payload),
-            ),
+    with connect() as connection:
+        snapshot = library.save_community_snapshot(
+            connection,
+            model,
+            effective_weight,
+            corpus_hash,
+            COMMUNITY_SNAPSHOT_REVISION,
+            len(rows),
+            parameters,
+            metrics,
+            payload,
         )
-        snapshot = cursor.fetchone()
     return {
         **payload,
         "snapshot_id": str(snapshot["id"]),

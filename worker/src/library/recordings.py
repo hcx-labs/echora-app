@@ -8,10 +8,12 @@ from dataclasses import dataclass
 
 import psycopg
 
+from core.db.connection import connect
 from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient
+from core.library import store
 from worker.library.fingerprints import compute_chromaprint, store_fingerprint
-from worker.library.sources import connect, source_rows
+from worker.library.sources import source_rows
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
 
 
@@ -48,22 +50,17 @@ class FingerprintProcessor(Processor[None, FingerprintItem, Fingerprint]):
     def plan(self, context: ProcessingContext) -> list[FingerprintItem]:
         rows = source_rows(context.user_id, context.library_url, list(context.track_ids))
         items = []
-        with connect() as connection, connection.cursor() as cursor:
+        with connect() as connection:
             for external_id, track_id in rows:
                 context.check()
-                cursor.execute(
-                    """SELECT duration_seconds FROM tracks WHERE id=%s
-                       AND NOT EXISTS (SELECT 1 FROM track_fingerprints WHERE track_id=%s)""",
-                    (track_id, track_id),
-                )
-                row = cursor.fetchone()
+                row = store.unfingerprinted_duration(connection, track_id)
                 if row:
                     items.append(
                         FingerprintItem(
                             key=str(track_id),
                             track_id=track_id,
                             external_id=external_id,
-                            duration=float(row[0] or 0),
+                            duration=float(row["duration_seconds"] or 0),
                         )
                     )
         return items

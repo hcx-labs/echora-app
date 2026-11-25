@@ -40,14 +40,7 @@ def analyze_waveform(audio: bytes) -> tuple[float, object]:
 
 def store_waveform(connection, track_id, waveform: tuple[float, object]) -> None:
     """Store what ``analyze_waveform`` measured."""
-    from psycopg.types.json import Jsonb
+    from core.library import store
 
     duration, peaks = waveform
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO track_waveforms (track_id, revision, duration_seconds, peaks)
-               VALUES (%s, %s, %s, %s)
-               ON CONFLICT (track_id) DO UPDATE SET revision=EXCLUDED.revision,
-                 duration_seconds=EXCLUDED.duration_seconds, peaks=EXCLUDED.peaks, created_at=now()""",
-            (track_id, WAVEFORM_REVISION, duration, Jsonb(peaks)),
-        )
+    store.save_waveform(connection, track_id, WAVEFORM_REVISION, duration, peaks)

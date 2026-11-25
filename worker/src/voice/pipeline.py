@@ -16,15 +16,16 @@ import numpy as np
 import onnxruntime as ort
 import psycopg
 import torch
-from psycopg.types.json import Jsonb
 
-from core.db.config import DatabaseConfig
+from core.analysis import store as runs
+from core.db.connection import connect
 from core.embeddings.representations import configure_representations, voice_config
 from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient
+from core.voice import store
 from worker.media.audio import decode_audio
 from worker.models.config import ModelsConfig
-from worker.planning.audio import _id_filter, resolve_library_id
+from worker.planning.audio import resolve_library_id
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
 
 logger = logging.getLogger(__name__)
@@ -183,33 +184,26 @@ def _create_run(connection: psycopg.Connection) -> uuid.UUID:
         json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     environment = {"python": platform.python_version(), "torch": torch.__version__, "device": "cpu"}
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO analysis_runs
-                 (kind, model_name, model_revision, config_hash, config, environment, device, precision, status, started_at)
-               VALUES ('voice_classification', %s, 'joint-v2', %s, %s, %s, 'cpu', 'float32', 'running', now())
-               ON CONFLICT (kind, model_name, model_revision, config_hash)
-               DO UPDATE SET id=analysis_runs.id RETURNING id""",
-            (VOICE_MODEL_NAME, config_hash, Jsonb(config), Jsonb(environment)),
-        )
-        return cursor.fetchone()[0]
+    return store.voice_run(connection, VOICE_MODEL_NAME, config_hash, config, environment)
 
 
-def _store_activation(
-    connection: psycopg.Connection, track_id: uuid.UUID, run_id: uuid.UUID, values: dict[str, float]
+def _store_voice(
+    connection: psycopg.Connection,
+    track_id: uuid.UUID,
+    run_id: uuid.UUID,
+    values: dict[str, float],
+    activity: dict[str, object],
 ) -> None:
     vector = [values[label] for label in VoiceGenderModel.labels]
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "DELETE FROM embeddings WHERE track_id=%s AND run_id=%s AND embedding_type=%s",
-            (track_id, run_id, VOICE_EMBEDDING_TYPE),
-        )
-        cursor.execute(
-            """INSERT INTO embeddings
-                 (track_id, run_id, embedding_type, dimension, aggregation, embedding)
-               VALUES (%s, %s, %s, %s, 'mean_activation', %s::vector)""",
-            (track_id, run_id, VOICE_EMBEDDING_TYPE, len(vector), _vector_literal(vector)),
-        )
+    store.save_voice(
+        connection,
+        track_id,
+        run_id,
+        VOICE_EMBEDDING_TYPE,
+        _vector_literal(vector),
+        len(vector),
+        activity,
+    )
 
 
 def classify_track(audio: bytes) -> tuple[dict[str, float], dict[str, object]]:
@@ -251,37 +245,31 @@ class VoiceProcessor(Processor[None, VoiceItem, Evidence]):
         self.limit = limit
 
     def plan(self, context: ProcessingContext) -> list[VoiceItem]:
-        with psycopg.connect(DatabaseConfig.load().database_url) as connection:
+        with connect() as connection:
             library_id = resolve_library_id(connection, context.library_url)
-            restriction, parameters = _id_filter(list(context.track_ids))
             configure_representations(connection)
             # Get or create: the run of the current classifier settings.
             self.run_id = _create_run(connection)
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    f"""SELECT DISTINCT ON (ts.track_id) ts.track_id, ts.external_id, t.title
-                       FROM track_sources ts JOIN tracks t ON t.id=ts.track_id
-                       WHERE ts.source_type='subsonic'
-                         AND ts.library_id=%s{restriction}
-                         AND NOT EXISTS (
-                           SELECT 1 FROM embeddings e
-                           JOIN track_vocal_activity activity ON activity.track_id=e.track_id AND activity.run_id=e.run_id
-                           WHERE e.track_id=ts.track_id AND e.embedding_type=%s AND e.run_id=%s
-                         )
-                       ORDER BY ts.track_id, ts.id
-                       LIMIT %s""",
-                    (library_id, *parameters, VOICE_EMBEDDING_TYPE, self.run_id, self.limit),
-                )
-                rows = cursor.fetchall()
+            rows = store.songs_without_voice(
+                connection,
+                library_id,
+                list(context.track_ids),
+                VOICE_EMBEDDING_TYPE,
+                self.run_id,
+                self.limit,
+            )
         return [
             VoiceItem(
-                key=str(track_id), label=title or "", track_id=track_id, external_id=external_id
+                key=str(row["track_id"]),
+                label=row["title"] or "",
+                track_id=row["track_id"],
+                external_id=row["external_id"],
             )
-            for track_id, external_id, title in rows
+            for row in rows
         ]
 
     def open(self, context: ProcessingContext, items) -> None:
-        self.connection = psycopg.connect(DatabaseConfig.load().database_url)
+        self.connection = connect()
         self.client = NavidromeClient(*context.library)
         self.client.__enter__()
         self.model = None
@@ -331,24 +319,13 @@ class VoiceProcessor(Processor[None, VoiceItem, Evidence]):
                 continue
             yield ItemResult(item=item, outcome="classified", output=evidence)
         # Every planned song has a result: the run is complete.
-        with self.connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE analysis_runs SET status='complete', finished_at=now() WHERE id=%s",
-                (self.run_id,),
-            )
+        runs.complete_run(self.connection, self.run_id)
         self.connection.commit()
 
     def persist(self, context, item: VoiceItem, output: Evidence) -> None:
         values, activity = output
         try:
-            _store_activation(self.connection, item.track_id, self.run_id, values)
-            with self.connection.cursor() as cursor:
-                cursor.execute(
-                    """INSERT INTO track_vocal_activity (track_id, run_id, activity)
-                       VALUES (%s,%s,%s) ON CONFLICT (track_id, run_id)
-                       DO UPDATE SET activity=EXCLUDED.activity, created_at=now()""",
-                    (item.track_id, self.run_id, Jsonb(activity)),
-                )
+            _store_voice(self.connection, item.track_id, self.run_id, values, activity)
             self.connection.commit()
         except Exception:
             self.connection.rollback()

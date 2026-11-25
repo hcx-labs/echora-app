@@ -124,7 +124,7 @@ def test_motion_artwork_of_another_library_is_404(client, monkeypatch):
     cursor.__enter__ = Mock(return_value=cursor)
     cursor.__exit__ = Mock(return_value=False)
     cursor.fetchone.return_value = None
-    monkeypatch.setattr(motion, "_connect", lambda: connection)
+    monkeypatch.setattr(motion, "connect", lambda **_: connection)
     response = client.get(f"/api/v1/media/motion-artwork/{uuid4()}.mp4")
     assert response.status_code == 404
     assert response.json() == {"detail": "Motion artwork not found"}

@@ -316,8 +316,11 @@ def database(monkeypatch, tmp_path):
     def connect():
         return psycopg.connect(url, options=f"-c search_path={schema}", row_factory=dict_row)
 
-    monkeypatch.setattr(motion_artwork, "_connect", connect)
-    monkeypatch.setattr(motion_artwork_jobs, "_connect", connect)
+    def store_connect(*, dict_rows=False, autocommit=False):
+        return psycopg.connect(url, options=f"-c search_path={schema}", autocommit=autocommit)
+
+    monkeypatch.setattr(motion_artwork, "connect", store_connect)
+    monkeypatch.setattr(motion_artwork_jobs, "connect", store_connect)
     monkeypatch.setenv("ECHORA_MOTION_ARTWORK_DIR", str(tmp_path / "artwork"))
     try:
         with connect() as db:
@@ -549,8 +552,8 @@ def test_each_album_and_each_cover_image_renders_once_in_three_phases(database, 
         track = db.execute("SELECT track_id FROM track_motion_artwork LIMIT 1").fetchone()[
             "track_id"
         ]
-        assert motion_artwork.track_artwork(db.cursor(), batch["owner"], track)["frames"] == 3
-        assert motion_artwork.track_artwork(db.cursor(), uuid4(), track) is None
+        assert motion_artwork.track_artwork(db, batch["owner"], track)["frames"] == 3
+        assert motion_artwork.track_artwork(db, uuid4(), track) is None
     assert all(artwork_path(row["path"]).is_file() for row in rows)
     assert prompts() == [CAPTION] * 4 and FakeComfyUI.encoded.count(NEGATIVE) == 1
     # Seed 42 described a zoom, so each cover's prompt was written again with seed 43.
@@ -615,7 +618,7 @@ def test_selection_finds_only_songs_whose_cover_has_no_loop(database, batch):
     recipe = MotionArtworkSettings().recipe()
     with database() as db:
         assert motion_artwork.missing_external_ids(
-            db.cursor(), batch["library"], batch["external_ids"], recipe
+            db, batch["library"], batch["external_ids"], recipe
         ) == set(batch["external_ids"])
         assert motion_artwork.sync_selection(db, batch["library"], batch["external_ids"]) == set(
             batch["external_ids"]
@@ -623,22 +626,18 @@ def test_selection_finds_only_songs_whose_cover_has_no_loop(database, batch):
     batch["run"]()
     with database() as db:
         assert (
-            motion_artwork.missing_external_ids(
-                db.cursor(), batch["library"], batch["external_ids"], recipe
-            )
+            motion_artwork.missing_external_ids(db, batch["library"], batch["external_ids"], recipe)
             == set()
         )
         other = MotionArtworkSettings(resolution=512).recipe()
         # Loops made with other settings are kept by default...
         assert (
-            motion_artwork.missing_external_ids(
-                db.cursor(), batch["library"], batch["external_ids"], other
-            )
+            motion_artwork.missing_external_ids(db, batch["library"], batch["external_ids"], other)
             == set()
         )
         # ...and need a new loop only when regenerating outdated loops.
         assert motion_artwork.missing_external_ids(
-            db.cursor(), batch["library"], batch["external_ids"], other, regenerate_outdated=True
+            db, batch["library"], batch["external_ids"], other, regenerate_outdated=True
         ) == set(batch["external_ids"])
 
 

@@ -9,8 +9,9 @@ from fastapi import Depends
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
-from backend.library.db import require_visible
-from worker.artwork.settings import _connect, track_artwork
+from core.db.connection import connect
+from core.library import store
+from worker.artwork.settings import track_artwork
 
 
 class MotionArtwork(ResponseModel):
@@ -35,9 +36,9 @@ class TrackMotionArtwork(Endpoint):
     response = MotionArtwork
 
     def handle(self, track_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> dict:
-        with _connect() as connection, connection.cursor() as cursor:
-            require_visible(cursor, user["id"], track_id, "Track not found")
-            artwork = track_artwork(cursor, user["id"], track_id)
+        with connect() as connection:
+            store.require_visible(connection, user["id"], track_id, "Track not found")
+            artwork = track_artwork(connection, user["id"], track_id)
         if artwork is None:
             return {"track_id": str(track_id), "available": False}
         return {

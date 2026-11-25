@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import psycopg
 from fastapi import Depends
 
 from backend.api.deps import SessionUser
 from backend.api.endpoint import Endpoint
 from backend.api.v1.settings._deps import admin_required
 from backend.api.v1.settings._models import ModelSwitch, SwitchState
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
+from core.settings import store as settings
 
 
 class TranscriptionSwitch(Endpoint):
@@ -28,14 +28,6 @@ class TranscriptionSwitch(Endpoint):
             if request.location == "modal"
             else "transcription_processing_enabled"
         )
-        with (
-            psycopg.connect(DatabaseConfig.load().database_url) as connection,
-            connection.cursor() as cursor,
-        ):
-            cursor.execute(
-                f"""INSERT INTO analysis_settings (singleton, {column}, updated_at)
-                   VALUES (true,%s,now()) ON CONFLICT (singleton) DO UPDATE
-                   SET {column}=EXCLUDED.{column}, updated_at=now()""",
-                (request.enabled,),
-            )
+        with connect() as connection:
+            settings.set_switch(connection, column, request.enabled, unbind_karaoke=False)
         return {"enabled": request.enabled, "location": request.location}

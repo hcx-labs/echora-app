@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, datetime
 
 from fastapi import Depends
 
@@ -12,12 +11,12 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.navidrome import Credentials
 from backend.api.responses import ResponseModel
-from core.db.models import UserPreference
 from core.db.session import session_scope
-from core.errors import InvalidQueryError, NotFoundError
+from core.errors import InvalidQueryError
 from core.integrations.navidrome import NavidromeClient
 from core.library.connections import save_connection
 from core.library.membership import attach_user_library
+from core.users import store as users
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +51,9 @@ class UpdateNavidrome(Endpoint):
             raise InvalidQueryError("Could not connect to Navidrome") from error
         connection_id = uuid.UUID(save_connection(credentials, user["id"]))
         with session_scope() as session:
-            preference = session.get(UserPreference, user["id"])
-            if preference is None:
-                raise NotFoundError("User preferences are unavailable")
+            preference = users.require_preference(session, user["id"])
             preference.navidrome_connection_id = connection_id
-            preference.updated_at = datetime.now(UTC)
+            users.touch(preference)
         attach_user_library(user["id"], credentials[0])
         return {
             "id": connection_id,

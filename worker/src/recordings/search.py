@@ -15,9 +15,9 @@ from pathlib import Path
 from uuid import UUID
 
 import numpy as np
-from psycopg.types.json import Jsonb
 
 import core.jobs.queue as jobs
+from core.recordings import store
 from worker.recordings.config import RecordingConfig
 from worker.recordings.errors import QueueFull
 
@@ -82,13 +82,7 @@ def status(user_id):
             "reason": "Recording search needs a validated local model.",
         }
     with jobs._db() as db:
-        count = db.execute(
-            """SELECT count(*) AS n FROM recording_fingerprints f
-            WHERE f.representation_id=%s AND f.segment_count>0 AND EXISTS (
-                SELECT 1 FROM user_track_links u WHERE u.track_id=f.track_id AND u.user_id=%s)
-            """,
-            (config.representation_id, user_id),
-        ).fetchone()["n"]
+        count = store.indexed_song_count(db, config.representation_id, user_id)
     try:
         search_configuration()
     except (ValueError, OSError):
@@ -128,18 +122,8 @@ def index_status(connection, namespace, external_ids, user_id):
         return {**result, "reason": "Recording model configuration needs attention."}
     if config is None:
         return {**result, "reason": "Recording fingerprinting needs a validated local model."}
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """SELECT count(DISTINCT ts.external_id) FILTER (WHERE f.segment_count>0),
-                   count(DISTINCT ts.external_id) FILTER (WHERE f.segment_count=0)
-            FROM track_sources ts JOIN libraries l ON l.id=ts.library_id
-            JOIN recording_fingerprints f ON f.track_id=ts.track_id AND f.representation_id=%s
-            WHERE l.namespace=%s AND ts.source_type='subsonic' AND ts.external_id=ANY(%s)
-              AND EXISTS (SELECT 1 FROM user_track_links u WHERE u.user_id=%s
-                  AND u.library_id=ts.library_id AND u.track_id=ts.track_id)""",
-            (config.representation_id, namespace, ids, user_id),
-        )
-        indexed, unsupported = cursor.fetchone()
+    coverage = store.catalog_coverage(connection, config.representation_id, namespace, ids, user_id)
+    indexed, unsupported = coverage["indexed"], coverage["unsupported"]
     return {
         **result,
         "enabled": True,
@@ -152,11 +136,7 @@ def index_status(connection, namespace, external_ids, user_id):
 def cleanup():
     """Worker maintenance also expires abandoned uploads when no queries run."""
     with jobs._db() as db:
-        db.execute(
-            "UPDATE recording_searches SET audio=NULL WHERE audio IS NOT NULL AND audio_expires_at<=now()"
-        )
-        db.execute("DELETE FROM recording_searches WHERE expires_at<=now()")
-        db.execute("DELETE FROM recording_diagnostic_captures WHERE expires_at<=now()")
+        store.expire_searches(db)
 
 
 def enqueue(user_id, audio: bytes, representation_id: str, policy_id: str):
@@ -164,18 +144,9 @@ def enqueue(user_id, audio: bytes, representation_id: str, policy_id: str):
         raise ValueError("Invalid recording upload size")
     with jobs._db() as db:
         # Serialize admission, including the global cap, across API replicas.
-        db.execute("SELECT pg_advisory_xact_lock(hashtextextended('recording-search-admission',0))")
-        active = db.execute(
-            """SELECT count(*) AS total,
-            count(*) FILTER (WHERE user_id=%s) AS owned FROM jobs
-            WHERE kind='recording_search' AND status IN ('queued','running','waiting')""",
-            (user_id,),
-        ).fetchone()
-        recent = db.execute(
-            """SELECT count(*) AS n FROM jobs WHERE kind='recording_search'
-            AND user_id=%s AND created_at>now()-interval '1 minute'""",
-            (user_id,),
-        ).fetchone()["n"]
+        store.lock_admission(db)
+        active = store.active_searches(db, user_id)
+        recent = store.recent_searches(db, user_id)
         if (
             active["total"] >= RecordingConfig.load().max_active
             or active["owned"] >= RecordingConfig.load().max_active_per_user
@@ -183,27 +154,20 @@ def enqueue(user_id, audio: bytes, representation_id: str, policy_id: str):
         ):
             raise QueueFull()
         public = jobs._insert(db, "recording_search", "analysis", user_id, None, {}, None, None)
-        db.execute("UPDATE jobs SET max_attempts=1 WHERE id=%s", (public["id"],))
-        db.execute(
-            """INSERT INTO recording_searches(job_id,representation_id,policy_id,audio,audio_expires_at,expires_at)
-            VALUES (%s,%s,%s,%s,now()+%s*interval '1 second',now()+%s*interval '1 second')""",
-            (
-                public["id"],
-                representation_id,
-                policy_id,
-                audio,
-                RecordingConfig.load().audio_retention_seconds,
-                RecordingConfig.load().result_retention_seconds,
-            ),
+        store.add_search(
+            db,
+            public["id"],
+            representation_id,
+            policy_id,
+            audio,
+            RecordingConfig.load().audio_retention_seconds,
+            RecordingConfig.load().result_retention_seconds,
         )
         # Operator-armed only after explicit user consent. Consume the one-shot
         # reservation in the same transaction as admission, never on rejected
         # uploads. Later searches retain the usual terminal audio erasure.
-        db.execute(
-            """UPDATE recording_diagnostic_captures
-            SET audio=%s,job_id=%s,captured_at=now(),expires_at=now()+%s*interval '1 second'
-            WHERE user_id=%s AND captured_at IS NULL AND expires_at>now()""",
-            (audio, public["id"], RecordingConfig.load().diagnostic_retention_seconds, user_id),
+        store.capture_diagnostic(
+            db, audio, public["id"], RecordingConfig.load().diagnostic_retention_seconds, user_id
         )
         return {"job_id": public["id"]}
 
@@ -284,19 +248,13 @@ def needs_fingerprints(connection, track_id, audio: bytes, config) -> bool:
 
     Raises ``ValueError`` when the song's bytes are not those its identity was resolved from.
     """
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT 1 FROM recording_fingerprints WHERE track_id=%s AND representation_id=%s",
-            (track_id, config.representation_id),
+    if store.has_fingerprints(connection, track_id, config.representation_id):
+        return False
+    audio_hash = store.track_audio_hash(connection, track_id)
+    if audio_hash is None or audio_hash != hashlib.sha256(audio).hexdigest():
+        raise ValueError(
+            "Recording source bytes changed; track identity must be refreshed before indexing"
         )
-        if cursor.fetchone():
-            return False
-        cursor.execute("SELECT audio_hash FROM tracks WHERE id=%s", (track_id,))
-        track = cursor.fetchone()
-        if track is None or track[0] != hashlib.sha256(audio).hexdigest():
-            raise ValueError(
-                "Recording source bytes changed; track identity must be refreshed before indexing"
-            )
     return True
 
 
@@ -318,44 +276,27 @@ def encode_fingerprints(audio: bytes, config, check=lambda: None) -> np.ndarray:
 
 def insert_fingerprints(connection, track_id, fingerprints: np.ndarray, config) -> bool:
     """Store a song's recording fingerprints; ``False`` when another worker stored them first."""
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO recording_fingerprints
-            (track_id,representation_id,segment_count,fingerprints) VALUES (%s,%s,%s,%s)
-            ON CONFLICT (track_id,representation_id) DO NOTHING""",
-            (
-                track_id,
-                config.representation_id,
-                len(fingerprints),
-                np.asarray(fingerprints, dtype="<f4").tobytes(),
-            ),
-        )
-        return cursor.rowcount == 1
+    return store.save_fingerprints(
+        connection,
+        track_id,
+        config.representation_id,
+        len(fingerprints),
+        np.asarray(fingerprints, dtype="<f4").tobytes(),
+    )
 
 
 def _references(db, user_id, representation_id, check):
     # Server-side cursor bounds memory. Access is scoped BEFORE similarity search.
-    with db.cursor(name="recording_references") as cursor:
-        cursor.itersize = 8
-        cursor.execute(
-            """SELECT f.track_id,f.segment_count,f.fingerprints,g.group_id
-            FROM recording_fingerprints f
-            LEFT JOIN recording_group_members g ON g.track_id=f.track_id
-            WHERE f.representation_id=%s AND f.segment_count>0 AND EXISTS (
-                SELECT 1 FROM user_track_links u WHERE u.track_id=f.track_id AND u.user_id=%s)
-            ORDER BY f.track_id""",
-            (representation_id, user_id),
-        )
-        for row in cursor:
-            check()
-            values = np.frombuffer(bytes(row["fingerprints"]), dtype="<f4")
-            if values.size != row["segment_count"] * 128:
-                raise ValueError("Corrupt recording fingerprint artifact")
-            yield {
-                "track_id": str(row["track_id"]),
-                "recording_group_id": str(row["group_id"]) if row["group_id"] else None,
-                "fingerprints": values.reshape(-1, 128),
-            }
+    for row in store.reference_rows(db, representation_id, user_id):
+        check()
+        values = np.frombuffer(bytes(row["fingerprints"]), dtype="<f4")
+        if values.size != row["segment_count"] * 128:
+            raise ValueError("Corrupt recording fingerprint artifact")
+        yield {
+            "track_id": str(row["track_id"]),
+            "recording_group_id": str(row["group_id"]) if row["group_id"] else None,
+            "fingerprints": values.reshape(-1, 128),
+        }
 
 
 def execute(job, context):
@@ -379,11 +320,7 @@ def execute(job, context):
     config, policy, policy_id = search_configuration()
     check()
     with jobs._db() as db:
-        query = db.execute(
-            """SELECT q.* FROM recording_searches q JOIN jobs j ON j.id=q.job_id
-            WHERE q.job_id=%s AND j.user_id=%s AND q.audio_expires_at>now()""",
-            (job["id"], job["user_id"]),
-        ).fetchone()
+        query = store.pending_search(db, job["id"], job["user_id"])
     if (
         not query
         or query["audio"] is None
@@ -415,18 +352,9 @@ def execute(job, context):
     with jobs._db() as db:
         # Lock the live job claim while publishing. A cancelled/expired executor
         # cannot overwrite a newer attempt's result or expose incomplete output.
-        owned = db.execute(
-            """SELECT id FROM jobs WHERE id=%s AND token=%s
-            AND status='running' AND NOT cancel_requested AND lease_until>now()
-            FOR UPDATE""",
-            (job["id"], context.token),
-        ).fetchone()
-        if not owned:
+        if not store.lock_live_claim(db, job["id"], context.token):
             raise jobs.JobCancelled()
-        db.execute(
-            "UPDATE recording_searches SET result=%s WHERE job_id=%s",
-            (Jsonb(result_value), job["id"]),
-        )
+        store.save_search_result(db, job["id"], result_value)
     # Results live outside public job summaries, because access can later change.
     return {"state": result_value["state"]}
 
@@ -435,27 +363,7 @@ def _visible_matches(db, matches, user_id):
     if not matches:
         return []
     ids = [UUID(item["track_id"]) for item in matches]
-    rows = db.execute(
-        """SELECT t.id,t.title,t.artist,t.album,t.duration_seconds,
-        CASE WHEN u.connection_id IS NOT NULL THEN u.external_id END AS source_id,
-        u.connection_id::text AS connection_id,
-        CASE WHEN u.connection_id IS NOT NULL THEN ts.source_data->>'coverArt' END AS cover_art
-        FROM tracks t JOIN LATERAL (
-            SELECT link.external_id,link.library_id,nc.id AS connection_id
-            FROM user_track_links link
-            LEFT JOIN libraries library ON library.id=link.library_id
-            LEFT JOIN navidrome_connections nc ON nc.owner_user_id=link.user_id
-                AND rtrim(nc.url,'/')=rtrim(library.root_path,'/')
-            LEFT JOIN user_preferences preference ON preference.user_id=link.user_id
-            WHERE link.track_id=t.id AND link.user_id=%s
-            ORDER BY (nc.id=preference.navidrome_connection_id) DESC NULLS LAST,
-                     nc.id NULLS LAST,link.library_id,link.external_id LIMIT 1
-        ) u ON true
-        LEFT JOIN track_sources ts ON ts.track_id=t.id AND ts.library_id=u.library_id
-            AND ts.external_id=u.external_id AND ts.source_type='subsonic'
-        WHERE t.id=ANY(%s)""",
-        (user_id, ids),
-    ).fetchall()
+    rows = store.visible_songs(db, user_id, ids)
     visible = {str(row["id"]): row for row in rows}
     return [
         {
@@ -469,12 +377,7 @@ def _visible_matches(db, matches, user_id):
 
 def result(job_id, user_id):
     with jobs._db() as db:
-        row = db.execute(
-            """SELECT j.status,j.error,q.result FROM jobs j
-            LEFT JOIN recording_searches q ON q.job_id=j.id AND q.expires_at>now()
-            WHERE j.id=%s AND j.user_id=%s AND j.kind='recording_search'""",
-            (job_id, user_id),
-        ).fetchone()
+        row = store.search_result(db, job_id, user_id)
         if not row:
             return None
         response = {"status": row["status"]}

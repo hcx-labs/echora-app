@@ -9,9 +9,8 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.requests import PutRequest
 from backend.api.responses import ResponseModel
-from core.db.models import User
 from core.db.session import session_scope
-from core.errors import NotFoundError
+from core.users import store as users
 
 
 class ProfileUpdate(PutRequest):
@@ -38,8 +37,5 @@ class UpdateProfile(Endpoint):
         self, request: ProfileUpdate, user: SessionUser = Depends(current_user)
     ) -> dict[str, str]:
         with session_scope() as session:
-            stored = session.get(User, user["id"])
-            if stored is None:
-                raise NotFoundError("User not found")
-            stored.display_name = request.display_name.strip()
+            users.require_user(session, user["id"]).display_name = request.display_name.strip()
         return {"display_name": request.display_name.strip()}

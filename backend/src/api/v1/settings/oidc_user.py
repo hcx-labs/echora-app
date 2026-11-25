@@ -5,15 +5,14 @@ from __future__ import annotations
 import uuid
 
 from fastapi import Depends
-from sqlalchemy import delete, func, select
 
 from backend.api.deps import SessionUser, admin_user
 from backend.api.endpoint import Endpoint
 from backend.api.requests import PatchRequest
 from backend.api.responses import ResponseModel
-from core.db.models import User, UserSession
 from core.db.session import session_scope
-from core.errors import InvalidQueryError, NotFoundError
+from core.errors import InvalidQueryError
+from core.users import store as users
 
 
 class AccountUpdate(PatchRequest):
@@ -48,23 +47,19 @@ class UpdateOidcUser(Endpoint):
     ) -> dict[str, object]:
         values = request.model_dump(exclude_none=True)
         with session_scope() as session:
-            target = session.get(User, user_id)
-            if target is None:
-                raise NotFoundError("User not found")
+            target = users.require_user(session, user_id)
             if user_id == admin["id"] and (
                 values.get("is_admin") is False or values.get("is_blocked") is True
             ):
                 raise InvalidQueryError("You cannot demote or block your own account")
-            if target.is_admin and values.get("is_admin") is False:
-                admin_count = session.scalar(
-                    select(func.count())
-                    .select_from(User)
-                    .where(User.is_admin, User.is_blocked.is_(False))
-                )
-                if admin_count <= 1:
-                    raise InvalidQueryError("Echora must retain at least one active administrator")
+            if (
+                target.is_admin
+                and values.get("is_admin") is False
+                and users.active_admin_count(session) <= 1
+            ):
+                raise InvalidQueryError("Echora must retain at least one active administrator")
             for key, value in values.items():
                 setattr(target, key, value)
             if values.get("is_blocked") is True:
-                session.execute(delete(UserSession).where(UserSession.user_id == user_id))
+                users.end_sessions(session, user_id)
             return {"id": str(target.id), **values}

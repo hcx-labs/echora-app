@@ -24,16 +24,14 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-import psycopg
 from openai import APIConnectionError, APIError, OpenAI, omit
-from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
 
-from core.db.config import require_database_url
+from core.db.connection import connect
 from core.embeddings.config import EmbeddingConfig
 from core.integrations.claude import ClaudeError, complete_json
 from core.integrations.external_ai import ExternalAISettings
 from core.library.connections import credential_cipher
+from core.lyrics import store
 from core.revisions import LYRIC_THEMES_REVISION
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
 from worker.themes.errors import ThemeError
@@ -167,50 +165,28 @@ def describe(
 def _pending(user_id, url, external_ids) -> list[dict]:
     """Tracks whose lyrics have no current description (failures retried after a week)."""
     namespace = uuid.uuid5(uuid.NAMESPACE_URL, url.rstrip("/"))
-    with psycopg.connect(require_database_url(), row_factory=dict_row) as db:
-        return db.execute(
-            """SELECT DISTINCT l.track_id, l.text, t.title
-               FROM lyrics l JOIN tracks t ON t.id=l.track_id
-               JOIN user_track_links u ON u.track_id=l.track_id
-               JOIN libraries lib ON lib.id=u.library_id
-               LEFT JOIN track_lyric_themes th ON th.track_id=l.track_id
-               WHERE u.user_id=%s AND lib.namespace=%s AND u.external_id=ANY(%s)
-                 AND NULLIF(btrim(l.text),'') IS NOT NULL
-                 AND (th.track_id IS NULL
-                      OR th.source_checksum <> encode(sha256(convert_to(l.text,'UTF8')),'hex')
-                      OR th.prompt_revision <> %s
-                      OR (th.status='failed'
-                          AND th.updated_at < now() - make_interval(days => %s)))""",
-            (user_id, namespace, external_ids, PROMPT_REVISION, RETRY_FAILED_AFTER_DAYS),
-        ).fetchall()
+    with connect() as db:
+        return store.songs_needing_themes(
+            db, user_id, namespace, external_ids, PROMPT_REVISION, RETRY_FAILED_AFTER_DAYS
+        )
 
 
 def _save(track_id, checksum, model, *, description=None, themes=(), vector=None, code=None):
     from worker.lyrics.pipeline import _vector_literal
 
-    with psycopg.connect(require_database_url()) as db:
-        db.execute(
-            """INSERT INTO track_lyric_themes (track_id, source_checksum, prompt_revision, model,
-                 status, error_code, description, themes, embedding, embedding_model, updated_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::vector,%s,now())
-               ON CONFLICT (track_id) DO UPDATE SET source_checksum=EXCLUDED.source_checksum,
-                 prompt_revision=EXCLUDED.prompt_revision, model=EXCLUDED.model,
-                 status=EXCLUDED.status, error_code=EXCLUDED.error_code,
-                 description=EXCLUDED.description, themes=EXCLUDED.themes,
-                 embedding=EXCLUDED.embedding, embedding_model=EXCLUDED.embedding_model,
-                 updated_at=now()""",
-            (
-                track_id,
-                checksum,
-                PROMPT_REVISION,
-                model,
-                "failed" if code else "ready",
-                code,
-                description,
-                Jsonb(list(themes)),
-                _vector_literal(vector) if vector is not None else None,
-                "bge_m3" if vector is not None else None,
-            ),
+    with connect() as db:
+        store.save_themes(
+            db,
+            track_id,
+            checksum,
+            PROMPT_REVISION,
+            model,
+            status="failed" if code else "ready",
+            error_code=code,
+            description=description,
+            themes=list(themes),
+            embedding=_vector_literal(vector) if vector is not None else None,
+            embedding_model="bge_m3" if vector is not None else None,
         )
 
 

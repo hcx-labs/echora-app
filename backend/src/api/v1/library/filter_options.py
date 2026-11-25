@@ -8,7 +8,8 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
 from backend.api.v1.library._models import NameCount
-from backend.library.db import connect
+from core.db.connection import connect
+from core.library import browse
 
 
 class FilterOptions(ResponseModel):
@@ -29,23 +30,8 @@ class FilterOptionsEndpoint(Endpoint):
     response = FilterOptions
 
     def handle(self, user: SessionUser = Depends(current_user)) -> dict:
-        with connect() as db:
-            rows = db.execute(
-                """WITH visible AS MATERIALIZED (
-                SELECT DISTINCT track_id FROM user_track_links WHERE user_id=%s
-            ), options AS (
-                SELECT 'language' AS kind, coalesce(nullif(l.language,''),'unknown') AS value, v.track_id
-                FROM visible v LEFT JOIN lyrics l ON l.track_id=v.track_id
-                UNION ALL
-                SELECT 'genre', g, v.track_id FROM visible v JOIN tracks t ON t.id=v.track_id
-                CROSS JOIN LATERAL unnest(t.genres) g WHERE g<>''
-                UNION ALL
-                SELECT 'translation', lt.target_language, v.track_id FROM visible v
-                JOIN lyric_translations lt ON lt.track_id=v.track_id WHERE lt.status='ready'
-            ) SELECT kind,value,count(DISTINCT track_id) AS tracks FROM options
-              GROUP BY kind,value ORDER BY kind,lower(value)""",
-                (user["id"],),
-            ).fetchall()
+        with connect() as connection:
+            rows = browse.filter_options(connection, user["id"])
         return {
             kind: [
                 {"name": row["value"], "tracks": row["tracks"]}

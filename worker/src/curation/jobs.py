@@ -9,45 +9,30 @@ import json
 import uuid
 from contextlib import contextmanager
 
-import psycopg
-from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
-
+from core.curation import store
 from core.curation.preview import CurationRecipe, preview_curation
-from core.db.config import require_database_url
+from core.db.connection import connect
 from core.errors import ConflictError, NotFoundError
 from core.integrations.navidrome import NavidromeClient
 from core.library.connections import load_connection
 from worker.curation.config import CurationConfig
 
 
-def _connect():
-    return psycopg.connect(require_database_url(), row_factory=dict_row)
-
-
 @contextmanager
 def locked(curation_id, *, wait=True):
     # Dedicated session; closing it also releases the lock after exceptions.
-    with _connect() as connection:
-        key = "curation:" + str(curation_id)
+    with connect(dict_rows=True) as connection:
         if wait:
-            connection.execute("SELECT pg_advisory_lock(hashtextextended(%s, 0))", (key,))
-        else:
-            acquired = connection.execute(
-                "SELECT pg_try_advisory_lock(hashtextextended(%s, 0)) AS acquired", (key,)
-            ).fetchone()["acquired"]
-            if not acquired:
-                yield None
-                return
+            store.lock_curation(connection, curation_id)
+        elif not store.try_lock_curation(connection, curation_id):
+            yield None
+            return
         connection.commit()
         try:
             yield connection
         finally:
             connection.rollback()
-            connection.execute(
-                "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
-                ("curation:" + str(curation_id),),
-            )
+            store.unlock_curation(connection, curation_id)
             connection.commit()
 
 
@@ -55,9 +40,7 @@ def enqueue(curation_id, user_id):
     import core.jobs.queue as jobs
 
     with locked(curation_id) as connection:
-        curation = connection.execute(
-            "SELECT * FROM curations WHERE id=%s AND user_id=%s", (curation_id, user_id)
-        ).fetchone()
+        curation = store.curation_row(connection, curation_id, user_id)
         if curation is None:
             raise NotFoundError("Curation not found")
         job = jobs.enqueue(
@@ -68,12 +51,7 @@ def enqueue(curation_id, user_id):
             payload={"curation_id": str(curation_id)},
             dedupe_key="curation:" + str(curation_id),
         )
-        connection.execute(
-            """UPDATE curations SET status=CASE WHEN status='draft' THEN 'pending' ELSE status END,
-            next_refresh_at=CASE WHEN refresh_enabled THEN now()+make_interval(hours => refresh_interval_hours) END,
-            updated_at=now() WHERE id=%s""",
-            (curation_id,),
-        )
+        store.mark_queued(connection, curation_id)
         connection.commit()
         return {
             "job_id": str(job.get("job_id") or job["id"]),
@@ -91,23 +69,14 @@ def enqueue_due():
     """
     import core.jobs.queue as jobs
 
-    with _connect() as connection:
-        due = connection.execute(
-            """SELECT id FROM curations
-            WHERE status='draft' OR (refresh_enabled AND next_refresh_at <= now())
-            ORDER BY next_refresh_at NULLS FIRST LIMIT %s""",
-            (CurationConfig.load().due_limit,),
-        ).fetchall()
+    with connect() as connection:
+        due = store.due_curation_ids(connection, CurationConfig.load().due_limit)
     count = 0
-    for item in due:
-        with locked(item["id"], wait=False) as connection:
+    for curation_id in due:
+        with locked(curation_id, wait=False) as connection:
             if connection is None:
                 continue
-            curation = connection.execute(
-                """SELECT * FROM curations WHERE id=%s
-                AND (status='draft' OR (refresh_enabled AND next_refresh_at <= now()))""",
-                (item["id"],),
-            ).fetchone()
+            curation = store.due_curation(connection, curation_id)
             if curation is None:
                 continue
             jobs.enqueue(
@@ -118,13 +87,7 @@ def enqueue_due():
                 payload={"curation_id": str(curation["id"])},
                 dedupe_key="curation:" + str(curation["id"]),
             )
-            connection.execute(
-                """UPDATE curations SET
-                status=CASE WHEN status='draft' THEN 'pending' ELSE status END,
-                next_refresh_at=CASE WHEN refresh_enabled THEN now()+make_interval(hours => refresh_interval_hours) END,
-                updated_at=now() WHERE id=%s""",
-                (curation["id"],),
-            )
+            store.mark_queued(connection, curation["id"])
             connection.commit()
             count += 1
     return count
@@ -132,10 +95,7 @@ def enqueue_due():
 
 def assert_mutable(connection, curation_id, *, deleting=False, delete_remote=True):
     """Do not let recipe changes invalidate a recoverable publication."""
-    pending = connection.execute(
-        "SELECT * FROM curation_publications WHERE curation_id=%s AND state <> 'complete'",
-        (curation_id,),
-    ).fetchone()
+    pending = store.unresolved_publication(connection, curation_id)
     if pending and not deleting:
         raise ConflictError("A publication is unresolved; refresh it before changing the recipe")
     if (
@@ -157,16 +117,7 @@ def _json(value):
 def _prepare(curation, user_id, connection):
 
     curation_id = curation["id"]
-    existing = [
-        row["track_id"]
-        for row in connection.execute(
-            """SELECT crt.track_id
-        FROM curation_revision_tracks crt JOIN curation_revisions cr ON cr.id=crt.revision_id
-        WHERE cr.curation_id=%s AND cr.revision_number=(SELECT max(revision_number)
-            FROM curation_revisions WHERE curation_id=%s) ORDER BY crt.position LIMIT %s""",
-            (curation_id, curation_id, curation["track_limit"]),
-        ).fetchall()
-    ]
+    existing = store.latest_revision_track_ids(connection, curation_id, curation["track_limit"])
     request = CurationRecipe(
         curation_type=curation["curation_type"],
         positive_prompt=curation["positive_prompt"],
@@ -258,12 +209,10 @@ def _prepare(curation, user_id, connection):
             *request.journey_stop_track_ids,
             request.journey_end_track_id,
         ]
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """SELECT id::text AS id, title, artist FROM tracks WHERE id=ANY(%s)""",
-                ([value for value in waypoint_ids if value],),
-            )
-            by_id = {row["id"]: row for row in cursor.fetchall()}
+        by_id = {
+            row["id"]: row
+            for row in store.track_names(connection, [value for value in waypoint_ids if value])
+        }
 
         def reference(value):
             row = by_id.get(str(value))
@@ -276,10 +225,7 @@ def _prepare(curation, user_id, connection):
         recipe["journey_start"] = reference(request.journey_start_track_id)
         recipe["journey_stops"] = [reference(value) for value in request.journey_stop_track_ids]
         recipe["journey_end"] = reference(request.journey_end_track_id)
-    revision = connection.execute(
-        "SELECT coalesce(max(revision_number), 0)+1 AS value FROM curation_revisions WHERE curation_id=%s",
-        (curation_id,),
-    ).fetchone()["value"]
+    revision = store.next_revision_number(connection, curation_id)
     return _json(
         {
             "name": curation["name"],
@@ -296,44 +242,25 @@ def execute(job, context):
     curation_id = uuid.UUID(str(job["payload"]["curation_id"]))
     with locked(curation_id) as connection:
         context.check()
-        curation = connection.execute(
-            "SELECT * FROM curations WHERE id=%s AND user_id=%s", (curation_id, job["user_id"])
-        ).fetchone()
+        curation = store.curation_row(connection, curation_id, job["user_id"])
         if curation is None:
             return {"curation_id": str(curation_id), "deleted": True}
         try:
-            publication = connection.execute(
-                """SELECT * FROM curation_publications
-                WHERE curation_id=%s AND (job_id=%s OR state <> 'complete')
-                ORDER BY (job_id=%s) DESC LIMIT 1""",
-                (curation_id, job["id"], job["id"]),
-            ).fetchone()
+            publication = store.job_publication(connection, curation_id, job["id"])
             if publication and publication["state"] == "complete":
                 return _summary(curation_id, publication)
             if publication is None:
                 context.report({"phase": "selecting"})
                 plan = _prepare(curation, job["user_id"], connection)
                 context.check()
-                publication = connection.execute(
-                    """INSERT INTO curation_publications
-                    (id, curation_id, job_id, state, plan, playlist_id)
-                    VALUES (%s,%s,%s,'prepared',%s,%s) RETURNING *""",
-                    (
-                        uuid.uuid4(),
-                        curation_id,
-                        job["id"],
-                        Jsonb(plan),
-                        curation["navidrome_playlist_id"],
-                    ),
-                ).fetchone()
+                publication = store.add_publication(
+                    connection, curation_id, job["id"], plan, curation["navidrome_playlist_id"]
+                )
                 connection.commit()
             if str(publication["job_id"]) != str(job["id"]):
                 # Adopt a failed/cancelled job's pending intent. A crash after
                 # completing this replacement job must replay its summary too.
-                connection.execute(
-                    "UPDATE curation_publications SET job_id=%s, updated_at=now() WHERE id=%s",
-                    (job["id"], publication["id"]),
-                )
+                store.adopt_publication(connection, publication["id"], job["id"])
                 connection.commit()
             plan = publication["plan"]
             # Never repeat an initial create after an uncertain network outcome.
@@ -347,16 +274,9 @@ def execute(job, context):
                 raise RuntimeError("Navidrome connection is unavailable")
             context.report({"phase": "publishing", "track_count": len(plan["source_ids"])})
             context.check()
-            connection.execute(
-                "UPDATE curation_publications SET state='publishing', updated_at=now() WHERE id=%s",
-                (publication["id"],),
-            )
             # A killed subprocess leaves an honest recoverable state, never a
             # permanent 'refreshing' flag. The job is the source of live progress.
-            connection.execute(
-                "UPDATE curations SET status='pending', last_error='Publication pending; refresh resumes the saved selection', updated_at=now() WHERE id=%s",
-                (curation_id,),
-            )
+            store.mark_publishing(connection, publication["id"], curation_id)
             connection.commit()
             with NavidromeClient(*credentials) as client:
                 playlist_id = client.replace_playlist(
@@ -364,59 +284,32 @@ def execute(job, context):
                 )
             # Store the returned ID before any potentially failing local revision
             # writes or cancellation checks. This shrinks the ambiguous-create gap.
-            connection.execute(
-                "UPDATE curation_publications SET playlist_id=%s, updated_at=now() WHERE id=%s",
-                (playlist_id, publication["id"]),
-            )
-            connection.execute(
-                "UPDATE curations SET navidrome_playlist_id=%s WHERE id=%s",
-                (playlist_id, curation_id),
-            )
+            store.record_playlist(connection, publication["id"], curation_id, playlist_id)
             connection.commit()
-            revision = connection.execute(
-                """INSERT INTO curation_revisions (curation_id, revision_number, recipe)
-                VALUES (%s,%s,%s) RETURNING id""",
-                (curation_id, plan["revision_number"], Jsonb(plan["recipe"])),
-            ).fetchone()["id"]
-            for position, track in enumerate(plan["tracks"]):
-                connection.execute(
-                    """INSERT INTO curation_revision_tracks
-                    (revision_id, position, track_id, score, evidence, source_id)
-                    VALUES (%s,%s,%s,%s,%s,%s)""",
-                    (
-                        revision,
-                        position,
-                        track["id"],
-                        track["score"],
-                        Jsonb(
-                            {
-                                "percentile": track["percentile"],
-                                "retained": track["retained"],
-                                **track.get("evidence", {}),
-                            }
-                        ),
-                        track["source_id"],
-                    ),
-                )
-            connection.execute(
-                """UPDATE curations SET status='ready', last_error=NULL,
-                last_refreshed_at=now(), next_refresh_at=CASE WHEN refresh_enabled THEN now()+make_interval(hours => refresh_interval_hours) END,
-                updated_at=now() WHERE id=%s""",
-                (curation_id,),
+            store.add_revision(
+                connection,
+                curation_id,
+                plan["revision_number"],
+                plan["recipe"],
+                [
+                    {
+                        **track,
+                        "evidence": {
+                            "percentile": track["percentile"],
+                            "retained": track["retained"],
+                            **track.get("evidence", {}),
+                        },
+                    }
+                    for track in plan["tracks"]
+                ],
             )
-            connection.execute(
-                "UPDATE curation_publications SET state='complete', updated_at=now() WHERE id=%s",
-                (publication["id"],),
-            )
+            store.complete_publication(connection, publication["id"], curation_id)
             connection.commit()
             publication["playlist_id"] = playlist_id
             return _summary(curation_id, publication)
         except BaseException as error:
             connection.rollback()
-            connection.execute(
-                "UPDATE curations SET status='failed', last_error=%s, updated_at=now() WHERE id=%s",
-                (str(error), curation_id),
-            )
+            store.mark_failed(connection, curation_id, str(error))
             connection.commit()
             raise
 

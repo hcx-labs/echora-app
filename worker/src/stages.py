@@ -14,8 +14,9 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from core.compute import location
+from core.db.connection import connect
 from core.library.membership import attach_user_library, user_audio_track_ids
-from worker.library.sources import connect, source_rows
+from worker.library.sources import source_rows
 from worker.processing import ProcessingContext, Processor, run_stage
 from worker.remote.session import current as remote_session
 
@@ -87,13 +88,14 @@ def _add_links(user_id, url: str, ids: list[str]) -> int:
     from core.library.visibility import update_memberships
 
     # Never reconcile a batch: removing absent IDs would delete sibling batches.
-    with connect() as connection, connection.cursor() as cursor:
+    from core.planning import store
+
+    with connect() as connection:
         namespace = uuid.uuid5(uuid.NAMESPACE_URL, url.rstrip("/"))
-        cursor.execute("SELECT id FROM libraries WHERE namespace=%s", (namespace,))
-        library = cursor.fetchone()
-        if library is None:
+        library_id = store.library_with_namespace(connection, namespace)
+        if library_id is None:
             return 0
-        return update_memberships(connection, library[0], user_id, ids)["linked"]
+        return update_memberships(connection, library_id, user_id, ids)["linked"]
 
 
 def profiles(batch: Batch, ids) -> dict[str, Any]:

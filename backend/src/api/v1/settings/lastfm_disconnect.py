@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from fastapi import Depends, Response
 
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
-from core.db.models import UserPreference
 from core.db.session import session_scope
+from core.users import store as users
 
 
 class DisconnectLastFm(Endpoint):
@@ -21,9 +19,9 @@ class DisconnectLastFm(Endpoint):
 
     def handle(self, user: SessionUser = Depends(current_user)) -> Response:
         with session_scope() as session:
-            preference = session.get(UserPreference, user["id"])
+            preference = users.preference(session, user["id"])
             if preference is not None:
                 preference.lastfm_username = None
                 preference.lastfm_api_key_encrypted = None
-                preference.updated_at = datetime.now(UTC)
+                users.touch(preference)
         return Response(status_code=204)

@@ -52,14 +52,13 @@ def test_cancellation_and_reuse(monkeypatch, library_helpers):
     library_helpers(SimpleNamespace(_cipher=lambda: None))
     row = {"track_id": TRACK, "text": "source", "language": "ja", "provenance": {}}
     db = MagicMock()
-    db.execute.return_value.fetchall.return_value = [row]
+    db.cursor.return_value.__enter__.return_value.fetchall.return_value = [row]
 
     @contextmanager
     def connect(*a, **kw):
         yield db
 
-    monkeypatch.setattr(pipeline.psycopg, "connect", connect)
-    monkeypatch.setattr(pipeline, "require_database_url", lambda: "unused")
+    monkeypatch.setattr(pipeline, "connect", connect)
     monkeypatch.setattr(
         pipeline,
         "load_translations",
@@ -96,14 +95,13 @@ def test_declined_counted_apart_from_failed(monkeypatch, library_helpers):
     library_helpers(SimpleNamespace(_cipher=lambda: None))
     row = {"track_id": TRACK, "text": "source", "language": "ja", "provenance": {}}
     db = MagicMock()
-    db.execute.return_value.fetchall.return_value = [row]
+    db.cursor.return_value.__enter__.return_value.fetchall.return_value = [row]
 
     @contextmanager
     def connect(*a, **kw):
         yield db
 
-    monkeypatch.setattr(pipeline.psycopg, "connect", connect)
-    monkeypatch.setattr(pipeline, "require_database_url", lambda: "unused")
+    monkeypatch.setattr(pipeline, "connect", connect)
     monkeypatch.setattr(pipeline, "load_translations", lambda *a: [])
     errors = iter([TranslationError("declined"), TranslationError("transport_failure")])
 
@@ -129,15 +127,17 @@ def test_mixed_song_translates_only_its_foreign_lines(monkeypatch, library_helpe
     lines = ["When I'm with you", "Mera bhi usse batana", "Eenie, meenie", "Tere bina"]
     row = {"track_id": TRACK, "text": "\n".join(lines), "language": "en", "provenance": {}}
     db = MagicMock()
-    db.execute.return_value.fetchall.return_value = [row]
-    db.execute.return_value.fetchone.return_value = {"text": row["text"], "provenance": {}}
+    db.cursor.return_value.__enter__.return_value.fetchall.return_value = [row]
+    db.cursor.return_value.__enter__.return_value.fetchone.return_value = {
+        "text": row["text"],
+        "provenance": {},
+    }
 
     @contextmanager
     def connect(*a, **kw):
         yield db
 
-    monkeypatch.setattr(pipeline.psycopg, "connect", connect)
-    monkeypatch.setattr(pipeline, "require_database_url", lambda: "unused")
+    monkeypatch.setattr(pipeline, "connect", connect)
     monkeypatch.setattr(pipeline, "load_translations", lambda *a: [])
     # The rule flags the Urdu lines and the vocable; the model leaves the vocable as it is.
     monkeypatch.setattr(pipeline, "foreign_lines", lambda lines, language, sources: [1, 2, 3])
@@ -180,14 +180,13 @@ def test_mixed_needs_two_foreign_lines(monkeypatch, library_helpers):
     library_helpers(SimpleNamespace(_cipher=lambda: None))
     row = {"track_id": TRACK, "text": "a\nb", "language": "en", "provenance": {}}
     db = MagicMock()
-    db.execute.return_value.fetchall.return_value = [row]
+    db.cursor.return_value.__enter__.return_value.fetchall.return_value = [row]
 
     @contextmanager
     def connect(*a, **kw):
         yield db
 
-    monkeypatch.setattr(pipeline.psycopg, "connect", connect)
-    monkeypatch.setattr(pipeline, "require_database_url", lambda: "unused")
+    monkeypatch.setattr(pipeline, "connect", connect)
     monkeypatch.setattr(pipeline, "foreign_lines", lambda *a: [1])
     translate = MagicMock()
     monkeypatch.setattr(pipeline, "translate", translate)

@@ -26,7 +26,7 @@ def planner(monkeypatch):
     )
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = (uuid4(),)
+    cursor.fetchone.return_value = {"id": uuid4()}
     audio = Mock(return_value=SimpleNamespace(download_external_ids=set()))
     karaoke = Mock(return_value=SimpleNamespace(karaoke_external_ids=()))
     monkeypatch.setattr(sync_plan, "plan_audio", audio)
@@ -38,18 +38,18 @@ def planner(monkeypatch):
 
 def test_entire_library_visits_songs_whose_album_needs_motion_artwork(planner, monkeypatch):
     connection, cursor, _, _ = planner
-    cursor.fetchall.side_effect = [[("a",), ("b",)], [], []]
+    cursor.fetchall.side_effect = [[{"external_id": "a"}, {"external_id": "b"}], [], []]
     artwork = Mock(return_value={"b"})
     monkeypatch.setattr(sync_plan, "sync_selection", artwork)
     assert sync_plan.select_sync_tracks(connection, "https://music", ["a", "b"]) == ["b"]
-    assert artwork.call_args.args[1:] == (cursor.fetchone.return_value[0], ["a", "b"])
+    assert artwork.call_args.args[1:] == (cursor.fetchone.return_value["id"], ["a", "b"])
 
 
 def test_new_only_excludes_existing_even_if_they_need_backfill(planner):
     connection, cursor, audio, karaoke = planner
     existing = [f"old-{i}" for i in range(936)]
     new = [f"new-{i}" for i in range(5)]
-    cursor.fetchall.return_value = [(song,) for song in existing]
+    cursor.fetchall.return_value = [{"external_id": song} for song in existing]
     assert (
         sync_plan.select_sync_tracks(connection, "https://music", existing + new, "missing") == new
     )
@@ -61,16 +61,16 @@ def test_karaoke_revision_backfill_combines_existing_and_new(planner):
     connection, cursor, audio, karaoke = planner
     old = [f"old-{i}" for i in range(100)]
     new = [f"new-{i}" for i in range(10)]
-    cursor.fetchall.side_effect = [[(song,) for song in old], []]
+    cursor.fetchall.side_effect = [[{"external_id": song} for song in old], []]
     karaoke.return_value.karaoke_external_ids = tuple(old)
     audio.return_value.download_external_ids = set(new)
     assert sync_plan.select_sync_tracks(connection, "https://music", old + new) == old + new
-    assert karaoke.call_args.kwargs["library_id"] == cursor.fetchone.return_value[0]
+    assert karaoke.call_args.kwargs["library_id"] == cursor.fetchone.return_value["id"]
 
 
 def test_current_catalog_creates_no_work(planner):
     connection, cursor, _, _ = planner
-    cursor.fetchall.side_effect = [[("current",)], []]
+    cursor.fetchall.side_effect = [[{"external_id": "current"}], []]
     assert sync_plan.select_sync_tracks(connection, "https://music", ["current"]) == []
 
 
@@ -118,7 +118,7 @@ def test_parent_batches_selected_work_but_reconciles_full_catalog(
     monkeypatch.setattr(analysis_jobs, "NavidromeClient", lambda *args: client)
 
     @contextmanager
-    def connect():
+    def connect(**_):
         yield "db"
 
     monkeypatch.setattr(analysis_jobs, "connect", connect)
@@ -166,7 +166,7 @@ def test_entire_library_selects_recording_only_backfill_without_other_models(pla
     monkeypatch.delenv("MOSS_REVISION", raising=False)
     reset_config_cache()
     connection, cursor, audio, _ = planner
-    cursor.fetchall.side_effect = [[("existing",), ("ready",)], []]
+    cursor.fetchall.side_effect = [[{"external_id": "existing"}, {"external_id": "ready"}], []]
     audio.return_value = AudioProcessingPlan(
         frozenset(),
         frozenset(),
@@ -182,7 +182,7 @@ def test_entire_library_selects_recording_only_backfill_without_other_models(pla
 
 def test_skip_hash_visits_known_tracks_for_metadata_and_translation(planner):
     connection, cursor, audio, karaoke = planner
-    cursor.fetchall.return_value = [("known",)]
+    cursor.fetchall.return_value = [{"external_id": "known"}]
     assert sync_plan.select_sync_tracks(
         connection, "https://music", ["known", "new"], verify_audio_hashes=False
     ) == ["known", "new"]

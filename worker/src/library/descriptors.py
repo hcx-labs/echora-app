@@ -6,8 +6,8 @@ import logging
 import math
 
 import numpy as np
-from psycopg.types.json import Jsonb
 
+from core.library import store
 from core.revisions import DESCRIPTOR_REVISION
 from worker.media.audio import decode_audio_channels
 
@@ -175,12 +175,5 @@ def analyze_audio_descriptors(audio: bytes) -> dict[str, object]:
 def store_audio_descriptors(connection, track_id, result: dict[str, object]) -> dict[str, object]:
     """Store what ``analyze_audio_descriptors`` measured (``partial`` with failed components)."""
     status = "partial" if result.get("failed_components") else "complete"
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO track_audio_descriptors (track_id, revision, status, descriptors)
-               VALUES (%s,%s,%s,%s)
-               ON CONFLICT (track_id, revision) DO UPDATE SET
-                 status=EXCLUDED.status, descriptors=EXCLUDED.descriptors, created_at=now()""",
-            (track_id, DESCRIPTOR_REVISION, status, Jsonb(result)),
-        )
+    store.save_audio_descriptors(connection, track_id, DESCRIPTOR_REVISION, status, result)
     return result

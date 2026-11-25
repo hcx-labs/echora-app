@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 
 import httpx
 from fastapi import Depends
@@ -13,11 +12,11 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.requests import PutRequest
 from backend.api.responses import ResponseModel
-from core.db.models import UserPreference
 from core.db.session import session_scope
-from core.errors import InvalidQueryError, NotFoundError
+from core.errors import InvalidQueryError
 from core.integrations.config import LastfmConfig
 from core.library.connections import credential_cipher
+from core.users import store as users
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +70,8 @@ class UpdateLastFm(Endpoint):
             logger.warning("Last.fm verification failed for %s: %s", request.username, error)
             raise InvalidQueryError("Could not verify the Last.fm account") from error
         with session_scope() as session:
-            preference = session.get(UserPreference, user["id"])
-            if preference is None:
-                raise NotFoundError("User preferences are unavailable")
+            preference = users.require_preference(session, user["id"])
             preference.lastfm_username = username
             preference.lastfm_api_key_encrypted = credential_cipher().encrypt(api_key.encode())
-            preference.updated_at = datetime.now(UTC)
+            users.touch(preference)
         return {"connected": True, "username": username, "scrobbles": total}

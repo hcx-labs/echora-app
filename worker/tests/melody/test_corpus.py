@@ -47,9 +47,9 @@ def database(monkeypatch):
     )
     cursor = connection.cursor.return_value.__enter__.return_value
     # A's contours are already in the run; B needs extracting; C's audio is unreachable.
-    cursor.fetchone.side_effect = [(3,), (0,), (0,)]
+    cursor.fetchone.side_effect = [{"n": 3}, {"n": 0}, {"n": 0}]
     connections = iter([planning, connection])
-    monkeypatch.setattr(corpus, "connect", lambda: next(connections))
+    monkeypatch.setattr(corpus, "connect", lambda **_: next(connections))
     monkeypatch.setattr(corpus, "source_rows", lambda *a: [("a", A), ("b", B), ("c", C)])
     monkeypatch.setattr(corpus, "NavidromeClient", Client)
     stored = []
@@ -73,7 +73,7 @@ def test_indexes_missing_contours_and_adds_every_song(database):
     assert database.stored == [B]
     added = [
         call.args[1]
-        for call in database.cursor.execute.call_args_list
+        for call in database.connection.execute.call_args_list
         if "hum_corpus_tracks" in call.args[0]
     ]
     assert added == [("corpus", A), ("corpus", B)]
@@ -88,6 +88,6 @@ def test_remote_batches_extract_on_modal(database):
 def test_unknown_corpus_fails_the_job(monkeypatch):
     planning = MagicMock()
     planning.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchone.return_value = None
-    monkeypatch.setattr(corpus, "connect", lambda: planning)
+    monkeypatch.setattr(corpus, "connect", lambda **_: planning)
     with pytest.raises(ValueError, match="Unknown hum corpus"):
         run_stage(corpus.MelodyCorpusProcessor(), corpus_context())

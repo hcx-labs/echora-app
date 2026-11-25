@@ -14,12 +14,11 @@ from typing import Any
 
 from authlib.integrations.starlette_client import OAuth
 from fastapi import HTTPException
-from sqlalchemy import delete, func, select
 
 from backend.config import OidcConfig
 from backend.sessions.store import create_session
-from core.db.models import OidcAllowedEmail, OidcSetting, User, UserPreference, UserSession
 from core.db.session import session_scope
+from core.users import store as users
 
 
 def issuer() -> str:
@@ -67,15 +66,11 @@ def sign_in(claims: Mapping[str, Any]) -> tuple[str, datetime]:
     if not bootstrap_email:
         raise HTTPException(status_code=503, detail="OIDC_BOOTSTRAP_ADMIN_EMAIL is not configured")
     with session_scope() as session:
-        user = session.scalar(
-            select(User).where((User.oidc_subject == subject) | (func.lower(User.email) == email))
-        )
-        admin_exists = (
-            session.scalar(select(func.count()).select_from(User).where(User.is_admin)) > 0
-        )
+        user = users.identity(session, subject, email)
+        admin_exists = users.admin_exists(session)
         if user is None:
-            policy = session.get(OidcSetting, True)
-            allowed = session.get(OidcAllowedEmail, email)
+            policy = users.oidc_policy(session)
+            allowed = users.allowed_email(session, email)
             if not admin_exists and email != bootstrap_email:
                 raise HTTPException(
                     status_code=403, detail="The bootstrap administrator must sign in first"
@@ -87,7 +82,8 @@ def sign_in(claims: Mapping[str, Any]) -> tuple[str, datetime]:
             display_name = str(
                 claims.get("name") or claims.get("preferred_username") or email
             ).strip()
-            user = User(
+            user = users.add_user(
+                session,
                 username=email,
                 email=email,
                 display_name=display_name,
@@ -95,11 +91,8 @@ def sign_in(claims: Mapping[str, Any]) -> tuple[str, datetime]:
                 oidc_subject=subject,
                 is_admin=not admin_exists and email == bootstrap_email,
             )
-            user.preference = UserPreference()
-            session.add(user)
-            session.flush()
             if allowed is not None:
-                session.delete(allowed)
+                users.disallow_email(session, email)
         else:
             if user.is_blocked:
                 raise HTTPException(status_code=403, detail="This Echora account is blocked")
@@ -110,6 +103,6 @@ def sign_in(claims: Mapping[str, Any]) -> tuple[str, datetime]:
             user.oidc_subject = subject
             user.email = email
             user.username = email
-        session.execute(delete(UserSession).where(UserSession.expires_at < datetime.now(UTC)))
+        users.drop_expired_sessions(session, datetime.now(UTC))
         token, expires_at, _ = create_session(session, user.id)
     return token, expires_at

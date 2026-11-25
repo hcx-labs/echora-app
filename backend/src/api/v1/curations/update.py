@@ -6,15 +6,13 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends
-from sqlalchemy import select
 
 import worker.curation.jobs as curation_jobs
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.v1.curations._models import CurationChanged, CurationUpdateRequest
-from core.db.models import Curation
+from core.curation import store
 from core.db.session import session_scope
-from core.errors import NotFoundError
 
 
 class UpdateCuration(Endpoint):
@@ -34,13 +32,7 @@ class UpdateCuration(Endpoint):
         values = request.model_dump(exclude_none=True)
         with curation_jobs.locked(curation_id) as lock_connection:
             with session_scope() as session:
-                curation = session.scalar(
-                    select(Curation).where(
-                        Curation.id == curation_id, Curation.user_id == user["id"]
-                    )
-                )
-                if curation is None:
-                    raise NotFoundError("Curation not found")
+                curation = store.require_owned_curation(session, curation_id, user["id"])
                 curation_jobs.assert_mutable(lock_connection, curation_id)
                 for key, value in values.items():
                     setattr(curation, key, value)

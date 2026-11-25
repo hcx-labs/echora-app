@@ -1,0 +1,1 @@
+"""Motion artwork queries (``store``)."""

@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from fastapi import Depends
 
 from backend.api.deps import SessionUser, admin_user
 from backend.api.endpoint import Endpoint
 from backend.api.requests import PutRequest
 from backend.api.responses import ResponseModel
-from core.db.models import OidcSetting
 from core.db.session import session_scope
+from core.users import store as users
 
 
 class OidcPolicy(PutRequest):
@@ -38,10 +36,5 @@ class UpdateOidcPolicy(Endpoint):
         self, request: OidcPolicy, admin: SessionUser = Depends(admin_user)
     ) -> dict[str, bool]:
         with session_scope() as session:
-            policy = session.get(OidcSetting, True)
-            if policy is None:
-                policy = OidcSetting(singleton=True)
-                session.add(policy)
-            policy.auto_provision = request.auto_provision
-            policy.updated_at = datetime.now(UTC)
+            users.set_auto_provision(session, request.auto_provision)
         return {"auto_provision": request.auto_provision}

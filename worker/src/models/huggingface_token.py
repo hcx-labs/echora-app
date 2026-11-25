@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import logging
 
-import psycopg
-
-from core.db.config import require_database_url
+from core.db.connection import connect
 from core.library.config import CredentialsConfig
+from core.settings import store
 from worker.models.errors import TokenRejected
 
 logger = logging.getLogger(__name__)
@@ -50,13 +49,11 @@ def account(token: str) -> str:
 
 def stored() -> tuple[str | None, str | None]:
     """(token, account) as saved, or (None, None)."""
-    with psycopg.connect(require_database_url()) as db:
-        row = db.execute(
-            "SELECT hf_token_encrypted, hf_token_account FROM analysis_settings WHERE singleton"
-        ).fetchone()
-    if not row or not row[0]:
+    with connect() as db:
+        row = store.huggingface_token(db)
+    if not row or not row["hf_token_encrypted"]:
         return None, None
-    return _cipher().decrypt(bytes(row[0])).decode(), row[1]
+    return _cipher().decrypt(bytes(row["hf_token_encrypted"])).decode(), row["hf_token_account"]
 
 
 def token_or_none() -> str | None:
@@ -73,12 +70,6 @@ def save(token: str | None) -> str | None:
     token = (token or "").strip() or None
     name = account(token) if token else None
     encrypted = _cipher().encrypt(token.encode()) if token else None
-    with psycopg.connect(require_database_url()) as db:
-        db.execute(
-            """INSERT INTO analysis_settings (singleton, hf_token_encrypted, hf_token_account, updated_at)
-               VALUES (true, %s, %s, now()) ON CONFLICT (singleton) DO UPDATE
-               SET hf_token_encrypted=EXCLUDED.hf_token_encrypted,
-                   hf_token_account=EXCLUDED.hf_token_account, updated_at=now()""",
-            (encrypted, name),
-        )
+    with connect() as db:
+        store.save_huggingface_token(db, encrypted, name)
     return name

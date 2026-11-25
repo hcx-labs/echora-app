@@ -14,9 +14,10 @@ from typing import Any
 import numpy as np
 import psycopg
 import torch
-from psycopg.types.json import Jsonb
 
-from core.db.config import DatabaseConfig
+from core.analysis import store as runs
+from core.db.connection import connect
+from core.embeddings import store as embeddings
 from core.embeddings.audio_models import (
     AudioEmbeddingModel,
     EmbeddingResult,
@@ -28,6 +29,7 @@ from core.embeddings.config import EmbeddingConfig
 from core.embeddings.representations import configure_representations, embedding_config
 from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient, NavidromeTrack
+from core.library import store as library
 from worker.library.attempts import finish_attempt, record_track, start_attempt
 from worker.library.descriptors import analyze_audio_descriptors, store_audio_descriptors
 from worker.library.fingerprints import compute_chromaprint, store_fingerprint
@@ -84,44 +86,25 @@ def _create_run(connection: psycopg.Connection, model: AudioEmbeddingModel) -> u
         "cuda": torch.version.cuda,
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
     }
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            INSERT INTO analysis_runs
-              (kind, model_name, model_revision, config_hash, config, environment,
-               device, precision, status, started_at)
-            VALUES ('audio_embedding', %s, %s, %s, %s, %s, %s, 'float32', 'running', now())
-            ON CONFLICT (kind, model_name, model_revision, config_hash)
-            DO UPDATE SET id = analysis_runs.id
-            RETURNING id
-            """,
-            (
-                model.name,
-                model.revision,
-                _config_hash(config),
-                Jsonb(config),
-                Jsonb(environment),
-                str(model.device),
-            ),
-        )
-        return cursor.fetchone()[0]
+    return embeddings.audio_embedding_run(
+        connection,
+        model.name,
+        model.revision,
+        _config_hash(config),
+        config,
+        environment,
+        str(model.device),
+    )
 
 
 def _has_fingerprint(connection: psycopg.Connection, track_id: uuid.UUID) -> bool:
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT 1 FROM track_fingerprints WHERE track_id=%s", (track_id,))
-        return cursor.fetchone() is not None
+    return library.has_fingerprint(connection, track_id)
 
 
 def _model_has_embedding(
     connection: psycopg.Connection, track_id: uuid.UUID, run_id: uuid.UUID
 ) -> bool:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT 1 FROM embeddings WHERE track_id=%s AND run_id=%s AND embedding_type='audio-track'",
-            (track_id, run_id),
-        )
-        return cursor.fetchone() is not None
+    return embeddings.has_audio_track_embedding(connection, track_id, run_id)
 
 
 def embed_track(
@@ -144,57 +127,33 @@ def _store_embedding(
     result: EmbeddingResult,
     ranges: list[tuple[float, float]] | None = None,
 ) -> None:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            INSERT INTO embeddings
-              (track_id, run_id, embedding_type, dimension, aggregation, embedding,
-               inference_ms, peak_vram_bytes)
-            VALUES (%s, %s, 'audio-track', %s, 'normalized_mean', %s::vector, %s, %s)
-            ON CONFLICT (track_id, run_id, embedding_type, window_index) DO NOTHING
-            """,
+    embeddings.save_audio_embeddings(
+        connection,
+        track_id,
+        run_id,
+        {
+            "dimension": len(result.vector),
+            "embedding": _vector_literal(result.vector),
+            "inference_ms": result.inference_ms,
+            "peak_vram_bytes": result.peak_vram_bytes,
+        },
+        [
             (
-                track_id,
-                run_id,
-                len(result.vector),
-                _vector_literal(result.vector),
-                result.inference_ms,
-                result.peak_vram_bytes,
-            ),
-        )
-        cursor.executemany(
-            """
-            INSERT INTO embeddings
-              (track_id, run_id, embedding_type, window_index, window_start_seconds,
-               window_end_seconds, dimension, aggregation, embedding)
-            VALUES (%s, %s, 'audio-window', %s, %s, %s, %s, 'none', %s::vector)
-            ON CONFLICT (track_id, run_id, embedding_type, window_index) DO NOTHING
-            """,
-            [
-                (
-                    track_id,
-                    run_id,
-                    window_index,
-                    ranges[window_index][0] if ranges else None,
-                    ranges[window_index][1] if ranges else None,
-                    len(vector),
-                    _vector_literal(vector),
-                )
-                for window_index, vector in enumerate(result.window_vectors)
-            ],
-        )
+                window_index,
+                ranges[window_index][0] if ranges else None,
+                ranges[window_index][1] if ranges else None,
+                len(vector),
+                _vector_literal(vector),
+            )
+            for window_index, vector in enumerate(result.window_vectors)
+        ],
+    )
 
 
 def _source_track_id(
     connection: psycopg.Connection, library_id: uuid.UUID, external_id: str
 ) -> uuid.UUID | None:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT track_id FROM track_sources WHERE library_id=%s AND source_type='subsonic' AND external_id=%s",
-            (library_id, external_id),
-        )
-        row = cursor.fetchone()
-        return row[0] if row else None
+    return library.source_track_id(connection, library_id, external_id)
 
 
 def _upsert_track(
@@ -206,42 +165,20 @@ def _upsert_track(
     previous_id = _source_track_id(connection, library_id, song.id)
     track_id = uuid.uuid5(CONTENT_NAMESPACE, audio_hash)
     metadata = {"navidrome": song.raw, "identity": "sha256-source-bytes"}
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            INSERT INTO tracks (id, audio_hash, title, artist, album, year, duration_seconds, genres, metadata)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (audio_hash) DO NOTHING
-            RETURNING id
-            """,
-            (
-                track_id,
-                audio_hash,
-                song.title,
-                song.artist,
-                song.album,
-                song.year,
-                song.duration,
-                [song.genre] if song.genre else [],
-                Jsonb(metadata),
-            ),
-        )
-        inserted = cursor.fetchone() is not None
-        cursor.execute("SELECT id FROM tracks WHERE audio_hash=%s", (audio_hash,))
-        canonical_id = cursor.fetchone()[0]
-        cursor.execute(
-            "INSERT INTO library_tracks (library_id, track_id, relative_path) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
-            (library_id, canonical_id, song.path),
-        )
-        cursor.execute(
-            """
-            INSERT INTO track_sources (library_id, track_id, source_type, external_id, source_data)
-            VALUES (%s,%s,'subsonic',%s,%s)
-            ON CONFLICT (library_id, source_type, external_id)
-            DO UPDATE SET track_id=EXCLUDED.track_id, source_data=EXCLUDED.source_data
-            """,
-            (library_id, canonical_id, song.id, Jsonb(song.raw)),
-        )
+    inserted = library.add_track(
+        connection,
+        track_id,
+        audio_hash,
+        title=song.title,
+        artist=song.artist,
+        album=song.album,
+        year=song.year,
+        duration_seconds=song.duration,
+        genres=[song.genre] if song.genre else [],
+        metadata=metadata,
+    )
+    canonical_id = library.track_with_hash(connection, audio_hash)
+    library.bind_source(connection, library_id, canonical_id, song.path, song.id, song.raw)
     if previous_id != canonical_id:
         source_remapped(connection, library_id, song.id)
     return canonical_id, inserted
@@ -249,17 +186,7 @@ def _upsert_track(
 
 def _library(connection: psycopg.Connection, url: str) -> uuid.UUID:
     namespace = uuid.uuid5(uuid.NAMESPACE_URL, url.rstrip("/"))
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            INSERT INTO libraries (name, root_path, namespace)
-            VALUES ('Navidrome', %s, %s)
-            ON CONFLICT (namespace) DO UPDATE SET root_path=EXCLUDED.root_path
-            RETURNING id
-            """,
-            (url.rstrip("/"), namespace),
-        )
-        return cursor.fetchone()[0]
+    return library.library_id(connection, url.rstrip("/"), namespace)
 
 
 def _bound_source_audio(
@@ -380,17 +307,11 @@ class IdentityPhase(_SongPhase):
             song = item.song
             try:
                 if not self.batch.verify_audio_hashes:
-                    with connection.cursor() as cursor:
-                        cursor.execute(
-                            """SELECT ts.track_id, t.audio_hash FROM track_sources ts
-                            JOIN tracks t ON t.id=ts.track_id
-                            WHERE ts.library_id=%s AND ts.source_type='subsonic' AND ts.external_id=%s""",
-                            (self.batch.library_id, song.id),
-                        )
-                        known = cursor.fetchone()
+                    known = library.known_source(connection, self.batch.library_id, song.id)
                     if known:
                         # Reuse identity, but do not claim the bytes were verified.
-                        yield ItemResult(item=item, outcome=None, output=("known", *known))
+                        output = ("known", known["track_id"], known["audio_hash"])
+                        yield ItemResult(item=item, outcome=None, output=output)
                         continue
                 audio = self.batch.navidrome.audio_bytes(song.id)
                 audio_hash = hashlib.sha256(audio).hexdigest()
@@ -420,36 +341,24 @@ class IdentityPhase(_SongPhase):
 
 
 def _refresh_known_source(batch: IngestBatch, song: NavidromeTrack, track_id) -> None:
-    with batch.connection.cursor() as cursor:
-        cursor.execute(
-            """UPDATE track_sources SET source_data=%s
-            WHERE library_id=%s AND source_type='subsonic' AND external_id=%s""",
-            (Jsonb(song.raw), batch.library_id, song.id),
-        )
-        cursor.execute(
-            """UPDATE tracks SET title=%s, artist=%s, album=%s, year=%s,
-            duration_seconds=%s, genres=%s WHERE id=%s""",
-            (
-                song.title,
-                song.artist,
-                song.album,
-                song.year,
-                song.duration,
-                [song.genre] if song.genre else [],
-                track_id,
-            ),
-        )
+    library.refresh_source(
+        batch.connection,
+        batch.library_id,
+        song.id,
+        song.raw,
+        track_id,
+        title=song.title,
+        artist=song.artist,
+        album=song.album,
+        year=song.year,
+        duration_seconds=song.duration,
+        genres=[song.genre] if song.genre else [],
+    )
 
 
 def _bind_source(batch: IngestBatch, song: NavidromeTrack, audio_hash: str):
     track_id, inserted = _upsert_track(batch.connection, batch.library_id, song, audio_hash)
-    with batch.connection.cursor() as cursor:
-        cursor.execute(
-            """UPDATE track_sources SET audio_verified_at=now()
-            WHERE library_id=%s AND source_type='subsonic' AND external_id=%s
-                AND track_id=%s""",
-            (batch.library_id, song.id, track_id),
-        )
+    library.mark_source_verified(batch.connection, batch.library_id, song.id, track_id)
     return track_id, inserted
 
 
@@ -611,11 +520,7 @@ class EmbeddingPhase(_SongPhase):
                     item=item, outcome=embedded, output=("embedded", track_id, outcome)
                 )
         finish_attempt(connection, self.attempt_id)
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE analysis_runs SET status='complete', finished_at=now() WHERE id=%s",
-                (self.run_id,),
-            )
+        runs.complete_run(connection, self.run_id)
         connection.commit()
 
     @staticmethod
@@ -715,11 +620,7 @@ class MelodyPhase(_SongPhase):
                     continue
                 track_id = self.batch.bindings[item.key][0]
                 yield ItemResult(item=item, outcome="melody_indexed", output=(track_id, outcome))
-        with self.batch.connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE analysis_runs SET status='complete',finished_at=now() WHERE id=%s",
-                (self.run_id,),
-            )
+        runs.complete_run(self.batch.connection, self.run_id)
         self.batch.connection.commit()
 
     def analyze(self, context, audio):
@@ -866,7 +767,7 @@ def ingest_navidrome(
             setattr(summary, key, getattr(summary, key) + value)
 
     with (
-        psycopg.connect(DatabaseConfig.load().database_url) as connection,
+        connect() as connection,
         NavidromeClient(url, username, password) as navidrome,
     ):
         configure_representations(connection)

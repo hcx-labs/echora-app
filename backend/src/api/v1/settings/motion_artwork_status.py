@@ -11,9 +11,11 @@ from backend.api.deps import SessionUser
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
 from backend.api.v1.settings._deps import admin_required
+from core.artwork import store
+from core.db.connection import connect
 from worker.artwork.config import ComfyUIConfig
 from worker.artwork.render import MODEL_FILES, REQUIRED_LOADERS
-from worker.artwork.settings import _connect, load_settings
+from worker.artwork.settings import load_settings
 
 
 class ExternalAIState(ResponseModel):
@@ -93,24 +95,10 @@ class MotionArtworkStatus(Endpoint):
     response = MotionArtworkState
 
     def handle(self, user: SessionUser = Depends(admin_required)) -> dict[str, object]:
-        with _connect() as connection, connection.cursor() as cursor:
-            settings = load_settings(cursor)
-            cursor.execute(
-                """SELECT count(*) FILTER (WHERE status='complete') AS complete,
-                          count(*) FILTER (WHERE status='failed') AS failed,
-                          coalesce(sum(bytes) FILTER (WHERE status='complete'), 0) AS bytes
-                   FROM motion_artworks"""
-            )
-            counts = cursor.fetchone()
-            cursor.execute(
-                """SELECT count(DISTINCT utl.track_id) AS tracks FROM user_track_links utl
-                   JOIN track_motion_artwork tma ON tma.track_id = utl.track_id
-                   JOIN motion_artworks ma ON ma.cover_sha256 = tma.cover_sha256
-                                          AND ma.status='complete'
-                   WHERE utl.user_id = %s""",
-                (user["id"],),
-            )
-            tracks = cursor.fetchone()["tracks"]
+        with connect() as connection:
+            settings = load_settings(connection)
+            counts = store.loop_counts(connection)
+            tracks = store.songs_with_loops(connection, user["id"])
         url = settings.external_url()
         from core.lyrics.translations import load_settings as load_external_ai
 
@@ -122,6 +110,6 @@ class MotionArtworkStatus(Endpoint):
                 "enabled": external_ai.ready(),
                 "model": external_ai.model or None,
             },
-            "artworks": dict(counts),
+            "artworks": counts,
             "tracks_with_artwork": tracks,
         }

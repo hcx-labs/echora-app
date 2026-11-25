@@ -7,7 +7,8 @@ import hashlib
 import numpy as np
 
 from backend.library.artists import fit_artist_profile, representative_indices
-from backend.library.db import connect, parse_vector
+from core.db.connection import connect
+from core.embeddings import store
 from core.errors import ConflictError, InvalidQueryError
 
 
@@ -15,19 +16,11 @@ def artist_embedding_corpus(model: str) -> tuple[list[dict[str, object]], np.nda
     """Songs with an artist (id, title, artist, album), their embeddings and the corpus hash."""
     if model not in {"muq_mulan", "mert"}:
         raise InvalidQueryError("Artist profiles support muq_mulan or mert")
-    with connect() as connection, connection.cursor() as cursor:
-        cursor.execute(
-            """SELECT DISTINCT ON (e.track_id) t.id, t.title, t.artist, t.album,
-                      e.embedding::text AS embedding, ar.id AS run_id
-               FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id JOIN tracks t ON t.id=e.track_id
-               WHERE e.embedding_type='audio-track' AND ar.model_name=%s AND t.artist IS NOT NULL
-               ORDER BY e.track_id, ar.created_at DESC""",
-            (model,),
-        )
-        rows = cursor.fetchall()
+    with connect() as connection:
+        rows = store.artist_corpus(connection, model)
     if not rows:
         raise ConflictError("No artist embeddings are available")
-    matrix = np.stack([parse_vector(row.pop("embedding")) for row in rows])
+    matrix = np.stack([store.parse_vector(row.pop("embedding")) for row in rows])
     corpus_hash = hashlib.sha256(
         "|".join(f"{row['id']}:{row['run_id']}" for row in rows).encode()
     ).hexdigest()

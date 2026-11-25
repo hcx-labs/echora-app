@@ -7,8 +7,6 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
-import psycopg
-from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
 
 from core.curation.concepts import expand_tag_groups
@@ -23,7 +21,7 @@ from core.curation.ranking import (
     MATCH_PERCENTILE,
     rank_curation,
 )
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.db.models import UserPreference
 from core.db.session import session_scope
 from core.embeddings.text import shared_lyrics_model
@@ -94,7 +92,7 @@ def curation_corpus(
     list[tuple[np.ndarray, np.ndarray] | None],
 ]:
     with (
-        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
+        connect(dict_rows=True) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -386,7 +384,7 @@ def preview_sonic_journey(
     )
 
     with (
-        psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
+        connect(dict_rows=True) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -487,7 +485,7 @@ def preview_curation(
     language_map: dict[str, dict[str, object]] = {}
     if request.target_language:
         with (
-            psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
+            connect(dict_rows=True) as connection,
             connection.cursor() as cursor,
         ):
             cursor.execute(

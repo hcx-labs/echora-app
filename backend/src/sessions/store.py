@@ -8,12 +8,10 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, Response
-from sqlalchemy import delete, select
-from sqlalchemy.orm import joinedload
 
 from backend.config import SessionConfig
-from core.db.models import User, UserSession
 from core.db.session import session_scope
+from core.users import store as users
 
 
 def token_hash(token: str) -> str:
@@ -26,16 +24,7 @@ def create_session(session, user_id, *, now: datetime | None = None):
     token = secrets.token_urlsafe(48)
     absolute = now + timedelta(seconds=settings.absolute_timeout_seconds)
     expires = min(absolute, now + timedelta(seconds=settings.idle_timeout_seconds))
-    session.add(
-        UserSession(
-            token_hash=token_hash(token),
-            user_id=user_id,
-            created_at=now,
-            last_renewed_at=now,
-            expires_at=expires,
-            absolute_expires_at=absolute,
-        )
-    )
+    users.add_session(session, token_hash(token), user_id, now, expires, absolute)
     return token, expires, absolute
 
 
@@ -44,21 +33,8 @@ def _load(session, token: str | None, now: datetime, *, lock: bool = False):
         raise HTTPException(
             status_code=401, detail="Authentication required", headers={"Cache-Control": "no-store"}
         )
-    query = (
-        select(UserSession)
-        .join(UserSession.user)
-        .options(joinedload(UserSession.user).joinedload(User.preference))
-        .where(
-            UserSession.token_hash == token_hash(token),
-            UserSession.expires_at > now,
-            UserSession.absolute_expires_at > now,
-            User.is_blocked.is_(False),
-        )
-    )
-    if lock:
-        # Serialize simultaneous activity from tabs without locking joined user rows.
-        query = query.with_for_update(of=UserSession)
-    stored = session.scalar(query)
+    # ``lock`` serializes simultaneous activity from tabs without locking joined user rows.
+    stored = users.live_session(session, token_hash(token), now, lock=lock)
     if stored is None or stored.user.preference is None:
         raise HTTPException(
             status_code=401, detail="Session expired", headers={"Cache-Control": "no-store"}
@@ -132,4 +108,4 @@ def set_session_cookie(response: Response, token: str, expires_at: datetime):
 def delete_session(token: str) -> None:
     """Forget a session (sign-out)."""
     with session_scope() as session:
-        session.execute(delete(UserSession).where(UserSession.token_hash == token_hash(token)))
+        users.drop_session(session, token_hash(token))

@@ -48,14 +48,14 @@ def test_audio_quality_reports_lossless(client, monkeypatch):
 
 def test_motion_artwork_points_at_the_media_route(client, monkeypatch):
     artwork = {"id": uuid.UUID(int=3), "width": 512, "height": 512, "frames": 96, "fps": 24}
-    db = install(monkeypatch, motion, [{"x": 1}], name="_connect")
-    monkeypatch.setattr(motion, "track_artwork", lambda cursor, user_id, track_id: artwork)
+    db = install(monkeypatch, motion, [{"x": 1}])
+    monkeypatch.setattr(motion, "track_artwork", lambda db, user_id, track_id: artwork)
     body = client.get(f"{BASE}/motion-artwork").json()
     assert body["url"] == f"/media/motion-artwork/{artwork['id']}.mp4"
     assert body["available"] is True and body["frames"] == 96
     assert db.executed
-    monkeypatch.setattr(motion, "track_artwork", lambda cursor, user_id, track_id: None)
-    install(monkeypatch, motion, [{"x": 1}], name="_connect")
+    monkeypatch.setattr(motion, "track_artwork", lambda db, user_id, track_id: None)
+    install(monkeypatch, motion, [{"x": 1}])
     assert client.get(f"{BASE}/motion-artwork").json() == {
         "track_id": str(TRACK),
         "available": False,

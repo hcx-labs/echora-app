@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-import psycopg
 from fastapi import Depends
-from psycopg.rows import dict_row
 
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
@@ -15,7 +13,8 @@ from core.curation.journeys import (
     select_journey,
     spherical_targets,
 )
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
+from core.embeddings import store
 from core.errors import InvalidQueryError, NotFoundError
 
 
@@ -30,34 +29,8 @@ class JourneyPreview(Endpoint):
     def handle(self, request: JourneyRequest, user: SessionUser = Depends(current_user)) -> dict:
         if request.start_track_id == request.end_track_id:
             raise InvalidQueryError("Journey endpoints must be different tracks")
-        with (
-            psycopg.connect(DatabaseConfig.load().database_url, row_factory=dict_row) as connection,
-            connection.cursor() as cursor,
-        ):
-            cursor.execute(
-                """
-                WITH semantic AS (
-                  SELECT DISTINCT ON (e.track_id) e.track_id, e.embedding::text AS embedding
-                  FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
-                  WHERE e.embedding_type='audio-track' AND ar.model_name='muq_mulan'
-                  ORDER BY e.track_id, ar.created_at DESC
-                ), acoustic AS (
-                  SELECT DISTINCT ON (e.track_id) e.track_id, e.embedding::text AS embedding
-                  FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
-                  WHERE e.embedding_type='audio-track' AND ar.model_name='mert'
-                  ORDER BY e.track_id, ar.created_at DESC
-                )
-                SELECT t.id, t.title, t.artist, t.album, t.duration_seconds,
-                       semantic.embedding AS semantic_embedding, acoustic.embedding AS acoustic_embedding,
-                       max(ts.external_id) AS source_id, max(ts.source_data->>'coverArt') AS cover_art,
-                       max(member.group_id::text) AS recording_group_id
-                FROM tracks t JOIN semantic ON semantic.track_id=t.id JOIN acoustic ON acoustic.track_id=t.id
-                LEFT JOIN track_sources ts ON ts.track_id=t.id
-                LEFT JOIN recording_group_members member ON member.track_id=t.id
-                GROUP BY t.id, semantic.embedding, acoustic.embedding ORDER BY t.id
-                """
-            )
-            rows = cursor.fetchall()
+        with connect() as connection:
+            rows = store.journey_corpus(connection)
         identifiers = {str(row["id"]): index for index, row in enumerate(rows)}
         start_index, end_index = (
             identifiers.get(str(request.start_track_id)),
@@ -69,14 +42,10 @@ class JourneyPreview(Endpoint):
         if start_group and start_group == rows[end_index].get("recording_group_id"):
             raise InvalidQueryError("Journey endpoints must be different recordings")
         semantic = normalize_journey_rows(
-            np.stack(
-                [np.fromstring(row.pop("semantic_embedding").strip("[]"), sep=",") for row in rows]
-            )
+            np.stack([store.parse_vector(row.pop("semantic_embedding")) for row in rows])
         )
         acoustic = normalize_journey_rows(
-            np.stack(
-                [np.fromstring(row.pop("acoustic_embedding").strip("[]"), sep=",") for row in rows]
-            )
+            np.stack([store.parse_vector(row.pop("acoustic_embedding")) for row in rows])
         )
         if request.mode == "semantic":
             matrix = semantic

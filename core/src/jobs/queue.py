@@ -10,11 +10,9 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-import psycopg
-from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.jobs.config import QueueConfig
 
 ACTIVE = ("queued", "running", "waiting")
@@ -53,10 +51,7 @@ def _uuid(value):
 
 
 def _db():
-    database_url = DatabaseConfig.load().database_url
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required")
-    return psycopg.connect(database_url, row_factory=dict_row)
+    return connect(dict_rows=True)
 
 
 def _public(row, existing=False):

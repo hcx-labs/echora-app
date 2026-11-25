@@ -18,12 +18,10 @@ import unicodedata
 import uuid
 from pathlib import Path
 
-import psycopg
-from psycopg.types.json import Jsonb
-
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient
+from core.lyrics import store
 from core.lyrics.backing import BACKING_VOICE, tag_bracketed_backing
 from core.revisions import KARAOKE_PIPELINE_REVISION
 from worker.kara.aligner import label_rules
@@ -573,26 +571,7 @@ def _store_supplied_karaoke(connection, track_id, lines, digest) -> None:
         "pipeline_revision": KARAOKE_PIPELINE_REVISION,
         "ai_generated": False,
     }
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO karaoke_lyrics_variants
-                 (track_id, bounded, lines, ass, lrc, model, model_revision, provenance,
-                  alignment_document, diagnostics, created_at)
-               VALUES (%s,false,%s,NULL,NULL,'navidrome','supplied',%s,NULL,'{}',now())
-               ON CONFLICT (track_id, bounded) DO UPDATE SET lines=EXCLUDED.lines,
-                 ass=NULL, lrc=NULL, model=EXCLUDED.model, model_revision=EXCLUDED.model_revision,
-                 provenance=EXCLUDED.provenance, alignment_document=NULL, diagnostics='{}',
-                 created_at=now()""",
-            (track_id, Jsonb(lines), Jsonb(provenance)),
-        )
-        cursor.execute(
-            """UPDATE lyrics SET karaoke_lines=%s, karaoke_ass=NULL, karaoke_lrc=NULL,
-                      karaoke_model='navidrome', karaoke_model_revision='supplied',
-                      karaoke_bounded=false, karaoke_created_at=now(),
-                      provenance=provenance || %s
-               WHERE track_id=%s""",
-            (Jsonb(lines), Jsonb({"karaoke": provenance}), track_id),
-        )
+    store.save_supplied_karaoke(connection, track_id, lines, provenance)
     connection.commit()
 
 
@@ -625,7 +604,7 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
     current_message = "Karaoke alignment already current"
 
     def plan(self, context: ProcessingContext) -> list[KaraokeItem]:
-        with psycopg.connect(DatabaseConfig.load().database_url) as connection:
+        with connect() as connection:
             self.library_id = resolve_library_id(connection, context.library_url)
             model_revision = _stored_model_revision(current_model_revision())
             planned = plan_karaoke(
@@ -637,29 +616,19 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
             ).karaoke_external_ids
             if not planned:
                 return []
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """SELECT DISTINCT ON (ts.track_id) ts.track_id, ts.external_id, t.title, l.text, l.language, l.provenance->'lines',
-                               l.provenance->'word_timing', l.provenance->>'word_timing_digest'
-                        FROM track_sources ts JOIN tracks t ON t.id=ts.track_id JOIN lyrics l ON l.track_id=ts.track_id
-                        WHERE ts.source_type='subsonic' AND ts.external_id=ANY(%s) AND ts.library_id=%s
-                        ORDER BY ts.track_id, ts.id""",
-                    (list(planned), self.library_id),
-                )
-                rows = cursor.fetchall()
+            rows = store.karaoke_sources(connection, list(planned), self.library_id)
         items = []
         for row in rows:
-            track_id, external_id, title, text, language, lines = row[:6]
-            supplied, digest = (row[6], row[7]) if len(row) > 7 else (None, None)
+            supplied, digest = row.get("word_timing"), row.get("word_timing_digest")
             items.append(
                 KaraokeItem(
-                    key=str(track_id),
-                    label=title or "",
-                    track_id=track_id,
-                    external_id=str(external_id),
-                    text=text or "",
-                    language=language,
-                    source_lines=lines,
+                    key=str(row["track_id"]),
+                    label=row["title"] or "",
+                    track_id=row["track_id"],
+                    external_id=str(row["external_id"]),
+                    text=row["text"] or "",
+                    language=row["language"],
+                    source_lines=row["lines"],
                     supplied=supplied if supplied and digest else None,
                     supplied_digest=digest if supplied and digest else None,
                 )
@@ -672,7 +641,7 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
             context.check()
         self.locked = True
         context.check()
-        self.connection = psycopg.connect(DatabaseConfig.load().database_url)
+        self.connection = connect()
         self.client = NavidromeClient(*context.library)
         self.client.__enter__()
 
@@ -805,32 +774,12 @@ def _store_alignment(connection, track_id, result: dict[str, object]) -> None:
     }
     lines = mark_backing_voice(result["lines"])
     revision = _stored_model_revision(str(result["model_revision"]))
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO karaoke_lyrics_variants
-                 (track_id, bounded, lines, ass, lrc, model, model_revision, provenance,
-                  alignment_document, diagnostics, created_at)
-               VALUES (%s,%s,%s,NULL,NULL,'fa_kara',%s,%s,%s,%s,now())
-               ON CONFLICT (track_id, bounded) DO UPDATE SET lines=EXCLUDED.lines,
-                 ass=EXCLUDED.ass, lrc=EXCLUDED.lrc, model=EXCLUDED.model,
-                 model_revision=EXCLUDED.model_revision, provenance=EXCLUDED.provenance,
-                 alignment_document=EXCLUDED.alignment_document,
-                 diagnostics=EXCLUDED.diagnostics, created_at=now()""",
-            (
-                track_id,
-                False,
-                Jsonb(lines),
-                revision,
-                Jsonb(karaoke_provenance),
-                Jsonb(result["alignment_document"]),
-                Jsonb(result["diagnostics"]),
-            ),
-        )
-        cursor.execute(
-            """UPDATE lyrics SET karaoke_lines=%s, karaoke_ass=NULL, karaoke_lrc=NULL,
-                      karaoke_model='fa_kara', karaoke_model_revision=%s, karaoke_bounded=%s,
-                      karaoke_created_at=now(),
-                      provenance=provenance || %s
-               WHERE track_id=%s""",
-            (Jsonb(lines), revision, False, Jsonb({"karaoke": karaoke_provenance}), track_id),
-        )
+    store.save_aligned_karaoke(
+        connection,
+        track_id,
+        lines,
+        revision,
+        karaoke_provenance,
+        result["alignment_document"],
+        result["diagnostics"],
+    )

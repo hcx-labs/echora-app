@@ -19,6 +19,9 @@ class FakeDb:
     def fetchone(self):
         return self.rows.pop(0) if self.rows else None
 
+    def cursor(self, **_):
+        return self
+
     def __enter__(self):
         return self
 
@@ -40,7 +43,7 @@ def test_authenticate_rejects_missing_and_unknown_keys(monkeypatch):
     with pytest.raises(HTTPException) as missing:
         integration.authenticate(None)
     assert missing.value.status_code == 401
-    monkeypatch.setattr(integration, "connect", lambda: FakeDb())
+    monkeypatch.setattr(integration, "connect", lambda **_: FakeDb())
     with pytest.raises(HTTPException) as unknown:
         integration.authenticate("Bearer echora_nd_nope")
     assert unknown.value.headers == {"WWW-Authenticate": "Bearer"}
@@ -48,7 +51,7 @@ def test_authenticate_rejects_missing_and_unknown_keys(monkeypatch):
 
 def test_authenticate_returns_the_profile_and_records_use(monkeypatch):
     db = FakeDb([{"key_id": "k", "user_id": "u", "connection_id": "c", "url": "x", "profile": {}}])
-    monkeypatch.setattr(integration, "connect", lambda: db)
+    monkeypatch.setattr(integration, "connect", lambda **_: db)
     row = integration.authenticate("Bearer echora_nd_secret")
     assert row["profile"] == integration.RankingProfile()
     assert db.calls[0][1] == (integration.digest("echora_nd_secret"),)
@@ -68,6 +71,6 @@ def test_bodies_match_what_the_web_app_sends():
 def test_enabling_without_a_connection_is_refused(client, monkeypatch):
     import backend.api.v1.settings.plugin_update as plugin_update
 
-    monkeypatch.setattr(plugin_update, "connect", lambda: FakeDb())
+    monkeypatch.setattr(plugin_update, "connect", lambda **_: FakeDb())
     response = client.put("/api/v1/settings/integrations/navidrome", json={"enabled": True})
     assert response.status_code == 400

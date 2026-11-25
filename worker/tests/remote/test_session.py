@@ -263,7 +263,7 @@ def test_compute_choice_respects_permission_and_default(monkeypatch):
         "allow_users": False,
         "default_compute": "modal",
     }
-    monkeypatch.setattr(external_processing, "_connect", lambda: nullcontext(MagicMock()))
+    monkeypatch.setattr(external_processing, "connect", lambda **_: nullcontext(MagicMock()))
     monkeypatch.setattr(external_processing, "load", lambda db=None: row)
     admin = {"value": True}
     monkeypatch.setattr(external_processing, "_is_admin", lambda db, user: admin["value"])
@@ -282,8 +282,8 @@ def test_compute_choice_respects_permission_and_default(monkeypatch):
 def preparation_database(monkeypatch):
     monkeypatch.setattr(external_processing, "remote_settings", compute_settings)
     db = MagicMock()
-    db.execute.return_value.fetchone.return_value = {"locked": True}
-    monkeypatch.setattr(external_processing, "_connect", lambda: nullcontext(db))
+    db.cursor.return_value.__enter__.return_value.fetchone.return_value = {"locked": True}
+    monkeypatch.setattr(external_processing, "connect", lambda **_: nullcontext(db))
     monkeypatch.setattr(external_processing, "config", lambda row=None: CONFIG)
     recorded = []
     monkeypatch.setattr(
@@ -301,7 +301,7 @@ def test_preparation_records_ready_state_under_a_lock(monkeypatch):
     factory.assert_called_once_with(CONFIG, compute_settings())
     assert recorded[0]["status"] == "preparing" and recorded[-1]["status"] == "ready"
     assert recorded[-1]["deployed_code"] == "code" and recorded[-1]["deployed_models"] == "models"
-    statements = [call.args[0] for call in db.execute.call_args_list]
+    statements = [call.args[0] for call in db.mock_calls if call[0].endswith("execute")]
     assert any("pg_try_advisory_lock" in s for s in statements) and any(
         "pg_advisory_unlock" in s for s in statements
     )
@@ -415,7 +415,7 @@ def ingest_batch(monkeypatch):
         "store_track_contours": Mock(return_value=2),
     }.items():
         monkeypatch.setattr(ingest, name, value)
-    monkeypatch.setattr(ingest.psycopg, "connect", Mock(return_value=connection))
+    monkeypatch.setattr(ingest, "connect", Mock(return_value=connection))
     monkeypatch.setattr(ingest, "NavidromeClient", Mock(return_value=client))
     monkeypatch.setattr(ingest.torch.cuda, "is_available", lambda: False)
     # A Modal batch must never load an embedding model locally.
@@ -506,7 +506,10 @@ def database(rows):
 def test_modal_batch_classifies_voice_remotely(monkeypatch):
     import worker.voice.pipeline as voice_pipeline
 
-    rows = [(uuid4(), "a", "A"), (uuid4(), "b", "B")]
+    rows = [
+        {"track_id": uuid4(), "external_id": "a", "title": "A"},
+        {"track_id": uuid4(), "external_id": "b", "title": "B"},
+    ]
     connection, _ = database(rows)
     client = MagicMock()
     client.__enter__.return_value = client
@@ -515,12 +518,12 @@ def test_modal_batch_classifies_voice_remotely(monkeypatch):
         "resolve_library_id": Mock(),
         "configure_representations": Mock(),
         "_create_run": Mock(return_value=uuid4()),
-        "_store_activation": Mock(),
+        "_store_voice": Mock(),
         "NavidromeClient": Mock(return_value=client),
         "shared_voice_model": Mock(side_effect=AssertionError("local model in Modal batch")),
     }.items():
         monkeypatch.setattr(voice_pipeline, name, value)
-    monkeypatch.setattr(voice_pipeline.psycopg, "connect", Mock(return_value=connection))
+    monkeypatch.setattr(voice_pipeline, "connect", Mock(return_value=connection))
     remote = Mock()
     remote.upload_audio.side_effect = lambda audio: sha256(audio).hexdigest()
     remote.voice.side_effect = lambda digests: [
@@ -532,17 +535,18 @@ def test_modal_batch_classifies_voice_remotely(monkeypatch):
     )
     summary = run_stage(voice_pipeline.VoiceProcessor(), context).as_dict()
     assert summary == {"total": 2, "classified": 1, "failed": 1}
-    voice_pipeline._store_activation.assert_called_once()
-    assert voice_pipeline._store_activation.call_args.args[1] == rows[0][0]
+    voice_pipeline._store_voice.assert_called_once()
+    assert voice_pipeline._store_voice.call_args.args[1] == rows[0]["track_id"]
 
 
 def test_modal_batch_aligns_karaoke_remotely(monkeypatch):
     import worker.kara.pipeline as karaoke_pipeline
 
     reset_config_cache()
+    keys = ("track_id", "external_id", "title", "text", "language", "lines")
     rows = [
-        (uuid4(), "a", "A", "lyrics a", "ja", [{"text": "a"}]),
-        (uuid4(), "b", "B", "lyrics b", None, None),
+        dict(zip(keys, (uuid4(), "a", "A", "lyrics a", "ja", [{"text": "a"}]))),
+        dict(zip(keys, (uuid4(), "b", "B", "lyrics b", None, None))),
     ]
     connection, cursor = database(rows)
     client = MagicMock()
@@ -556,7 +560,7 @@ def test_modal_batch_aligns_karaoke_remotely(monkeypatch):
         "_stop_fa_kara_worker": Mock(),
     }.items():
         monkeypatch.setattr(karaoke_pipeline, name, value)
-    monkeypatch.setattr(karaoke_pipeline.psycopg, "connect", Mock(return_value=connection))
+    monkeypatch.setattr(karaoke_pipeline, "connect", Mock(return_value=connection))
     aligned = {
         "lines": [],
         "alignment_document": {},
@@ -720,7 +724,7 @@ def test_saved_token_is_verified_and_encrypted(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
     reset_config_cache()
     db = MagicMock()
-    monkeypatch.setattr(huggingface_token.psycopg, "connect", lambda url: nullcontext(db))
+    monkeypatch.setattr(huggingface_token, "connect", lambda **_: nullcontext(db))
     monkeypatch.setattr(
         huggingface_token, "account", lambda token: "hcX02" if token == "hf_good" else 1 / 0
     )
@@ -789,8 +793,9 @@ def test_settings_report_a_stored_hugging_face_token_without_decrypting_it(monke
         huggingface_token, "token_or_none", Mock(side_effect=AssertionError("decrypted"))
     )
     db = MagicMock()
-    db.execute.return_value.fetchone.return_value = {"stored": True}
+    cursor = db.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value = {"stored": True}
     assert external_processing._has_hf_token(db) is True
-    assert "IS NOT NULL" in db.execute.call_args.args[0]
-    db.execute.return_value.fetchone.return_value = None
+    assert "IS NOT NULL" in cursor.execute.call_args.args[0]
+    cursor.fetchone.return_value = None
     assert external_processing._has_hf_token(db) is False

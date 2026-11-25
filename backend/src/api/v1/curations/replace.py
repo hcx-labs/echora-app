@@ -6,16 +6,14 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends
-from sqlalchemy import select
 
 import worker.curation.jobs as curation_jobs
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.v1.curations._models import CurationReplaceRequest, CurationSaved
 from backend.api.v1.curations._shared import recipe_columns, refresh, saved, unique_name
-from core.db.models import Curation
+from core.curation import store
 from core.db.session import session_scope
-from core.errors import NotFoundError
 
 
 class ReplaceCuration(Endpoint):
@@ -38,11 +36,7 @@ class ReplaceCuration(Endpoint):
             unique_name(),
             session_scope() as session,
         ):
-            curation = session.scalar(
-                select(Curation).where(Curation.id == curation_id, Curation.user_id == user["id"])
-            )
-            if curation is None:
-                raise NotFoundError("Curation not found")
+            curation = store.require_owned_curation(session, curation_id, user["id"])
             curation_jobs.assert_mutable(lock_connection, curation_id)
             for column, value in recipe_columns(request).items():
                 setattr(curation, column, value)

@@ -447,7 +447,7 @@ def database(monkeypatch):
         db.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
 
     @contextmanager
-    def connect():
+    def connect(**_):
         with psycopg.connect(url, options=f"-c search_path={schema}", row_factory=dict_row) as db:
             yield db
 

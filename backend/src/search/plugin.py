@@ -24,48 +24,12 @@ from backend.library.artists import (
 )
 from backend.plugin.scope import library_namespace
 from backend.search.service import SearchService, search_now
-from backend.settings.plugin_integration import connect
 from core.curation.journeys import normalize_rows, select_journey, spherical_targets
+from core.db.connection import connect
 from core.errors import ConflictError, NotFoundError
+from core.plugin import store
 
 DIMENSIONS = {"muq": 512, "mert": 768, "lyrics": 1024}
-
-# The latest current embedding of each kind per visible song, as in the legacy plugin query.
-_SONGS = """
-    FROM user_source_memberships visible
-    JOIN libraries lib ON lib.id=visible.library_id AND lib.namespace=%s
-    JOIN track_sources ts ON ts.library_id=visible.library_id
-        AND ts.external_id=visible.external_id AND ts.source_type='subsonic'
-    JOIN tracks t ON t.id=ts.track_id
-    LEFT JOIN recording_group_members member ON member.track_id=t.id
-    LEFT JOIN LATERAL (
-        SELECT e.id, e.embedding FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
-        WHERE e.track_id=t.id AND e.embedding_type='audio-track' AND e.window_index IS NULL
-            AND ar.model_name='muq_mulan' ORDER BY ar.created_at DESC LIMIT 1
-    ) muq ON true
-    LEFT JOIN LATERAL (
-        SELECT e.id, e.embedding FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
-        WHERE e.track_id=t.id AND e.embedding_type='audio-track' AND e.window_index IS NULL
-            AND ar.model_name='mert' ORDER BY ar.created_at DESC LIMIT 1
-    ) mert ON true
-    LEFT JOIN LATERAL (
-        SELECT e.id, e.embedding FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
-        WHERE e.track_id=t.id AND e.embedding_type='lyrics' AND e.window_index IS NULL
-            AND ar.model_name='bge_m3' ORDER BY ar.created_at DESC LIMIT 1
-    ) lyric ON true
-    WHERE visible.user_id=%s AND (muq.embedding IS NOT NULL OR mert.embedding IS NOT NULL
-        OR lyric.embedding IS NOT NULL)"""
-
-_COLUMNS = """t.id,t.title,t.artist,t.album,t.duration_seconds,ts.external_id AS source_id,
-    coalesce(ts.source_data->>'artistId',ts.source_data#>>'{artists,0,id}') AS artist_id,
-    coalesce(ts.source_data->>'artist',t.artist) AS source_artist,
-    member.group_id::text AS recording_group_id"""
-
-# Everything the corpus holds except the vectors, which the current embedding ids stand for.
-# ROW()::text keeps NULLs in place, so different songs never digest alike.
-_KEY_COLUMNS = """t.id, t.title, t.artist, t.album, t.duration_seconds, ts.external_id,
-    ts.source_data->>'artistId', ts.source_data#>>'{artists,0,id}', ts.source_data->>'artist',
-    member.group_id, muq.id, mert.id, lyric.id"""
 
 
 @dataclass
@@ -95,23 +59,12 @@ class PluginCorpus(SearchService[None, Corpus]):
     def index_key(self) -> str:
         user_id, namespace = self.scope
         with connect() as db:
-            return db.execute(
-                f"""SELECT md5(coalesce(string_agg(ROW({_KEY_COLUMNS})::text, ','
-                                   ORDER BY t.id, ts.external_id), '')) AS key
-                    {_SONGS}""",
-                (namespace, user_id),
-            ).fetchone()["key"]
+            return store.corpus_key(db, user_id, namespace)
 
     def open(self) -> None:
         user_id, namespace = self.scope
         with connect() as db:
-            rows = db.execute(
-                f"""SELECT {_COLUMNS},
-                       muq.embedding::text AS muq, mert.embedding::text AS mert,
-                       lyric.embedding::text AS lyrics
-                    {_SONGS} ORDER BY t.id,ts.external_id""",
-                (namespace, user_id),
-            ).fetchall()
+            rows = store.corpus(db, user_id, namespace)
         self.corpus = corpus_from_rows(rows)
         for matrix in (*self.corpus.vectors.values(), *self.corpus.available.values()):
             matrix.flags.writeable = False

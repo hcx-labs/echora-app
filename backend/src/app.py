@@ -6,7 +6,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
-import psycopg
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -14,7 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from backend.api import v1
 from backend.api.errors import install_error_handlers
 from backend.config import ApiConfig, OidcConfig, SessionConfig
-from core.db.config import DatabaseConfig
+from core.db.connection import connect
 from core.embeddings.representations import configure_representations
 
 DEFAULT_REDIRECT_URI = "http://localhost:3000/api/v1/auth/oidc/callback"
@@ -59,7 +58,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def _startup() -> None:
     enforce_secure_cookie_policy()
-    with psycopg.connect(DatabaseConfig.load().database_url) as connection:
+    with connect() as connection:
         configure_representations(connection)
 
 
