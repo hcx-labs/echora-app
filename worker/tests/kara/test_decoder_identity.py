@@ -78,6 +78,7 @@ class DecoderIdentityTests(unittest.TestCase):
             in_line_gap_cost=0.0,
             line_acoustic_ranges=[(0, 1)],
             optional_groups=None,
+            bonus_backing_groups=None,
         )
         env.update(overrides)
         exec(

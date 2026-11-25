@@ -18,6 +18,9 @@ class AlignRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     audio_path: str
+    stem_path: str | None = None
+    """The song's separated vocals: what the model reads on them is added to what it reads on
+    the mix (see ``decoder.with_stem_reading``)."""
     text: str
     """The lyrics, one line per source line."""
     model_path: str
@@ -40,6 +43,9 @@ class AlignRequest(BaseModel):
     blank_free_tokens: bool = False
     inline_backing: bool = False
     """Re-place inline bracketed words on the background head inside their line's window."""
+    inline_text_bonus: bool = False
+    """The text head scores inline bracketed words with its backing voice, on the lead path and
+    where ``inline_backing`` re-places them."""
     optional_brackets: bool = False
     """Experiment, off: inline bracketed words may leave the lead path."""
     gap_onset_pull: bool = False

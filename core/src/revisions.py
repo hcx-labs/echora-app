@@ -42,8 +42,10 @@ SUPPORTED_PROFILE_MODELS = ("muq_mulan", "mert")
 # language, and vocal loudness is read at each frame's true time.
 # v10: blocks of backing lines keep a pace (the lead's rhythm where it sings the same lines, both
 # heads where no lead line is sung, the text head's bonus) and no longer start on the lead line
-# before them.
-KARAOKE_PIPELINE_REVISION = "v10-echora-kara-mix"
+# before them; a line the model did not hear keeps the full minimum word length.
+# v11: what the model reads on the separated vocals is added to what it reads on the mix, and the
+# text head scores inline bracketed words with its backing voice.
+KARAOKE_PIPELINE_REVISION = "v11-echora-kara-mix"
 
 # Lyric theme descriptions (worker.themes): the first 16 hex digits of the SHA-256 of the system
 # prompt. worker/tests/themes checks it against the prompt, so a prompt change must update it.

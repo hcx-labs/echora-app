@@ -89,6 +89,14 @@ class KaraConfig(EchoraConfig, env_prefix="ECHORA_KARA_"):
         legacy="FA_KARA_INLINE_BACKING",
         description="Place inline bracketed words on the backing-vocal head.",
     )
+    inline_text_bonus: bool = compute(
+        True,
+        description="The text head's evidence also places inline bracketed words (needs text_bonus).",
+    )
+    stem_reading: bool = compute(
+        True,
+        description="Add what the model reads on the separated vocals to what it reads on the mix.",
+    )
     job_timeout_seconds: float = setting(1800, gt=0, legacy="ECHORA_KARAOKE_JOB_TIMEOUT_SECONDS")
     shutdown_grace_seconds: float = setting(
         10, gt=0, legacy="ECHORA_KARAOKE_SHUTDOWN_GRACE_SECONDS"

@@ -590,8 +590,51 @@ def test_modal_batch_aligns_karaoke_remotely(monkeypatch):
         and lines == [[{"text": "a"}], []]
     )
     assert digests == [sha256(b"audio a").hexdigest(), sha256(b"audio b").hexdigest()]
-    # The full mix: nothing is separated on Modal for karaoke.
-    remote.prepare_vocals.assert_not_called()
+    # The stem reading: one separation phase on Modal for the batch, before it aligns.
+    remote.prepare_vocals.assert_called_once_with(digests, vocals=True)
+
+
+def test_modal_karaoke_skips_a_song_whose_vocals_could_not_be_separated(monkeypatch):
+    import worker.kara.pipeline as karaoke_pipeline
+
+    reset_config_cache()
+    keys = ("track_id", "external_id", "title", "text", "language", "lines")
+    rows = [
+        dict(zip(keys, (uuid4(), "a", "A", "lyrics a", "en", None))),
+        dict(zip(keys, (uuid4(), "b", "B", "lyrics b", "en", None))),
+    ]
+    connection, cursor = database(rows)
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.audio_bytes.side_effect = lambda source: f"audio {source}".encode()
+    for name, value in {
+        "resolve_library_id": Mock(),
+        "NavidromeClient": Mock(return_value=client),
+        "plan_karaoke": Mock(return_value=SimpleNamespace(karaoke_external_ids={"a", "b"})),
+        "_stop_fa_kara_worker": Mock(),
+    }.items():
+        monkeypatch.setattr(karaoke_pipeline, name, value)
+    monkeypatch.setattr(karaoke_pipeline, "connect", Mock(return_value=connection))
+    aligned = {
+        "lines": [],
+        "alignment_document": {},
+        "model": "m",
+        "model_revision": "r",
+        "diagnostics": {"audio_source": "original_mix", "separator_revision": "s"},
+    }
+    remote = Mock()
+    remote.upload_audio.side_effect = lambda audio: sha256(audio).hexdigest()
+    remote.prepare_vocals.side_effect = lambda digests, **artifacts: [
+        RuntimeError("separation failed"),
+        None,
+    ]
+    remote.karaoke.side_effect = lambda digests, texts, languages, lines: [aligned]
+    context = ProcessingContext(
+        remote=remote, user_id="user", library=("url", "user", "password"), track_ids=("a", "b")
+    )
+    summary = run_stage(karaoke_pipeline.KaraokeProcessor(), context).as_dict()
+    assert summary == {"total": 2, "aligned": 1, "failed": 1}
+    assert remote.karaoke.call_args.args[0] == [sha256(b"audio b").hexdigest()]
 
 
 # Motion artwork
