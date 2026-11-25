@@ -517,3 +517,28 @@ def songs_without_contour(db: Connection, revision: str) -> int:
         (revision,),
     )
     return int(row["pending"]) if row else 0
+
+
+def processed_source_ids(db: Connection, namespace: uuid.UUID) -> set[str]:
+    """Navidrome song ids of the library namespace that Echora has ingested."""
+    rows = fetch_all(
+        db,
+        """SELECT ts.external_id FROM track_sources ts
+           JOIN libraries l ON l.id=ts.library_id
+           WHERE l.namespace=%s AND ts.source_type='subsonic'""",
+        (namespace,),
+    )
+    return {str(row["external_id"]) for row in rows}
+
+
+def songs_with_contours(db: Connection, user_id: uuid.UUID) -> int:
+    """How many of the user's songs have a melody contour (hum search covers them)."""
+    row = fetch_one(
+        db,
+        """SELECT count(DISTINCT mc.track_id) AS indexed_tracks
+           FROM melody_contours mc
+           WHERE EXISTS (SELECT 1 FROM user_track_links utl
+                         WHERE utl.user_id=%s AND utl.track_id=mc.track_id)""",
+        (user_id,),
+    )
+    return int(row["indexed_tracks"]) if row else 0

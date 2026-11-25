@@ -8,6 +8,7 @@ from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
 from core.db.connection import connect
+from core.library import store
 
 
 class HumIndexState(ResponseModel):
@@ -27,18 +28,8 @@ class HumIndexStatus(Endpoint):
     response = HumIndexState
 
     def handle(self, user: SessionUser = Depends(current_user)) -> dict:
-        with (
-            connect(dict_rows=True) as connection,
-            connection.cursor() as cursor,
-        ):
-            cursor.execute(
-                """SELECT count(DISTINCT mc.track_id) AS indexed_tracks
-                   FROM melody_contours mc
-                   WHERE EXISTS (SELECT 1 FROM user_track_links utl
-                                 WHERE utl.user_id=%s AND utl.track_id=mc.track_id)""",
-                (user["id"],),
-            )
-            indexed = int(cursor.fetchone()["indexed_tracks"])
+        with connect() as connection:
+            indexed = store.songs_with_contours(connection, user["id"])
         return {
             "status": "complete" if indexed else "missing",
             "indexed_tracks": indexed,

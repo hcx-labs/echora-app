@@ -26,7 +26,11 @@ def test_semantic_fusion_rebuild_is_one_job_for_the_corpus(client, user, enqueue
 def test_audio_profile_rebuild_lists_each_song_once(client, user, enqueue, monkeypatch):
     connection = MagicMock()
     cursor = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
-    cursor.fetchall.return_value = [("t2", "mert"), ("t1", "mert"), ("t2", "muq_mulan")]
+    cursor.fetchall.return_value = [
+        {"track_id": "t2", "model_name": "mert"},
+        {"track_id": "t1", "model_name": "mert"},
+        {"track_id": "t2", "model_name": "muq_mulan"},
+    ]
     monkeypatch.setattr(rebuild, "connect", lambda **_: connection)
     assert client.post("/api/v1/sync/audio-profiles").status_code == 202
     assert enqueue.call_args.kwargs == {

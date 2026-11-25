@@ -13,6 +13,7 @@ from backend.sync.connections import owned_connection
 from core.db.connection import connect
 from core.errors import IntegrationError
 from core.integrations.navidrome import NavidromeClient
+from core.library import store as library
 from core.library.membership import relink_renumbered_sources
 from worker.recordings.search import index_status
 
@@ -32,21 +33,10 @@ class ConnectionSyncStatus(Endpoint):
         except Exception as error:
             raise IntegrationError("Could not scan the Navidrome library") from error
         namespace = uuid.uuid5(uuid.NAMESPACE_URL, credentials[0].rstrip("/"))
-        with (
-            connect() as connection,
-            connection.cursor() as cursor,
-        ):
+        with connect() as connection:
             # Heal a renumbered library here too, so it never shows as unanalyzed.
             relink_renumbered_sources(connection, credentials[0], tracks)
-            cursor.execute(
-                """
-                SELECT ts.external_id FROM track_sources ts
-                JOIN libraries l ON l.id=ts.library_id
-                WHERE l.namespace=%s AND ts.source_type='subsonic'
-                """,
-                (namespace,),
-            )
-            processed = {str(row[0]) for row in cursor.fetchall()}
+            processed = library.processed_source_ids(connection, namespace)
             recording_index = index_status(
                 connection, namespace, [track.id for track in tracks], user["id"]
             )

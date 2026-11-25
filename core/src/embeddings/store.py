@@ -6,7 +6,7 @@ Every function takes an open connection; the caller owns the transaction.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from psycopg import Connection
@@ -141,3 +141,71 @@ def blend_map_corpus(db: Connection, user_id: uuid.UUID, limit: int) -> list[dic
         """,
         (user_id, user_id, limit),
     )
+
+
+def fusion_counts(db: Connection) -> dict[str, int]:
+    """How many current semantic fusion, whole-song lyrics and audio embeddings exist."""
+    return cast(
+        dict[str, int],
+        fetch_one(
+            db,
+            """SELECT count(*) AS fused,
+                      (SELECT count(*) FROM current_embeddings l WHERE l.embedding_type='lyrics'
+                        AND l.window_index IS NULL) AS lyrics,
+                      (SELECT count(*) FROM current_embeddings a WHERE a.embedding_type='audio-track'
+                        AND a.window_index IS NULL) AS audio
+               FROM current_embeddings e WHERE e.embedding_type='semantic_fusion'""",
+        ),
+    )
+
+
+def audio_profile_coverage(
+    db: Connection, user_id: uuid.UUID, model: str, revision: str
+) -> tuple[int, int]:
+    """The user's songs with a ``model`` audio embedding, and how many have a current profile.
+
+    A profile counts when it is of ``revision`` and built from the song's newest embedding.
+    """
+    row = fetch_one(
+        db,
+        """WITH latest_source AS (
+             SELECT DISTINCT ON (e.track_id) e.track_id, e.run_id
+             FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
+             WHERE e.embedding_type='audio-track' AND e.window_index IS NULL
+               AND ar.model_name=%s
+               AND EXISTS (SELECT 1 FROM user_track_links utl
+                           WHERE utl.user_id=%s AND utl.track_id=e.track_id)
+             ORDER BY e.track_id, ar.created_at DESC
+           )
+           SELECT count(*) AS total,
+                  count(*) FILTER (WHERE EXISTS (
+                    SELECT 1 FROM current_audio_profiles tap
+                    JOIN analysis_runs profile_run ON profile_run.id=tap.profile_run_id
+                    WHERE tap.track_id=latest_source.track_id
+                      AND tap.source_run_id=latest_source.run_id
+                      AND tap.model_name=%s
+                      AND profile_run.kind='audio_profile'
+                      AND profile_run.model_revision=%s
+                  )) AS current
+           FROM latest_source""",
+        (model, user_id, model, revision),
+    )
+    return (int(row["total"]), int(row["current"])) if row else (0, 0)
+
+
+def songs_with_audio_embeddings(
+    db: Connection, user_id: uuid.UUID, models: list[str]
+) -> list[uuid.UUID]:
+    """The user's songs that have a whole-song audio embedding from any of ``models``."""
+    rows = fetch_all(
+        db,
+        """SELECT DISTINCT e.track_id, ar.model_name
+           FROM current_embeddings e JOIN analysis_runs ar ON ar.id=e.run_id
+           WHERE e.embedding_type='audio-track' AND e.window_index IS NULL
+             AND ar.model_name=ANY(%s)
+             AND EXISTS (SELECT 1 FROM user_track_links utl
+                         WHERE utl.user_id=%s AND utl.track_id=e.track_id)
+           ORDER BY e.track_id, ar.model_name""",
+        (models, user_id),
+    )
+    return sorted({row["track_id"] for row in rows})
