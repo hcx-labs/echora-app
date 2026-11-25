@@ -1,36 +1,35 @@
 from __future__ import annotations
 
-from core.db.config import DatabaseConfig
-from core.errors import ProcessingError
-from core.embeddings.config import EmbeddingConfig
-from core.library.connections import credential_cipher
-
-from contextlib import ExitStack
-from dataclasses import dataclass
 import hashlib
 import json
 import logging
 import platform
 import uuid
+from contextlib import ExitStack
+from dataclasses import dataclass
 
 import psycopg
-from psycopg.types.json import Jsonb
 import torch
+from psycopg.types.json import Jsonb
 
-from core.embeddings.text import LyricsEmbeddingModel
-from core.lyrics.language import detect_distribution
+from core.db.config import DatabaseConfig
 from core.embeddings.audio_models import release_model
-from core.integrations.navidrome import NavidromeClient
-from core.lyrics.sources import store_original
-from worker.planning.audio import plan_lyrics, resolve_library_id
+from core.embeddings.config import EmbeddingConfig
 from core.embeddings.representations import configure_representations, embedding_config
-from worker.library.attempts import start_attempt, record_track, finish_attempt
+from core.embeddings.text import LyricsEmbeddingModel
+from core.errors import ProcessingError
+from core.integrations.navidrome import NavidromeClient
+from core.library.connections import credential_cipher
+from core.lyrics.language import detect_distribution
+from core.lyrics.sources import store_original
+from worker.library.attempts import finish_attempt, record_track, start_attempt
 from worker.media.preprocessing import prepare_audio
+from worker.media.roformer import separation_phase
+from worker.planning.audio import plan_lyrics, resolve_library_id
 from worker.processing import Item, ItemResult, ProcessingContext, Processor, run_stage
 from worker.remote.session import RemoteModel
-from worker.media.roformer import separation_phase
-from worker.transcription.song import SongTranscriber, needs_repair
 from worker.transcription.recovery import diagnostic_writer
+from worker.transcription.song import SongTranscriber, needs_repair
 
 logger = logging.getLogger(__name__)
 

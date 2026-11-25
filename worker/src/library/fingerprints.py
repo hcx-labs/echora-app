@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from worker.library.config import LibraryConfig
-
 import json
 import subprocess
 import tempfile
@@ -11,6 +9,8 @@ import zlib
 import numpy as np
 import psycopg
 from psycopg.types.json import Jsonb
+
+from worker.library.config import LibraryConfig
 
 _MATCH_THRESHOLD = 0.88
 _DURATION_TOLERANCE_SECONDS = 3.0

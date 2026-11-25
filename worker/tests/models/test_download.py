@@ -1,5 +1,6 @@
-from core.config import reset_config_cache
 import pytest
+
+from core.config import reset_config_cache
 
 
 @pytest.fixture(autouse=True)
@@ -24,8 +25,8 @@ def test_pin_main_ref_points_to_snapshot_commit(tmp_path) -> None:
 
 
 def test_required_models_include_pinned_roformer(monkeypatch):
-    from worker.models.download import required_models
     from worker.media.roformer import MODEL_ID, MODEL_REVISION
+    from worker.models.download import required_models
 
     monkeypatch.delenv("MOSS_MODEL_ID", raising=False)
     monkeypatch.delenv("MOSS_REVISION", raising=False)

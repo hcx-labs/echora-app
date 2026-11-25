@@ -16,12 +16,12 @@ from psycopg.types.json import Jsonb
 from sklearn.metrics import adjusted_rand_score
 
 from core.db.config import require_database_url
-from core.errors import ProcessingError
 from core.embeddings.representations import (
     DEFAULT_PARAMETERS,
     AudioProfileParameters,
     profile_config,
 )
+from core.errors import ProcessingError
 from core.revisions import AUDIO_PROFILE_REVISION, SUPPORTED_PROFILE_MODELS
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
 

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import worker.recordings.encoder as recording_encoder
-from worker.planning.audio import plan_audio, audio_prerequisites
+from worker.planning.audio import audio_prerequisites, plan_audio
 
 
 def test_recording_only_backfill_requests_shared_8khz_decode(monkeypatch):

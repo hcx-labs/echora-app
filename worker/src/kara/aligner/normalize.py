@@ -1,18 +1,19 @@
-from janome.tokenizer import Tokenizer
-import nltk
-from nltk.corpus import cmudict
-import pykakasi
-import pyphen
-import pypinyin
-from pypinyin import pinyin, Style
-from uroman import Uroman
 import re
 import unicodedata
-# import string
 
-from worker.kara.aligner import indic as indic_romanization
-from worker.kara.aligner import label_rules
-from worker.kara.aligner import romanization as script_romanization
+import nltk
+import pykakasi
+import pyphen
+from janome.tokenizer import Tokenizer
+from nltk.corpus import cmudict
+from uroman import Uroman
+
+# import string
+from worker.kara.aligner import (
+    indic as indic_romanization,
+    label_rules,
+    romanization as script_romanization,
+)
 
 kks = pykakasi.kakasi()
 tokenizer = Tokenizer()
@@ -538,14 +539,13 @@ def align_syllables_en(a, b):
 
     if long_to_short:
         return list(zip(merged_list, short_list))
-    else:
-        return list(zip(short_list, merged_list))
+    return list(zip(short_list, merged_list))
 
 
 def process_english_word(word, surf=True):
     if word == "a":
         return [("a", "a")]
-    elif word == "A":
+    if word == "A":
         return [("A", "ei")]
 
     hyphenated = eng_dic.inserted(word)

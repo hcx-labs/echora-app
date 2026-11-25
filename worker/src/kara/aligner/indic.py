@@ -192,7 +192,7 @@ _LABIAL = set("pbm")
 
 
 def _nasal_for(next_label: str | None) -> str:
-    """m before labials, n otherwise (n + k/g already spells the velar nasal: ਲੰਘਦਾ → langhdaa)."""
+    """M before labials, n otherwise (n + k/g already spells the velar nasal: ਲੰਘਦਾ → langhdaa)."""
     if next_label and next_label[0] in _LABIAL:
         return "m"
     return "n"

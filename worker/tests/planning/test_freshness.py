@@ -1,7 +1,5 @@
 """Source rechecks are independent of canonical analysis completeness."""
 
-from core.config import reset_config_cache
-
 import os
 from types import SimpleNamespace
 from uuid import uuid4
@@ -9,6 +7,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from core.config import reset_config_cache
 from worker.planning.freshness import sources_needing_refresh
 
 

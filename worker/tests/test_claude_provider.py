@@ -5,8 +5,8 @@ import pytest
 
 from core.integrations.claude import complete_json
 from core.integrations.external_ai import ExternalAISettings
-from worker.transcription.refinement import RefinementError, enabled, refine
 from core.lyrics.translations import TranslationError
+from worker.transcription.refinement import RefinementError, enabled, refine
 from worker.translation.client import translate
 
 CAPTION = (

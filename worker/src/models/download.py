@@ -1,19 +1,19 @@
-from core.db.config import DatabaseConfig
-from core.media.config import MotionArtworkConfig
-from worker.kara.config import KaraConfig
-from worker.models.config import ModelsConfig
 import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import urllib.request
+from pathlib import Path
 
 from huggingface_hub import hf_hub_download, scan_cache_dir, snapshot_download
 
-from worker.media.roformer import MODEL_ID as ROFORMER_MODEL_ID, MODEL_REVISION as ROFORMER_REVISION
-from worker.recordings.download import download_recording_model
+from core.db.config import DatabaseConfig
+from core.media.config import MotionArtworkConfig
 from worker.artwork.render import MODEL_FILES as MOTION_ARTWORK_FILES
+from worker.kara.config import KaraConfig
+from worker.media.roformer import MODEL_ID as ROFORMER_MODEL_ID, MODEL_REVISION as ROFORMER_REVISION
+from worker.models.config import ModelsConfig
+from worker.recordings.download import download_recording_model
 
 ESSENTIA_MODELS = (
     (

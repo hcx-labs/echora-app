@@ -1,9 +1,9 @@
 """Inference regression tests; no checkpoints, GPU, network or database required."""
 
 import io
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 from torchaudio.functional import TokenSpan
 

@@ -11,14 +11,14 @@ languages constantly), so the module always produces a distribution:
 
 from __future__ import annotations
 
-from core.lyrics.config import LanguageConfig
-
 import hashlib
 import logging
 import os
 import re
 import urllib.request
 from collections import defaultdict
+
+from core.lyrics.config import LanguageConfig
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,8 @@ def _load_ftr():
     if not os.path.exists(INDICLID_FTR_PATH):
         os.makedirs(os.path.dirname(INDICLID_FTR_PATH) or ".", exist_ok=True)
         try:
-            import io, zipfile
+            import io
+            import zipfile
 
             request = urllib.request.Request(
                 INDICLID_FTR_URL, headers={"User-Agent": "Mozilla/5.0"}
@@ -343,4 +344,4 @@ def language_affinity(distribution: dict[str, object] | None, target: str) -> fl
     # matches both shares so Hinglish tracks score consistently.
     if target in ("hi", "ur"):
         return float((languages.get("hi") or 0.0) + (languages.get("ur") or 0.0))
-    return float((languages.get(target) or 0.0))
+    return float(languages.get(target) or 0.0)

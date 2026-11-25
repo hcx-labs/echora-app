@@ -66,7 +66,7 @@ def test_batch_audio_cache_reuses_bytes_and_cleans_up():
 
     client = object.__new__(NavidromeClient)
     client.base_url, client.username = "https://music/", "user"
-    client._auth = lambda: {}
+    client._auth = dict
     client.client = SimpleNamespace(
         get=Mock(
             return_value=SimpleNamespace(
@@ -82,12 +82,11 @@ def test_batch_audio_cache_reuses_bytes_and_cleans_up():
 
     import pytest
 
-    with pytest.raises(Cancelled):
-        with batch_audio_cache():
-            directory = _batch_state.get()["directory"]
-            assert client.audio_bytes("one") == client.audio_bytes("one") == b"audio"
-            assert client.client.get.call_count == 1
-            raise Cancelled()
+    with pytest.raises(Cancelled), batch_audio_cache():
+        directory = _batch_state.get()["directory"]
+        assert client.audio_bytes("one") == client.audio_bytes("one") == b"audio"
+        assert client.client.get.call_count == 1
+        raise Cancelled()
     assert not directory.exists()
     assert _batch_state.get() is None
 
@@ -100,7 +99,7 @@ def test_audio_bytes_rejects_a_subsonic_error_instead_of_returning_it_as_audio()
 
     client = object.__new__(NavidromeClient)
     client.base_url, client.username = "https://music/", "user"
-    client._auth = lambda: {}
+    client._auth = dict
     error = {
         "subsonic-response": {
             "status": "failed",

@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from __future__ import annotations
-from core.library.config import CredentialsConfig
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime
+
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import select
-from core.db.session import session_scope
+
 from core.db.models import NavidromeConnection
+from core.db.session import session_scope
+from core.library.config import CredentialsConfig
 
 
 def credential_cipher() -> Fernet:
@@ -33,7 +34,7 @@ def load_connection(
         stored = session.scalar(select(NavidromeConnection).where(*filters))
         if stored is None:
             return None
-        stored.last_used_at = datetime.now(timezone.utc)
+        stored.last_used_at = datetime.now(UTC)
         url, username, encrypted_password = (
             stored.url,
             stored.username,

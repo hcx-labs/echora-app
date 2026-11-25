@@ -29,8 +29,8 @@ import math
 from dataclasses import asdict, dataclass
 
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn
 
 LEAD, BACKING = 0, 1
 IMPOSSIBLE = -1e4  # score of a token column that does not belong to the voice
@@ -79,7 +79,8 @@ def frame_windows(
 ):
     """Windows of at most ``window`` frames covering ``frames``, neighbours sharing ``overlap``:
     ``[(piece, keep), ...]`` with ``piece`` the slice to run and ``keep`` the slice of its output to
-    use (half the overlap on each side), so the kept parts concatenate to exactly ``frames``."""
+    use (half the overlap on each side), so the kept parts concatenate to exactly ``frames``.
+    """
     step = window - overlap
     starts = list(range(0, max(1, frames - overlap), step)) or [0]
     windows = []
@@ -108,7 +109,7 @@ class TokenEmbedding(nn.Module):
         self.pad = config.letters
 
     def forward(self, letters: torch.Tensor) -> torch.Tensor:
-        """letters [B, N, L] (pad = config.letters) -> [B, N, dim]."""
+        """Letters [B, N, L] (pad = config.letters) -> [B, N, dim]."""
         batch, tokens, length = letters.shape
         x = self.letters(letters.view(batch * tokens, length))  # [BN, L, dim]
         x = F.gelu(self.conv(x.transpose(1, 2))).transpose(1, 2)
@@ -229,8 +230,9 @@ class TextAligner(nn.Module):
         self.letter_scale = nn.Parameter(torch.ones(2))
 
     def encode_text(self, letters, voice, text_padding, line=None, position=None):
-        """letters [B, N, L], voice [B, N] (0 lead / 1 backing), text_padding [B, N] (True = pad);
-        ``line`` / ``position`` [B, N] (line index, position in the line) with ``line_embeddings``."""
+        """Letters [B, N, L], voice [B, N] (0 lead / 1 backing), text_padding [B, N] (True = pad);
+        ``line`` / ``position`` [B, N] (line index, position in the line) with ``line_embeddings``.
+        """
         positions = torch.arange(letters.shape[1], device=letters.device).expand(letters.shape[:2])
         x = self.tokens(letters) + self.voice(voice) + sinusoid(positions, self.config.dim)
         if self.config.line_embeddings:
@@ -254,7 +256,8 @@ class TextAligner(nn.Module):
     ):
         """Per voice: ``combined`` [B, T, 1 + N] log-probabilities over [none, every token] (what the
         decoders read), and with ``factorized`` also ``singing`` logits [B, T] and ``token`` log-probs
-        [B, T, N] (normalised over that voice's tokens only)."""
+        [B, T, N] (normalised over that voice's tokens only).
+        """
         text = self.encode_text(letters, voice, text_padding, line, position)
         if self.config.letter_dim:
             hidden = torch.cat((hidden, letter_log_probs.to(hidden.dtype)), -1)
@@ -313,7 +316,8 @@ class TextAligner(nn.Module):
         position=None,
     ):
         """(lead, backing) log-probabilities [B, T, 1 + N] over [none, every token of the song]; a voice's
-        column j + 1 is ~IMPOSSIBLE unless token j belongs to that voice (and is not padding)."""
+        column j + 1 is ~IMPOSSIBLE unless token j belongs to that voice (and is not padding).
+        """
         parts = self.forward_parts(
             hidden, frame_padding, letters, voice, text_padding, letter_log_probs, line, position
         )
@@ -322,7 +326,8 @@ class TextAligner(nn.Module):
 
 def forward_sum_loss(log_probs, sequences, lengths, frames):
     """CTC over token columns (blank = column 0, "none"), mean over windows with targets (RAD-TTS
-    forward-sum). ``sequences`` [B, S] padded token columns, ``lengths`` [B]."""
+    forward-sum). ``sequences`` [B, S] padded token columns, ``lengths`` [B].
+    """
     rows = (lengths > 0).nonzero(as_tuple=True)[0]
     if rows.numel() == 0:
         return log_probs.new_zeros(())
@@ -356,7 +361,8 @@ def voice_loss(
     ``fs_mode="region"`` (factorized heads, with ``regions`` [B, R, 3 + L] = first frame, stop frame, token count,
     token columns): instead of the CTC forward-sum, each group of contiguous tokens fills its measured frames
     blank-free and in order, boundaries free (``region_loss``: the trainer's monotonic_alignment_loss), per frame,
-    the same objective the letter path uses and decoder A assumes."""
+    the same objective the letter path uses and decoder A assumes.
+    """
     combined = part["combined"]
     targets = targets[:, : combined.shape[1]]
     graded = targets != -100
@@ -416,7 +422,8 @@ def pack_song_tokens(tokens: list[dict], config: TextAlignerConfig) -> dict:
     """One song's tokens in text order -> tensors for a batch of one (padding added by ``collate_text``).
 
     ``tokens``: dicts with ``ids`` (letter ids of the CTC vocabulary), ``voice`` (0 lead / 1 backing) and
-    ``line``, already in text order (line, then position in the line)."""
+    ``line``, already in text order (line, then position in the line).
+    """
     letters = torch.full((len(tokens), config.max_letters), config.letters, dtype=torch.long)
     for index, token in enumerate(tokens):
         ids = list(token["ids"])[: config.max_letters]
@@ -477,7 +484,8 @@ def decode_voice(
     (``ctc_segmentation.align_with_minimum_durations``) with one "letter" per token, the token's own
     column as its emission and column 0 ("none") as the blank. ``columns`` are the voice's token columns
     (1 + text index) in text order; ``line_ranges`` index into ``columns`` (for the in-line gap cost).
-    Returns one TokenSpan per token (start/end frames, mean probability)."""
+    Returns one TokenSpan per token (start/end frames, mean probability).
+    """
     from worker.kara.aligner.ctc import align_with_minimum_durations
 
     groups = [[int(column)] for column in columns]

@@ -7,8 +7,6 @@ serialize cancellation/aggregation without serializing unrelated jobs.
 
 from __future__ import annotations
 
-from core.db.config import DatabaseConfig
-from core.jobs.config import QueueConfig
 from datetime import datetime
 from uuid import UUID, uuid4
 
@@ -16,6 +14,8 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from core.db.config import DatabaseConfig
+from core.jobs.config import QueueConfig
 
 ACTIVE = ("queued", "running", "waiting")
 TERMINAL = ("complete", "partial", "failed", "cancelled")
@@ -329,7 +329,7 @@ def _aggregate(db, parent_id):
     rows = db.execute(
         "SELECT status,count(*) AS n FROM jobs WHERE parent_id=%s GROUP BY status", (parent_id,)
     ).fetchall()
-    counts = {state: 0 for state in (*ACTIVE, *TERMINAL)}
+    counts = dict.fromkeys((*ACTIVE, *TERMINAL), 0)
     counts.update({r["status"]: r["n"] for r in rows})
     counts["total"] = sum(counts.values())
     counts["finished"] = sum(counts[s] for s in TERMINAL)

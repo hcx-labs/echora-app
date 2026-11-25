@@ -5,16 +5,17 @@ for source attribution, model licensing and author permission references. Full-t
 on CPU; only one inference chunk and the model reside on the accelerator.
 """
 
+import gc
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
-import gc
 
 import numpy as np
 import torch
 
 from core.revisions import (
-    SEPARATION_REVISION,
+    # Re-exported: consumers key their caches on the revision of the separator they call.
+    SEPARATION_REVISION as SEPARATION_REVISION,
     SEPARATOR_CHUNK_SIZE as _CHUNK_SIZE,
     SEPARATOR_MODEL_FILENAME as MODEL_FILENAME,
     SEPARATOR_MODEL_ID as MODEL_ID,

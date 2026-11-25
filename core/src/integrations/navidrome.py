@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from core.integrations.config import NavidromeConfig
-
+import hashlib
+import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from dataclasses import dataclass
-import hashlib
-import secrets
 from urllib.parse import urljoin
 
 import httpx
+
+from core.integrations.config import NavidromeConfig
 
 
 @dataclass(frozen=True)
@@ -280,7 +280,8 @@ class NavidromeClient:
 
     def scrobble(self, song_id: str, submission: bool = True) -> None:
         """Subsonic scrobble: submission=False marks the song as now playing,
-        submission=True records a completed play (feeds Navidrome play counts)."""
+        submission=True records a completed play (feeds Navidrome play counts).
+        """
         self._request("scrobble", id=song_id, submission="true" if submission else "false")
 
     def transcode_chunks(
@@ -423,7 +424,7 @@ class NavidromeClient:
         if self._owns_client:
             self.client.close()
 
-    def __enter__(self) -> "NavidromeClient":
+    def __enter__(self) -> NavidromeClient:
         return self
 
     def __exit__(self, *_: object) -> None:

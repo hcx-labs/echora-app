@@ -83,8 +83,8 @@ def test_drafts_without_compressed_windows_need_no_aligner():
 def test_a_stem_cache_miss_moves_moss_off_the_gpu_while_separating(monkeypatch):
     import torch
 
-    import worker.transcription.song as song_transcription
     import worker.transcription.budget as transcription_budget
+    import worker.transcription.song as song_transcription
 
     moves = []
     model = SimpleNamespace(to=lambda device: moves.append(device))

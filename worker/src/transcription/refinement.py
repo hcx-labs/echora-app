@@ -165,31 +165,33 @@ def refine(
         ],
     }
     try:
-        with OpenAI(
-            base_url=settings.url.rstrip("/") + "/",
-            api_key=api_key or "not-required",
-            organization="",
-            project="",
-            admin_api_key="",
-            max_retries=0,
-            http_client=httpx.Client(
-                timeout=httpx.Timeout(DEADLINE_SECONDS, connect=5, pool=5),
-                follow_redirects=False,
-                trust_env=False,
-                transport=transport,
-            ),
-        ) as client:
-            with client.chat.completions.with_streaming_response.create(
+        with (
+            OpenAI(
+                base_url=settings.url.rstrip("/") + "/",
+                api_key=api_key or "not-required",
+                organization="",
+                project="",
+                admin_api_key="",
+                max_retries=0,
+                http_client=httpx.Client(
+                    timeout=httpx.Timeout(DEADLINE_SECONDS, connect=5, pool=5),
+                    follow_redirects=False,
+                    trust_env=False,
+                    transport=transport,
+                ),
+            ) as client,
+            client.chat.completions.with_streaming_response.create(
                 **payload,
                 extra_headers={"Authorization": omit} if not api_key else None,
-            ) as response:
-                raw = bytearray()
-                for chunk in response.iter_bytes():
-                    raw.extend(chunk)
-                    if len(raw) > MAX_RESPONSE_BYTES:
-                        raise RefinementError("response_too_large")
-                    if time.monotonic() - started > DEADLINE_SECONDS:
-                        raise RefinementError("deadline_exceeded")
+            ) as response,
+        ):
+            raw = bytearray()
+            for chunk in response.iter_bytes():
+                raw.extend(chunk)
+                if len(raw) > MAX_RESPONSE_BYTES:
+                    raise RefinementError("response_too_large")
+                if time.monotonic() - started > DEADLINE_SECONDS:
+                    raise RefinementError("deadline_exceeded")
     except (APIError, APIConnectionError, httpx.HTTPError) as error:
         raise RefinementError("endpoint_failure") from error
     return _refined(settings, result, lines, *_texts(bytes(raw), len(lines)), started)

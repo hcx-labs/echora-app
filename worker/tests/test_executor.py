@@ -3,9 +3,9 @@ from uuid import uuid4
 
 import pytest
 
-import worker.operations as analysis_jobs
 import core.jobs.queue as jobs
 import worker.executor as worker
+import worker.operations as analysis_jobs
 
 
 @pytest.fixture
@@ -93,8 +93,8 @@ def test_success_is_terminal(execution, monkeypatch):
 
 @pytest.mark.parametrize("failing", ["search", "calibration"])
 def test_retention_failure_does_not_block_job_claims(monkeypatch, caplog, failing):
-    import worker.recordings.search as recording_search
     import worker.recordings.calibration as recording_calibration
+    import worker.recordings.search as recording_search
 
     search_cleanup = Mock(side_effect=OSError("private-path") if failing == "search" else None)
     calibration_cleanup = Mock(

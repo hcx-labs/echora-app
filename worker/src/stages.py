@@ -13,7 +13,6 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-
 from core.compute import location
 from core.library.membership import attach_user_library, user_audio_track_ids
 from worker.library.sources import connect, source_rows

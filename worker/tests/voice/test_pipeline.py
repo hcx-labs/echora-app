@@ -35,6 +35,7 @@ def test_classifier_output_shapes_are_validated() -> None:
 
 def test_vocal_activity_keeps_patch_timestamps_and_reports_uncovered_tail():
     from types import SimpleNamespace
+
     from worker.voice.pipeline import VoiceGenderModel
 
     model = VoiceGenderModel.__new__(VoiceGenderModel)

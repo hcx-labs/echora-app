@@ -7,12 +7,12 @@ receives it for its downloads only. Gated models today: LTX-2.5 for motion artwo
 
 from __future__ import annotations
 
-from core.library.config import CredentialsConfig
 import logging
 
 import psycopg
 
 from core.db.config import require_database_url
+from core.library.config import CredentialsConfig
 
 logger = logging.getLogger(__name__)
 

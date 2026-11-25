@@ -1,5 +1,6 @@
 import pytest
-from worker.transcription.recovery import recover_window, stalled_segments, WindowDecodeError
+
+from worker.transcription.recovery import WindowDecodeError, recover_window, stalled_segments
 
 
 def test_detects_stalled_timestamps_not_real_choruses():

@@ -2,9 +2,10 @@
 
 import re
 from contextlib import contextmanager, nullcontext
-from worker.transcription.recovery import WindowDecodeError, stalled_segments
-from worker.media.roformer import SEPARATION_REVISION
+
 from worker.media.preprocessing import vocal_waveform
+from worker.media.roformer import SEPARATION_REVISION
+from worker.transcription.recovery import WindowDecodeError, stalled_segments
 
 PROMPT = "Transcribe the audio. For each segment, start with the timestamp and speaker ID ([S01], [S02], [S03], ...), then the spoken text, and end with the segment timestamp."
 
@@ -68,6 +69,7 @@ class SongTranscriber:
     def _load_processor(self):
         if self._processor is None:
             from huggingface_hub import snapshot_download
+
             from .vendor.moss.processor import MossTranscribeDiarizeProcessor
 
             self._snapshot = snapshot_download(
@@ -165,8 +167,9 @@ class SongTranscriber:
         import numpy as np
         import torch
         from transformers import LogitsProcessorList, StoppingCriteriaList
-        from worker.transcription.guard import SegmentGuard
+
         from worker.transcription.budget import generate_song
+        from worker.transcription.guard import SegmentGuard
         from worker.transcription.timing import compressed_timing
 
         if self._model is None:
@@ -299,7 +302,7 @@ class SongTranscriber:
         phase that repairs stops it.
         """
         from worker.transcription.budget import reconcile_song
-        from worker.transcription.timing import compressed_timing, apply_aligned_times
+        from worker.transcription.timing import apply_aligned_times, compressed_timing
 
         ranges, duration, sr = draft["ranges"], draft["duration"], draft["sr"]
         diagnostics = draft["diagnostics"]
@@ -320,7 +323,9 @@ class SongTranscriber:
             progress(f"Reconciling compressed timestamps at {start:.0f}–{end:.0f}s")
             check()
             import io
+
             import soundfile as sf
+
             from worker.kara.pipeline import _run_fa_kara
 
             buffer = io.BytesIO()

@@ -189,7 +189,7 @@ class ComfyUI:
         self.client = httpx.Client(timeout=timeout_seconds, follow_redirects=False, trust_env=False)
         self.client_id = str(uuid.uuid4())
 
-    def __enter__(self) -> "ComfyUI":
+    def __enter__(self) -> ComfyUI:
         return self
 
     def __exit__(self, *_) -> None:

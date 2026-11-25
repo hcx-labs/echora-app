@@ -2,9 +2,9 @@
 
 import ast
 import os
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
-import unittest
 
 import torch
 
@@ -124,7 +124,7 @@ class DecoderIdentityTests(unittest.TestCase):
 
     def test_edge_without_floors_requires_head(self):
         model = SimpleNamespace(
-            blank=0, last_edge_logits=None, tokenizer=SimpleNamespace(get_vocab=lambda: {})
+            blank=0, last_edge_logits=None, tokenizer=SimpleNamespace(get_vocab=dict)
         )
         with self.assertRaisesRegex(RuntimeError, "edge head"):
             self.decode_lead(edge_weight=1.0, aligner_model=model)

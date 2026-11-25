@@ -1,5 +1,5 @@
 from worker.transcription.evidence import retry_evidence
-from worker.transcription.recovery import recover_window, WindowDecodeError
+from worker.transcription.recovery import WindowDecodeError, recover_window
 
 
 def activity(score=0.01):

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from core.embeddings.config import EmbeddingConfig
-
 import threading
-from typing import Iterable
+from collections.abc import Iterable
 
 import numpy as np
 import torch
+
+from core.embeddings.config import EmbeddingConfig
 
 _PREDEFINED: tuple[dict[str, object], ...] = (
     {

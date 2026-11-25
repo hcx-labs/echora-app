@@ -7,7 +7,6 @@ explicit lyrics backfills remain the way to retry retrieval for those songs.
 
 from __future__ import annotations
 
-
 import uuid
 
 from worker.artwork.settings import sync_selection
@@ -87,7 +86,7 @@ def select_sync_tracks(
         )
         selected.update(row[0] for row in cursor.fetchall())
 
-    from worker.transcription.config import transcription_model, transcription_enabled
+    from worker.transcription.config import transcription_enabled, transcription_model
 
     if transcription_model() and transcription_enabled(connection):
         with connection.cursor() as cursor:
@@ -104,7 +103,6 @@ def select_sync_tracks(
     # Share the exact karaoke compatibility contract with the executing pipeline.
     from worker.kara.pipeline import (
         KARAOKE_PIPELINE_REVISION,
-        DEFAULT_MODEL_REVISION,
         _stored_model_revision,
         current_model_revision,
     )

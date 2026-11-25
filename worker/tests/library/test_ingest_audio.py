@@ -1,16 +1,15 @@
 """Execution binds canonical artifacts to hashed source bytes, not mutable aliases."""
 
-from core.config import reset_config_cache
-
+import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 from uuid import uuid4
-import os
 
 import psycopg
 import pytest
 
 import worker.library.ingest as ingest
+from core.config import reset_config_cache
 from worker.planning.audio import AudioProcessingPlan, plan_audio
 
 

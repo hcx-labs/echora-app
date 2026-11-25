@@ -1,17 +1,17 @@
 """Exercise migration configuration without importing the application engine."""
 
-from core.errors import ConfigurationError
-from contextlib import nullcontext
-from pathlib import Path
 import runpy
 import sys
+from contextlib import nullcontext
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
-from alembic.config import Config
 import pytest
+from alembic.config import Config
 
 import core.db  # noqa: F401 - the real package, before its modules are stubbed
 from core.config import reset_config_cache
+from core.errors import ConfigurationError
 
 
 def run_offline_migrations(monkeypatch):

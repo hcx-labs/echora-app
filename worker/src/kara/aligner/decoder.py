@@ -1,8 +1,7 @@
 import logging
+import math
 import os
 from collections.abc import Callable
-
-import math
 
 import torch
 import torchaudio
@@ -68,7 +67,8 @@ class Wav2Vec2ForcedAligner:
     """CTC emissions from a fine-tuned checkpoint. ``wav2vec2`` checkpoints (MMS, omniASR: every
     shipped model) take the waveform through ``Wav2Vec2Processor``; a ``wav2vec2-bert`` checkpoint
     (w2v-BERT 2.0 / Sylla-600M, picked from ``config.json``) takes stacked fbank frames through
-    ``Wav2Vec2BertProcessor`` on the same 20 ms grid with a 279.5-sample receptive-field centre."""
+    ``Wav2Vec2BertProcessor`` on the same 20 ms grid with a 279.5-sample receptive-field centre.
+    """
 
     def __init__(
         self,
@@ -172,7 +172,8 @@ class Wav2Vec2ForcedAligner:
         timings on full mixes), so by default the probabilities are scaled between the song's 10th
         and 90th percentile exactly as ``ctc_segmentation.vocal_activity`` scales loudness; this
         keeps ``vocal_activity_weight`` on the same footing for both sources. ``scaled=False``
-        returns the raw sigmoid."""
+        returns the raw sigmoid.
+        """
         if self.last_vad_logits is None:
             raise RuntimeError(
                 "vocal_activity_source='vad' needs a checkpoint with aux_heads.safetensors"
@@ -338,14 +339,15 @@ class Wav2Vec2ForcedAligner:
         1 backing) and ``lines`` (line index per token).
 
         ``backing``: indexes of backing tokens; then returns ``(lead share, backing share)``, the second
-        being the backing voice's log P(token | singing) of those tokens [frames, len(backing)]."""
+        being the backing voice's log P(token | singing) of those tokens [frames, len(backing)].
+        """
+        from worker.kara.aligner.song_text import lyric_tokens, text_features
         from worker.kara.aligner.text_aligner import (
             TRAINING_WINDOW_FRAMES,
             WINDOW_OVERLAP_FRAMES,
             collate_text,
             frame_windows,
         )
-        from worker.kara.aligner.song_text import lyric_tokens, text_features
 
         window = TRAINING_WINDOW_FRAMES if window is None else window
         overlap = WINDOW_OVERLAP_FRAMES if overlap is None else overlap
@@ -413,7 +415,8 @@ class Wav2Vec2ForcedAligner:
 
     def _fused_hidden(self, hidden: torch.Tensor, chunk: torch.Tensor) -> torch.Tensor:
         """The encoder's last hidden state of one chunk plus the gated MuQ projection, sampled
-        on this backbone's frame clock (the same arithmetic as the trainer's ``fusion_hidden``)."""
+        on this backbone's frame clock (the same arithmetic as the trainer's ``fusion_hidden``).
+        """
         from worker.kara.aligner.ctc import receptive_field_centre_samples
         from worker.kara.aligner.muq_fusion import fusion_term
 
@@ -449,7 +452,8 @@ def _backbone(model: str) -> str:
 
 def _load_aux_heads(model: str, in_features: int) -> torch.nn.ModuleDict | None:
     """``vad`` and ``f0`` linear heads from ``aux_heads.safetensors`` next to the checkpoint
-    (local directory or hub repo), or None when the checkpoint ships none."""
+    (local directory or hub repo), or None when the checkpoint ships none.
+    """
     from transformers.utils import cached_file
 
     try:
@@ -478,7 +482,8 @@ def _load_aux_heads(model: str, in_features: int) -> torch.nn.ModuleDict | None:
 def pitch_from_f0_logits(logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """(voicing probability, Hz of the most likely bin) per frame from the F0 head's
     ``1 + F0_BINS`` outputs: index 0 is the voicing logit, bin b (1-based) sits at
-    10 * 2 ** ((20 b + 1997.38) / 1200) Hz (20-cent bins, about 32 Hz to 2 kHz)."""
+    10 * 2 ** ((20 b + 1997.38) / 1200) Hz (20-cent bins, about 32 Hz to 2 kHz).
+    """
     logits = logits.float()
     voicing = torch.sigmoid(logits[:, 0])
     bins = logits[:, 1:].argmax(dim=-1) + 1
@@ -489,6 +494,7 @@ def pitch_from_f0_logits(logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tens
 def _load_text_aligner(model_dir: str, record: dict):
     """§5j text-conditioned head (``text_aligner.*`` in model.safetensors, config ``text_aligner``)."""
     from safetensors import safe_open
+
     from worker.kara.aligner.text_aligner import TextAligner, TextAlignerConfig
 
     head = TextAligner(TextAlignerConfig(**record))
@@ -508,7 +514,8 @@ def _load_edge_head(
     model_dir: str, in_features: int, prefix: str = "edge_head", outputs: int = 1
 ) -> torch.nn.Linear:
     """The S1 edge head (``edge_head.weight`` / ``edge_head.bias``) from a checkpoint directory;
-    ``prefix``/``outputs`` load another linear head the same way (the v2 ``background_head``)."""
+    ``prefix``/``outputs`` load another linear head the same way (the v2 ``background_head``).
+    """
     import os
 
     head = torch.nn.Linear(in_features, outputs)
@@ -570,7 +577,8 @@ def _format_time(time_sec):
 def _span_result(token, spans, frame_duration, offset=0.0, frame_times=None, fraction=0.0):
     """Token times in seconds. Legacy clock: frame k at k x ``frame_duration``. With
     ``frame_times`` (E3) frame k is at its own receptive-field centre, and ``fraction`` (S2)
-    moves the start by a fraction of a frame."""
+    moves the start by a fraction of a frame.
+    """
     if not spans:
         return {"token": token, "start": "[error]", "end": "[error]", "score": 0.0}
     if frame_times is None:
@@ -607,7 +615,8 @@ def _assign_ctc_blank_holds(
     """Bounded display-only blank extension, not a silence detector.
 
     ``second_stream`` groups (optional brackets placed on their own) are timed apart from the
-    lead: a word is only held up to the next word of its own stream on the same line."""
+    lead: a word is only held up to the next word of its own stream on the same line.
+    """
     import math
 
     if (
@@ -676,7 +685,8 @@ def _display_span_results(
 ):
     """Token times in seconds. ``offset`` moves every time by a fixed amount (timing calibration);
     ``token_offsets`` (S2 onset-class table) adds a per-token amount, ``fractions`` a sub-frame
-    start per token, ``frame_times`` the exact chunk clock (E3)."""
+    start per token, ``frame_times`` the exact chunk clock (E3).
+    """
     display = _assign_ctc_blank_holds(
         spans, ranges, frame_duration, MAX_BLANK_HOLD_SECONDS, second_stream
     )
@@ -711,7 +721,8 @@ def _decode_background_blocks(
     after it (plus ``margin_seconds``), so an echo may sit on, or just after, the lead it answers.
     Inside the window the block is one duration-floored CTC path, as the lead; a window never starts
     before the previous block's end, so background lines keep their order. Returns the blocks
-    with their token indexes (input order), line sizes and spans (global frames)."""
+    with their token indexes (input order), line sizes and spans (global frames).
+    """
     background = aligner_model.last_background_log_probs
     frames = background.shape[0]
     margin = round(margin_seconds / frame_shift)
@@ -797,7 +808,8 @@ def _place_skipped_groups(
     A run's window starts where the lead word before it ends (an echo answers what was just sung)
     and ends with the next lead line (plus ``margin_seconds``), so it may overlap that line; runs
     stay in order among themselves. ``emission`` is the background head when the checkpoint has
-    one, else the lead's. Returns the filled spans and the indexes of the placed groups."""
+    one, else the lead's. Returns the filled spans and the indexes of the placed groups.
+    """
     frames = emission.shape[0]
     margin = round(margin_seconds / frame_shift)
     letter_cap = max(1, round(min_letter_ms / 1000 / frame_shift)) if min_letter_ms > 0 else 1
@@ -921,7 +933,8 @@ def _place_inline_backing(
     line, decode the run alone on the background head (letter floors, blank-free words) inside
     [line start - margin, next line start + margin], free to overlap the lead; the lead groups stay.
     2026-11-09: on 32 library songs with Apple timing this moved backing words >300 ms off from 63
-    to 51 of 313 and left the lead unchanged (13 songs better, 7 worse). Returns the moved groups."""
+    to 51 of 313 and left the lead unchanged (13 songs better, 7 worse). Returns the moved groups.
+    """
     frames = background.shape[0]
     margin = round(margin_seconds / frame_shift)
     moved = []

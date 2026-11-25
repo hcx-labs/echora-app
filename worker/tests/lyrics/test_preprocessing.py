@@ -1,15 +1,14 @@
-from core.config import reset_config_cache
-
+import uuid
 from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
-import uuid
 
 import pytest
 
 import worker.lyrics.pipeline as lp
-from worker.processing import ProcessingContext
 import worker.transcription.config as transcription_config
+from core.config import reset_config_cache
+from worker.processing import ProcessingContext
 
 
 def run_lyrics():

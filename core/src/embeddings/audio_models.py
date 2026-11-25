@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
 import gc
 import time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 import numpy as np
 import torch

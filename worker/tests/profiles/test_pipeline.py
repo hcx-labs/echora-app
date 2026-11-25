@@ -71,6 +71,7 @@ def test_legacy_range_reconstruction_preserves_exact_final_window() -> None:
 def test_store_profile_accepts_dictionary_rows_for_profile_and_mode_ids():
     import uuid
     from unittest.mock import MagicMock
+
     from worker.profiles.pipeline import _store_profile
 
     profile = derive_audio_profile(_windows([[1.0, 0.0]] * 8), 45.0)

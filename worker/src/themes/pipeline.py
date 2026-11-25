@@ -14,8 +14,6 @@ tracks with lyrics (`core.curation.preview.theme_overlay`).
 
 from __future__ import annotations
 
-from core.embeddings.config import EmbeddingConfig
-from core.library.connections import credential_cipher
 import concurrent.futures
 import hashlib
 import json
@@ -31,10 +29,12 @@ from openai import APIConnectionError, APIError, OpenAI, omit
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from core.db.config import require_database_url
+from core.embeddings.config import EmbeddingConfig
 from core.integrations.claude import ClaudeError, complete_json
 from core.integrations.external_ai import ExternalAISettings
+from core.library.connections import credential_cipher
 from core.revisions import LYRIC_THEMES_REVISION
-from core.db.config import require_database_url
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
 
 logger = logging.getLogger(__name__)
@@ -122,21 +122,22 @@ def describe(
         return parse(reply)
     started = time.monotonic()
     try:
-        with OpenAI(
-            base_url=settings.url.rstrip("/") + "/",
-            api_key=api_key or "not-required",
-            organization="",
-            project="",
-            admin_api_key="",
-            max_retries=0,
-            http_client=httpx.Client(
-                timeout=httpx.Timeout(DEADLINE_SECONDS, connect=5, pool=5),
-                follow_redirects=False,
-                trust_env=False,
-                transport=transport,
-            ),
-        ) as client:
-            with client.chat.completions.with_streaming_response.create(
+        with (
+            OpenAI(
+                base_url=settings.url.rstrip("/") + "/",
+                api_key=api_key or "not-required",
+                organization="",
+                project="",
+                admin_api_key="",
+                max_retries=0,
+                http_client=httpx.Client(
+                    timeout=httpx.Timeout(DEADLINE_SECONDS, connect=5, pool=5),
+                    follow_redirects=False,
+                    trust_env=False,
+                    transport=transport,
+                ),
+            ) as client,
+            client.chat.completions.with_streaming_response.create(
                 model=settings.model,
                 stream=False,
                 max_completion_tokens=4000,
@@ -146,14 +147,15 @@ def describe(
                     {"role": "user", "content": user},
                 ],
                 extra_headers={"Authorization": omit} if not api_key else None,
-            ) as response:
-                raw = bytearray()
-                for chunk in response.iter_bytes():
-                    raw.extend(chunk)
-                    if len(raw) > MAX_RESPONSE_BYTES:
-                        raise ThemeError("response_too_large")
-                    if time.monotonic() - started > DEADLINE_SECONDS:
-                        raise ThemeError("deadline_exceeded")
+            ) as response,
+        ):
+            raw = bytearray()
+            for chunk in response.iter_bytes():
+                raw.extend(chunk)
+                if len(raw) > MAX_RESPONSE_BYTES:
+                    raise ThemeError("response_too_large")
+                if time.monotonic() - started > DEADLINE_SECONDS:
+                    raise ThemeError("deadline_exceeded")
     except (APIError, APIConnectionError, httpx.HTTPError) as error:
         raise ThemeError("endpoint_failure") from error
     try:

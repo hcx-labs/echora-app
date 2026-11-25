@@ -113,7 +113,8 @@ def token_minimum_frames(
     vowel_ids: set[int],
 ) -> list[int]:
     """Minimum frames per target: each letter at least ``letter_frames``, each acoustic token
-    (group) at least ``group_frames``, its extra frames given to vowels (what singers hold)."""
+    (group) at least ``group_frames``, its extra frames given to vowels (what singers hold).
+    """
     minimums: list[int] = []
     for group in token_groups:
         frames = [max(1, letter_frames)] * len(group)
@@ -455,7 +456,8 @@ def with_vocal_activity(
     emission: torch.Tensor, activity: torch.Tensor, blank: int, weight: float
 ) -> torch.Tensor:
     """Letters cost ``weight`` x (1 - activity) extra per frame, so the path can't hold a word
-    through silence or start a line in an instrumental; blanks (pauses) are unchanged."""
+    through silence or start a line in an instrumental; blanks (pauses) are unchanged.
+    """
     penalty = weight * (1 - activity.to(emission.device, emission.dtype))
     adjusted = emission - penalty.unsqueeze(1)
     adjusted[:, blank] = emission[:, blank]

@@ -1,10 +1,9 @@
-from core.testing import stub_module
-from core.config import reset_config_cache
-
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import worker.operations as analysis_jobs
+from core.config import reset_config_cache
+from core.testing import stub_module
 
 
 def setup_main(monkeypatch, library_helpers):

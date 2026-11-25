@@ -1,14 +1,13 @@
 """Orchestration tests use no database or model downloads."""
 
-from core.testing import stub_module
-from core.config import reset_config_cache
-
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
 
 import worker.operations as analysis_jobs
+from core.config import reset_config_cache
+from core.testing import stub_module
 
 
 class Cancelled(BaseException):

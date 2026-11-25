@@ -41,20 +41,19 @@ non-silent rows must have nonzero finite embeddings and are L2 normalized. Input
 shorter than one second are rejected. No padding or amplitude normalization occurs.
 """
 
-from worker.recordings.config import RecordingConfig
-
-from collections import OrderedDict
-from dataclasses import dataclass
-from threading import RLock
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
-from typing import Callable, Mapping
+from collections import OrderedDict
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from threading import RLock
 
 import numpy as np
 
+from worker.recordings.config import RecordingConfig
 
 _FIXED = {
     "schema_version": 1,
@@ -260,7 +259,6 @@ def load_config(manifest_path: str | Path) -> EncoderConfig:
 
 def config_from_env(environ: Mapping[str, str] | None = None) -> EncoderConfig | None:
     """Absent/empty env disables; an invalid configured path fails closed."""
-
     path = (
         RecordingConfig.load().model_manifest
         if environ is None

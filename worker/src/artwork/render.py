@@ -205,7 +205,8 @@ FRAME_CHANGES = re.compile(
 
 def zooms(prompt: str) -> bool:
     """Whether a prompt asks for a zoom-like or any other camera move, or a subject moving toward or
-    away from the camera ("no pan", "never zooms", "nobody steps forward" do not count)."""
+    away from the camera ("no pan", "never zooms", "nobody steps forward" do not count).
+    """
     for pattern in (ZOOM_WORDS, CAMERA_MOVES, FRAME_CHANGES, DEPTH_MOVES):
         for match in pattern.finditer(prompt):
             # Look at the clause before the match too, for "the camera does not zoom" or "no push-in".

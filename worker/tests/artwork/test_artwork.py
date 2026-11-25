@@ -1,6 +1,5 @@
 """Motion artwork: recipe, graph, post-processing, settings, GPU handoff and album de-duplication."""
 
-import core.compute as compute
 import json
 import os
 import runpy
@@ -20,10 +19,10 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from pydantic import ValidationError
 
-import worker.artwork.settings as motion_artwork
+import core.compute as compute
 import worker.artwork.pipeline as motion_artwork_jobs
+import worker.artwork.settings as motion_artwork
 from worker.artwork.comfyui import ComfyUIUnavailable, launch
-from worker.artwork.settings import MotionArtworkSettings, artwork_path
 from worker.artwork.prompts import CAMERA_RETRY, I2V_SYSTEM_PROMPT
 from worker.artwork.render import (
     CAMERA_LORA,
@@ -41,6 +40,7 @@ from worker.artwork.render import (
     finish,
     zooms,
 )
+from worker.artwork.settings import MotionArtworkSettings, artwork_path
 
 VERSIONS = Path(__file__).resolve().parents[3] / "core/src/db/migrations/versions"
 
@@ -746,14 +746,16 @@ def test_launch_starts_comfyui_on_demand_and_stops_it(tmp_path):
     with pytest.raises(ComfyUIUnavailable, match="exited during startup"):
         with launch(str(tmp_path), sys.executable, startup_timeout_seconds=30, check=lambda: None):
             pass
-    with pytest.raises(ComfyUIUnavailable, match="not installed"):
-        with launch(
+    with (
+        pytest.raises(ComfyUIUnavailable, match="not installed"),
+        launch(
             str(tmp_path / "missing"),
             sys.executable,
             startup_timeout_seconds=30,
             check=lambda: None,
-        ):
-            pass
+        ),
+    ):
+        pass
 
 
 def _chat(content):

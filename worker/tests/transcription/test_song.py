@@ -1,9 +1,9 @@
-from core.errors import ConfigurationError
-from core.config import reset_config_cache
-
 import pytest
-from worker.transcription.song import parse_window, windows
+
+from core.config import reset_config_cache
+from core.errors import ConfigurationError
 from worker.transcription.config import transcription_model
+from worker.transcription.song import parse_window, windows
 
 
 def test_windows_cover_full_song_with_overlap():
@@ -52,8 +52,10 @@ def test_model_config_requires_pinned_revision(monkeypatch):
 def test_transcription_uses_shared_vocals_before_loading_asr(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import Mock
+
     import huggingface_hub
     import transformers
+
     import worker.transcription.song as st
     from worker.transcription.vendor.moss.processor import MossTranscribeDiarizeProcessor
 

@@ -7,15 +7,14 @@ Disk publication/deletion and expiry share a database advisory lock across repli
 
 from __future__ import annotations
 
-from worker.recordings.config import RecordingConfig
-
 import hashlib
 import os
-from pathlib import Path
 import time
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import core.jobs.queue as jobs
+from worker.recordings.config import RecordingConfig
 from worker.recordings.search import SAMPLE_RATE, QueueFull, decode_query
 
 CONSENT_VERSION = "save-for-calibration-v1"

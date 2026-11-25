@@ -1,13 +1,13 @@
 """Dependency-free orchestration regressions; execute real function bodies with fake IO."""
 
 import ast
-from core.config import config_classes
+import unittest
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
-import unittest
 from unittest.mock import MagicMock
-import uuid
 
+from core.config import config_classes
 
 SOURCE = Path(__file__).parents[1] / "src"
 

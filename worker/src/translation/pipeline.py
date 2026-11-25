@@ -10,6 +10,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from core.db.config import require_database_url
+from core.errors import ProcessingError
 from core.integrations.external_ai import LanguagePair
 from core.library.connections import credential_cipher
 from core.lyrics.translations import (
@@ -19,7 +20,6 @@ from core.lyrics.translations import (
     save_translation,
     source_checksum,
 )
-from core.errors import ProcessingError
 from worker.kara.aligner import label_rules
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
 from worker.translation.client import translate
@@ -47,7 +47,8 @@ MIXED_LID_CONFIDENCE = 0.7
 def foreign_lines(lines: list[str], language: str, sources: set[str]) -> list[int]:
     """Indexes of lines not in the song's language: the karaoke aligner's per-line rule
     (romanised Urdu, Hindi, Korean, ... that fastText cannot name), or fastText confident in a
-    language that is translated from (Spanish lines it names but the rule reads as English)."""
+    language that is translated from (Spanish lines it names but the rule reads as English).
+    """
     rules = label_rules
     found = []
     for index, line in enumerate(lines):
@@ -70,7 +71,8 @@ def _comparable(text: str) -> str:
 
 def keep_foreign(lines: list[str], translated: list[dict], foreign: list[int]) -> list[dict]:
     """Only translations of foreign lines, and only where the model changed them; every other line
-    is left empty, which the player shows as no translation."""
+    is left empty, which the player shows as no translation.
+    """
     chosen = set(foreign)
     return [
         {

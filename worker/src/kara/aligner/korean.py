@@ -148,12 +148,12 @@ COMPOUND = {
     "ㅄ": ("ㅂ", "ㅅ"),
 }
 NEUTRAL = {
-    **{c: "ㄱ" for c in "ㄱㄲㅋㄳㄺ"},
-    **{c: "ㄴ" for c in "ㄴㄵㄶ"},
-    **{c: "ㄷ" for c in "ㄷㅅㅆㅈㅊㅌㅎ"},
-    **{c: "ㄹ" for c in "ㄹㄼㄽㄾㅀ"},
-    **{c: "ㅁ" for c in "ㅁㄻ"},
-    **{c: "ㅂ" for c in "ㅂㅍㅄㄿ"},
+    **dict.fromkeys("ㄱㄲㅋㄳㄺ", "ㄱ"),
+    **dict.fromkeys("ㄴㄵㄶ", "ㄴ"),
+    **dict.fromkeys("ㄷㅅㅆㅈㅊㅌㅎ", "ㄷ"),
+    **dict.fromkeys("ㄹㄼㄽㄾㅀ", "ㄹ"),
+    **dict.fromkeys("ㅁㄻ", "ㅁ"),
+    **dict.fromkeys("ㅂㅍㅄㄿ", "ㅂ"),
     "ㅇ": "ㅇ",
     "": "",
 }

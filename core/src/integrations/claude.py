@@ -17,7 +17,8 @@ DEFAULT_BASE_URL = "https://api.anthropic.com"
 
 class ClaudeError(Exception):
     """`code` is one of: missing_key, endpoint_failure, transport_failure, refusal,
-    incomplete_response, invalid_response."""
+    incomplete_response, invalid_response.
+    """
 
     def __init__(self, code: str):
         super().__init__(code)

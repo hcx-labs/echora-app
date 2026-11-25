@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
-from core.jobs.config import QueueConfig
-from worker.config import WorkerConfig
 import argparse
 import logging
 import multiprocessing
 import os
 import signal
 import socket
-import threading
-import tempfile
 import sys
+import tempfile
+import threading
 import time
 import uuid
 
 import core.jobs.queue as jobs
 from core.errors import ConfigurationError
+from core.jobs.config import QueueConfig
+from worker.config import WorkerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -198,8 +198,8 @@ def run(
     while not stop.is_set():
         try:
             if worker_type == "analysis" and time.monotonic() >= next_recording_cleanup:
-                from worker.recordings.search import cleanup
                 from worker.recordings.calibration import cleanup as cleanup_calibration
+                from worker.recordings.search import cleanup
 
                 next_recording_cleanup = time.monotonic() + settings.cleanup_interval_seconds
                 for maintenance in (cleanup, cleanup_calibration):

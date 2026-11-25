@@ -1,7 +1,8 @@
 import pytest
-from worker.transcription.timing import compressed_timing, apply_aligned_times
+
 from worker.transcription.budget import decode_song
 from worker.transcription.recovery import WindowDecodeError
+from worker.transcription.timing import apply_aligned_times, compressed_timing
 
 
 def compressed():

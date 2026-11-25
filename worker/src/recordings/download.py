@@ -6,17 +6,17 @@ ECHORA_RECORDING_MODEL_DIRECTORY defaults to /data/models/recording. Bundles liv
 under <directory>/<full revision>, leaving other generations untouched.
 """
 
-from worker.recordings.config import RecordingConfig
-from collections.abc import Mapping
 import errno
 import json
-from pathlib import Path
 import re
 import shutil
 import tempfile
+from collections.abc import Mapping
+from pathlib import Path
 
 from huggingface_hub import snapshot_download
 
+from worker.recordings.config import RecordingConfig
 from worker.recordings.encoder import load_config
 from worker.recordings.search import load_match_policy
 

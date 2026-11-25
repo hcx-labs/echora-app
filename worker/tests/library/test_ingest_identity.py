@@ -1,15 +1,14 @@
 """Source replacement must refresh identity before planning new analysis."""
 
-from core.config import reset_config_cache
-
+import hashlib
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 from uuid import uuid4
-import hashlib
 
 from psycopg.rows import tuple_row
 
 import worker.library.ingest as ingest
+from core.config import reset_config_cache
 from worker.planning.audio import AudioProcessingPlan
 
 

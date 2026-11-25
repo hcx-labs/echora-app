@@ -17,7 +17,6 @@ from worker.melody.index import (
     _match_prepared_motifs,
     _motif_windows,
     _prepare_motifs,
-    _relative,
     extract_hum_contour,
     match_contour,
 )

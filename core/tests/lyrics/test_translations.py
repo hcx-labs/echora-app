@@ -1,18 +1,18 @@
 """Opt-in isolated-schema PostgreSQL persistence/migration tests, as in test_jobs."""
 
 import os
-from pathlib import Path
 import runpy
+from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
 import psycopg
+import pytest
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
-import pytest
 
-from core.integrations.external_ai import ExternalAISettings, LanguagePair
 import core.lyrics.translations as storage
+from core.integrations.external_ai import ExternalAISettings, LanguagePair
 
 
 @pytest.fixture

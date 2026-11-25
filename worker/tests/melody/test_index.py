@@ -134,6 +134,7 @@ def test_unrelated_contour_scores_worse():
 
 def test_melody_sources_use_shared_roformer_audio(monkeypatch):
     from unittest.mock import Mock
+
     import worker.melody.index as h
 
     vocals = np.ones(100, dtype=np.float32)
@@ -151,7 +152,9 @@ def test_melody_sources_use_shared_roformer_audio(monkeypatch):
 
 def test_separation_failure_does_not_publish_incomplete_recipe(monkeypatch):
     from unittest.mock import Mock
+
     import pytest
+
     import worker.melody.index as h
 
     monkeypatch.setattr(h, "extract_catalog_contour", Mock(return_value=_melody([60] * 10)))
@@ -166,7 +169,9 @@ def test_separation_failure_does_not_publish_incomplete_recipe(monkeypatch):
 
 def test_melody_cancellation_propagates(monkeypatch):
     from unittest.mock import Mock
+
     import pytest
+
     import worker.melody.index as h
 
     class Cancel(BaseException):
@@ -182,6 +187,7 @@ def test_melody_cancellation_propagates(monkeypatch):
 
 def test_runs_record_roformer_and_residual_provenance():
     from unittest.mock import MagicMock
+
     import worker.melody.index as h
 
     connection = MagicMock()
@@ -203,6 +209,7 @@ def test_runs_record_roformer_and_residual_provenance():
 
 def test_search_loads_only_current_recipe_and_owned_tracks(monkeypatch):
     from unittest.mock import MagicMock
+
     import worker.melody.index as h
 
     connection = MagicMock()

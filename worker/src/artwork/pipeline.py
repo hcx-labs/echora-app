@@ -17,8 +17,8 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
-from typing import Any
 from pathlib import Path
+from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
@@ -115,15 +115,17 @@ def comfyui_phase(
                     logger.warning("Could not ask ComfyUI to free its memory")
         return
     deployment = ComfyUIConfig.load()
-    with launch(
-        deployment.dir,
-        deployment.python,
-        work_dir=work,
-        check=check,
-        startup_timeout_seconds=deployment.startup_timeout_seconds,
-    ) as local:
-        with ComfyUI(local) as client:
-            yield client
+    with (
+        launch(
+            deployment.dir,
+            deployment.python,
+            work_dir=work,
+            check=check,
+            startup_timeout_seconds=deployment.startup_timeout_seconds,
+        ) as local,
+        ComfyUI(local) as client,
+    ):
+        yield client
 
 
 def _video_items(outputs: dict) -> list[dict]:

@@ -10,9 +10,11 @@ import importlib.util
 
 import pytest
 
-from worker.kara.aligner import normalize as norm  # noqa: E402
-from worker.kara.aligner import korean as korean_pronunciation  # noqa: E402
-from worker.kara.aligner import label_rules  # noqa: E402
+from worker.kara.aligner import (
+    korean as korean_pronunciation,  # noqa: E402
+    label_rules,  # noqa: E402
+    normalize as norm,  # noqa: E402
+)
 
 V2_READY = all(importlib.util.find_spec(name) for name in ("phonemizer", "num2words"))
 needs_v2 = pytest.mark.skipif(
@@ -165,7 +167,8 @@ def test_v3_fixes():
 @needs_v3
 def test_v3_training_and_inference_units_identical():
     """main.py --label_rules v3 (FA_KARA_LABEL_RULES=v3 forwards en/de/fr) gives the units the v3
-    manifest is built with: the manifest calls process_haruhi_line(line, hint, rules="v3") per line."""
+    manifest is built with: the manifest calls process_haruhi_line(line, hint, rules="v3") per line.
+    """
     from worker.kara.aligner import align
 
     scope = {"normalize_source_lines": align.normalize_source_lines}

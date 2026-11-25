@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-from core.integrations.config import LastfmConfig
-from collections import Counter
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import re
 import threading
 import time
 import unicodedata
+from collections import Counter
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import httpx
+
+from core.integrations.config import LastfmConfig
 
 
 @dataclass(frozen=True)
@@ -75,7 +76,7 @@ def recent_listens(username: str, api_key: str, since: datetime) -> list[Listen]
                     Listen(
                         artist=str(track.get("artist", {}).get("#text") or ""),
                         title=str(track.get("name") or ""),
-                        played_at=datetime.fromtimestamp(int(timestamp), tz=timezone.utc),
+                        played_at=datetime.fromtimestamp(int(timestamp), tz=UTC),
                     )
                 )
             pages = int(recent.get("@attr", {}).get("totalPages") or 1)

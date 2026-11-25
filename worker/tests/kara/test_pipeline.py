@@ -1,5 +1,3 @@
-from core.config import reset_config_cache
-
 import io
 import os
 import uuid
@@ -10,16 +8,16 @@ from unittest.mock import MagicMock
 import pytest
 
 import worker.kara.pipeline as pipeline
-from worker.processing import ProcessingContext, run_stage
+from core.config import reset_config_cache
 from worker.kara.aligner.request import AlignRequest
-
 from worker.kara.pipeline import (
     FA_KARA_REVISION,
     _stored_model_revision,
+    _validate_alignment_document,
     apply_adaptive_line_padding,
     build_lines_from_alignment_document,
-    _validate_alignment_document,
 )
+from worker.processing import ProcessingContext, run_stage
 
 
 def align_batch(progress=None, ids=("0", "1", "2")):
@@ -631,7 +629,8 @@ def test_lyrics_without_a_language_ask_the_aligner_to_identify_them(
     monkeypatch, tmp_path, language, detects
 ):
     """A known language the normalizer has no rules for ("es") stays on the generic path; only a
-    missing one is identified by the aligner, which would otherwise spell English letter by letter."""
+    missing one is identified by the aligner, which would otherwise spell English letter by letter.
+    """
     monkeypatch.setenv("HF_HOME", str(tmp_path))
     reset_config_cache()
     snapshot = (

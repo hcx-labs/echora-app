@@ -1,8 +1,5 @@
 """Pre-batch song selection, separate from execution-time rechecking."""
 
-from core.testing import stub_module
-from core.config import reset_config_cache
-
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
@@ -11,6 +8,8 @@ from uuid import uuid4
 import pytest
 
 import worker.planning.sync as sync_plan
+from core.config import reset_config_cache
+from core.testing import stub_module
 
 
 @pytest.fixture

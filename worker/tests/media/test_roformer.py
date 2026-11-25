@@ -1,8 +1,8 @@
 import sys
 import types
 import unittest
-from unittest.mock import Mock, patch
 import weakref
+from unittest.mock import Mock, patch
 
 import numpy as np
 import torch

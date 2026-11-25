@@ -10,8 +10,8 @@ from worker.processing import ProcessingContext, run_stage
 
 T = {n: uuid.UUID(f"00000000-0000-4000-8000-00000000000{n}") for n in (1, 2, 3)}
 
-import worker.themes.pipeline as lyric_themes
 import core.lyrics.translations as translation_storage
+import worker.themes.pipeline as lyric_themes
 from core.integrations.external_ai import ExternalAISettings
 from worker.themes.pipeline import (
     PROMPT_REVISION,
@@ -144,7 +144,7 @@ def test_overlay_needs_coverage_and_never_mixes_spaces(monkeypatch):
     matrix, available, active = _theme_overlay(lyrics, has_lyrics, themes, few)
     assert not active and matrix is lyrics and available is has_lyrics
     most = np.array([True, True, False, False])
-    assert 2 >= THEME_COVERAGE_THRESHOLD * 3
+    assert THEME_COVERAGE_THRESHOLD * 3 <= 2
     matrix, available, active = _theme_overlay(lyrics, has_lyrics, themes, most)
     assert active and matrix is themes
     # The lyric track without a description is neutral, not ranked by raw lyrics.

@@ -1,24 +1,19 @@
 """Unit tests plus isolated-schema PostgreSQL tests (opt in TEST_DATABASE_URL)."""
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 from uuid import uuid4
-import os
 
-import psycopg
-from psycopg import sql
-from psycopg.rows import dict_row
 import pytest
 
 import core.jobs.queue as jobs
 
 
 def test_public_allowlist():
-    row = {key: None for key in jobs.PUBLIC}
+    row = dict.fromkeys(jobs.PUBLIC)
     row.update(
         id=uuid4(),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         status="queued",
         payload={"password": "secret"},
         token=uuid4(),
@@ -273,7 +268,7 @@ def test_public_progress_snapshot(database):
 
 
 def test_legacy_cancelled_progress_is_not_success():
-    row = {key: None for key in jobs.PUBLIC}
+    row = dict.fromkeys(jobs.PUBLIC)
     row.update(
         id=uuid4(),
         status="cancelled",
@@ -374,7 +369,7 @@ def test_library_discovery_filters_before_limiting(database):
 
 
 def test_historical_fusion_completion_uses_committed_summary():
-    row = {key: None for key in jobs.PUBLIC}
+    row = dict.fromkeys(jobs.PUBLIC)
     row.update(
         id=uuid4(),
         kind="semantic_fusion_build",

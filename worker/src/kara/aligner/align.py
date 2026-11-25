@@ -17,9 +17,7 @@ import unicodedata
 
 import soundfile as sf
 
-from worker.kara.aligner import korean as korean_pronunciation
-from worker.kara.aligner import label_rules
-from worker.kara.aligner import normalize as hn
+from worker.kara.aligner import korean as korean_pronunciation, label_rules, normalize as hn
 from worker.kara.aligner.request import AlignRequest
 
 # Japanese syllable splitting of the normaliser, as every shipped model was trained with.
@@ -66,7 +64,8 @@ def normalize_source_lines(
 
     ``label_rules`` selects the shared normalizer's rule set (label_rules.RULES); "v1" is the
     behaviour of every shipped model, "v2" must only be used with a model trained on v2 labels.
-    ``line_languages``, when a list, receives the language each source line was normalised with."""
+    ``line_languages``, when a list, receives the language each source line was normalised with.
+    """
     records, source_texts = [], []
     for index, line in enumerate(lines):
         text = line.rstrip("\r\n")

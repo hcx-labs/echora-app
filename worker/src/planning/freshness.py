@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from worker.library.config import LibraryConfig
 
-
 # Ignore per-user playback/star/rating fields. Catalog metadata is only a change
 # hint, not proof of byte identity: periodic rehashing handles unreported edits.
 _CONTENT_HINTS = (

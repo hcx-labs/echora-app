@@ -1,8 +1,10 @@
 import torch
 
-
 from worker.kara.aligner.ctc import align_ctc  # noqa: E402
-from worker.kara.aligner.decoder import _assign_ctc_blank_holds, _inference_chunk_starts  # noqa: E402
+from worker.kara.aligner.decoder import (  # noqa: E402
+    _assign_ctc_blank_holds,
+    _inference_chunk_starts,
+)
 
 
 def test_ctc_blank_frames_extend_the_preceding_acoustic_token():
@@ -125,8 +127,9 @@ def test_token_minimum_frames_give_extra_frames_to_vowels():
 
 
 def test_paced_minimum_frames_follow_each_lines_pace():
-    from worker.kara.aligner.ctc import paced_minimum_frames
     from torchaudio.functional import TokenSpan
+
+    from worker.kara.aligner.ctc import paced_minimum_frames
 
     def spans(starts, length):
         return [[TokenSpan(1, s, s + length, 0.9)] for s in starts]

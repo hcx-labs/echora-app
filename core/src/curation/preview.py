@@ -2,33 +2,34 @@
 
 from __future__ import annotations
 
-from __future__ import annotations
-from core.db.config import DatabaseConfig
-from core.errors import ConflictError, IntegrationError, InvalidQueryError, NotFoundError
-from core.library.connections import credential_cipher
-from datetime import datetime, timedelta, timezone
 import secrets
 import uuid
+from datetime import UTC, datetime, timedelta
+
 import numpy as np
 import psycopg
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
+
 from core.curation.concepts import expand_tag_groups
+from core.curation.journeys import (
+    normalize_rows as normalize_journey_rows,
+    select_multistop_journey,
+)
+from core.curation.listening import recent_listens, track_listen_counts
 from core.curation.ranking import (
     CURATION_SCORING_REVISION,
     EXAMPLE_COMPONENT_WEIGHTS,
     MATCH_PERCENTILE,
     rank_curation,
 )
-from core.db.session import session_scope
+from core.db.config import DatabaseConfig
 from core.db.models import UserPreference
-from core.curation.journeys import (
-    normalize_rows as normalize_journey_rows,
-    select_multistop_journey,
-)
-from core.curation.listening import recent_listens, track_listen_counts
-from core.lyrics.language import LANGUAGE_NAMES, PRIMARY_SHARE, language_affinity
+from core.db.session import session_scope
 from core.embeddings.text import shared_lyrics_model
+from core.errors import ConflictError, IntegrationError, InvalidQueryError, NotFoundError
+from core.library.connections import credential_cipher
+from core.lyrics.language import LANGUAGE_NAMES, PRIMARY_SHARE, language_affinity
 from core.revisions import LYRIC_THEMES_REVISION
 
 
@@ -531,7 +532,7 @@ def preview_curation(
             listens = recent_listens(
                 lastfm_username,
                 api_key,
-                datetime.now(timezone.utc) - timedelta(days=request.lookback_days),
+                datetime.now(UTC) - timedelta(days=request.lookback_days),
             )
             all_counts, period_counts = track_listen_counts(
                 rows,

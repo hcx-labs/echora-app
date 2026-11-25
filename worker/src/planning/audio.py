@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-from core.embeddings.config import EmbeddingConfig
-from core.features import feature_enabled
-
-from dataclasses import dataclass
 import uuid
-from typing import Iterable
+from collections.abc import Iterable
+from dataclasses import dataclass
 
 import psycopg
 
+from core.embeddings.config import EmbeddingConfig
+from core.features import feature_enabled
 from core.revisions import MELODY_CONTOUR_REVISION
 from worker.library.descriptors import DESCRIPTOR_REVISION
-from worker.library.waveforms import WAVEFORM_REVISION
 from worker.library.visual_features import VISUAL_FEATURE_REVISION
+from worker.library.waveforms import WAVEFORM_REVISION
 
 
 @dataclass(frozen=True)

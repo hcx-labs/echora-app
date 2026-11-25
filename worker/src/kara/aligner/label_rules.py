@@ -295,7 +295,8 @@ PYPHEN_LANGUAGES = {"en": "en_US", "de": "de_DE", "fr": "fr_FR"}
 def ipa_tokens(ipa: str, language: str, reduced: bool = False) -> list[tuple[str, bool]]:
     """[(label letters, is_vowel)] from an espeak IPA string; unknown symbols are dropped.
 
-    ``reduced`` (v3-sung, English): ə and ᵻ become the slots ``@a`` / ``@i`` for ``sung_vowels``."""
+    ``reduced`` (v3-sung, English): ə and ᵻ become the slots ``@a`` / ``@i`` for ``sung_vowels``.
+    """
     overrides = {**IPA_OVERRIDES.get(language, {}), **({"ə": "@a", "ᵻ": "@i"} if reduced else {})}
     text = (
         ipa  # espeak writes nasal vowels with the combining tilde; ç and the like stay precomposed
@@ -351,7 +352,8 @@ def syllable_cuts(tokens: list[tuple[str, bool]]) -> list[int]:
 
 def syllabify(tokens: list[tuple[str, bool]]) -> list[str]:
     """Phone syllables: one per vowel nucleus; a consonant cluster between two nuclei gives its
-    last consonant to the next syllable (maximal-onset simplification)."""
+    last consonant to the next syllable (maximal-onset simplification).
+    """
     if sum(1 for _, vowel in tokens if vowel) <= 1:
         return ["".join(label for label, _ in tokens)] if tokens else []
     cuts = syllable_cuts(tokens)
@@ -520,10 +522,107 @@ LETTER_NAMES = {
     },
 }
 ACRONYMS = frozenset(
-    """OK TV DJ CD DVD USA UK NYC MC VIP ID AM PM BFF DND SOS MVP CEO UFO ATM GPS LOL FBI CIA NBA NFL
-BMW DNA EP LP OMG IDK TBH BRB RIP VHS ABC MTV BBC CNN XO AI UFC WWE NYPD LAPD DC AC PC TBD ETA PS IOU SUV RV TNT UV
-MDMA LSD THC CBD PTSD ADHD OCD IQ EDM RNB BBQ DIY FYI GTA KFC NSA OG AKA VIP CDC IRS DMV LGBT LGBTQ NRA UN EU US LA
-TLC AWOL MIA POV ESPN HBO USB SMS DM DMs IG FM AMA""".split()
+    [
+        "OK",
+        "TV",
+        "DJ",
+        "CD",
+        "DVD",
+        "USA",
+        "UK",
+        "NYC",
+        "MC",
+        "VIP",
+        "ID",
+        "AM",
+        "PM",
+        "BFF",
+        "DND",
+        "SOS",
+        "MVP",
+        "CEO",
+        "UFO",
+        "ATM",
+        "GPS",
+        "LOL",
+        "FBI",
+        "CIA",
+        "NBA",
+        "NFL",
+        "BMW",
+        "DNA",
+        "EP",
+        "LP",
+        "OMG",
+        "IDK",
+        "TBH",
+        "BRB",
+        "RIP",
+        "VHS",
+        "ABC",
+        "MTV",
+        "BBC",
+        "CNN",
+        "XO",
+        "AI",
+        "UFC",
+        "WWE",
+        "NYPD",
+        "LAPD",
+        "DC",
+        "AC",
+        "PC",
+        "TBD",
+        "ETA",
+        "PS",
+        "IOU",
+        "SUV",
+        "RV",
+        "TNT",
+        "UV",
+        "MDMA",
+        "LSD",
+        "THC",
+        "CBD",
+        "PTSD",
+        "ADHD",
+        "OCD",
+        "IQ",
+        "EDM",
+        "RNB",
+        "BBQ",
+        "DIY",
+        "FYI",
+        "GTA",
+        "KFC",
+        "NSA",
+        "OG",
+        "AKA",
+        "VIP",
+        "CDC",
+        "IRS",
+        "DMV",
+        "LGBT",
+        "LGBTQ",
+        "NRA",
+        "UN",
+        "EU",
+        "US",
+        "LA",
+        "TLC",
+        "AWOL",
+        "MIA",
+        "POV",
+        "ESPN",
+        "HBO",
+        "USB",
+        "SMS",
+        "DM",
+        "DMs",
+        "IG",
+        "FM",
+        "AMA",
+    ]
 )
 SYMBOL_WORDS = {
     "&": {"en": "and", "de": "und", "fr": "et"},
@@ -578,7 +677,7 @@ def is_acronym(word: str) -> bool:
 ESPEAK_ACCEPTED = ("1.51", "1.52")
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _espeak_backend(language: str):
     try:
         from phonemizer.backend import EspeakBackend
@@ -616,7 +715,7 @@ def espeak_version() -> str:
         return "unavailable"
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _cmudict():
     try:
         from nltk.corpus import cmudict
@@ -626,7 +725,7 @@ def _cmudict():
         raise RuntimeError("CMUdict is not available to nltk") from error
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _pyphen(language: str):
     import pyphen
 
@@ -1278,7 +1377,9 @@ HOMOGRAPHS_EN = {
 }
 
 # Dropped-g spellings CMUdict lists with another reading (a name or a reduced form): read as -ing too.
-DROPPED_G_IN_CMU = frozenset("nothin goin lovin killin talkin makin rollin lookin rockin".split())
+DROPPED_G_IN_CMU = frozenset(
+    ["nothin", "goin", "lovin", "killin", "talkin", "makin", "rollin", "lookin", "rockin"]
+)
 
 # Single words espeak reads out of context: French "y" (il y a) as the letter name igrek, German "'n"
 # (ein) as the letter name en.
@@ -1324,7 +1425,8 @@ def _english_lexicons(lowered: str, context: tuple | None, sung: bool = False):
     """(tokens, source) from the v3 English lexicons and CMUdict, or None when espeak must read it.
 
     ``sung`` (v3-sung): reduced vowels take their spelled vowel and CMUdict's reading is the one that
-    aligns best with the spelling (``sung_vowels``); otherwise CMUdict's first reading as written."""
+    aligns best with the spelling (``sung_vowels``); otherwise CMUdict's first reading as written.
+    """
 
     def tokens_of(readings):
         if sung:
@@ -1410,7 +1512,8 @@ def _unit_cost(label: str, letters: str) -> float:
     """Cost of one label unit covering ``letters``. Each vowel costs the same whichever vowel letters it
     covers and each consonant nothing over any of its spellings, so readings compete on structure (number
     and place of vowels, silent letters, letterless phones) and a tie goes to CMUdict's order, never to
-    the reading that looks most like the spelling."""
+    the reading that looks most like the spelling.
+    """
     vowel = label.startswith("@") or label in (
         "a",
         "e",
@@ -1439,7 +1542,8 @@ def _unit_cost(label: str, letters: str) -> float:
 def align_spelling(units, word: str) -> tuple[float, list[str], list[int]]:
     """(cost, letters each unit covers, index of each unit's first letter) of the cheapest monotonic
     alignment of label units to the word's a-z letters; letters no unit covers are silent (e, h, w, u, gh
-    cost 0.5, others 1.0). A unit covering no letter gets the index where it sits."""
+    cost 0.5, others 1.0). A unit covering no letter gets the index where it sits.
+    """
     letters = re.sub(r"[^a-z]", "", word.lower())
     n, m = len(letters), len(units)
     inf = float("inf")
@@ -1456,7 +1560,7 @@ def align_spelling(units, word: str) -> tuple[float, list[str], list[int]]:
                 if step < cost[i + 1][j]:
                     cost[i + 1][j], back[i + 1][j] = step, (i, j)
             if j < m:
-                for k in range(0, min(4, n - i) + 1):
+                for k in range(min(4, n - i) + 1):
                     step = here + _unit_cost(units[j][0], letters[i : i + k])
                     if step < cost[i + k][j + 1]:
                         cost[i + k][j + 1], back[i + k][j + 1] = step, (i, j)
@@ -1477,7 +1581,8 @@ SUNG_READING_MARGIN = 0.6
 
 def sung_vowels(readings, word: str) -> tuple[tuple[str, bool], ...]:
     """The first reading (unit lists with reduced slots), or a later one that aligns with ``word``'s letters
-    better by SUNG_READING_MARGIN; each slot over one vowel letter reads as that vowel, any other as v3."""
+    better by SUNG_READING_MARGIN; each slot over one vowel letter reads as that vowel, any other as v3.
+    """
     best = None
     for units in readings:
         score, spans, _ = align_spelling(units, word)
@@ -1494,7 +1599,8 @@ def sung_vowels(readings, word: str) -> tuple[tuple[str, bool], ...]:
 
 def _abbreviation(word: str) -> bool:
     """Lower-case acronyms keep their letter names: an acronym (DJ, tv), or 2-4 letters without a vowel or
-    a doubled letter (km, dms, fr). Doubled letters are onomatopoeia (brr, psst, skrrt)."""
+    a doubled letter (km, dms, fr). Doubled letters are onomatopoeia (brr, psst, skrrt).
+    """
     if word.upper() in ACRONYMS:
         return True
     return (
@@ -1516,7 +1622,8 @@ def _espeak_v3(
     word: str, language: str, sung: bool = False
 ) -> tuple[tuple[tuple[str, bool], ...], str | None]:
     """(phone tokens, language espeak switched to or None) for one word or a spaced letter string;
-    ``sung`` (v3-sung, English): reduced vowels take their spelled vowel (``sung_vowels``)."""
+    ``sung`` (v3-sung, English): reduced vowels take their spelled vowel (``sung_vowels``).
+    """
     ipa = _espeak_backend(language).phonemize([word], strip=True, njobs=1)[0]
     switch = _SWITCH.search(ipa)
     sung = sung and language == "en" and not switch
@@ -1531,8 +1638,9 @@ def _espeak_label(text: str, language: str) -> str:
 
 
 def _espeak_spellout(word: str, label: str, language: str) -> bool:
-    """espeak read the word (or its leading consonants) letter by letter: skrrt → es kei ar…, gbe → ji bi i,
-    nhlonipho → en eich lanifo. Compared with espeak's own letter names, so it holds for every voice."""
+    """Espeak read the word (or its leading consonants) letter by letter: skrrt → es kei ar…, gbe → ji bi i,
+    nhlonipho → en eich lanifo. Compared with espeak's own letter names, so it holds for every voice.
+    """
     if not (len(word) >= 2 and word.isascii() and word.isalpha()) or _abbreviation(word):
         return False
     names = [_espeak_label(c, language) for c in word]
@@ -1563,7 +1671,8 @@ def word_pronunciation_v3(
     """(phone tokens, source, pronunciation language) of one word under v3 (``sung``: v3-sung).
 
     Sources: lexicon, slang, homograph, dropped_g, cmudict, espeak, espeak-switch, english:<source> (an
-    English word in a de/fr line), letter_spellout (no tokens: the caller spells the word)."""
+    English word in a de/fr line), letter_spellout (no tokens: the caller spells the word).
+    """
     lowered = word.lower().translate(_APOS_MAP)
     vocable = vocable_label(word)
     if vocable:
@@ -1612,7 +1721,8 @@ def _v3_word_label(word: str, language: str, sung: bool = False) -> str:
 def aligned_surface(tokens, word: str) -> list[str] | None:
     """v3-sung: the word's spelling cut where its phone syllables are cut, through the letters each
     phone was aligned to (intuition → in|tu|i|tion where pyphen gives in-tu-ition); silent letters stay
-    with the syllable before. None when the alignment is impossible or a syllable gets no letter."""
+    with the syllable before. None when the alignment is impossible or a syllable gets no letter.
+    """
     cuts = syllable_cuts(list(tokens))
     positions = [k for k, char in enumerate(word) if "a" <= char.lower() <= "z"]
     if not cuts or not positions:
@@ -1636,7 +1746,8 @@ def pronunciation_items_v3(
     word: str, language: str, spell, context: tuple | None = None, sung: bool = False
 ) -> tuple[list[dict], str]:
     """v3 counterpart of pronunciation_items; a letter spell-out falls back to ``spell`` with repeated
-    letters collapsed (skrrt → skrt)."""
+    letters collapsed (skrrt → skrt).
+    """
     lowered = word.lower().translate(_APOS_MAP)
     tokens, source, used = word_pronunciation_v3(
         word, language, context if lowered in HOMOGRAPHS_EN else None, sung
@@ -1684,15 +1795,85 @@ LID_ALPHABETS = {
 LID_EVIDENCE = {
     "de": (
         frozenset(
-            "ich und nicht ist du der die das ein eine einen mein meine dich mich mir dir wir ihr "
-            "auf mit für zu nur auch noch wie was wenn aber nein ja sie es".split()
+            [
+                "ich",
+                "und",
+                "nicht",
+                "ist",
+                "du",
+                "der",
+                "die",
+                "das",
+                "ein",
+                "eine",
+                "einen",
+                "mein",
+                "meine",
+                "dich",
+                "mich",
+                "mir",
+                "dir",
+                "wir",
+                "ihr",
+                "auf",
+                "mit",
+                "für",
+                "zu",
+                "nur",
+                "auch",
+                "noch",
+                "wie",
+                "was",
+                "wenn",
+                "aber",
+                "nein",
+                "ja",
+                "sie",
+                "es",
+            ]
         ),
         "äöüß",
     ),
     "fr": (
         frozenset(
-            "je tu il elle nous vous le la les des du et est pas que qui mon ma mes ton ta tes un "
-            "une dans pour avec moi toi suis c'est j'ai sur au aux ce".split()
+            [
+                "je",
+                "tu",
+                "il",
+                "elle",
+                "nous",
+                "vous",
+                "le",
+                "la",
+                "les",
+                "des",
+                "du",
+                "et",
+                "est",
+                "pas",
+                "que",
+                "qui",
+                "mon",
+                "ma",
+                "mes",
+                "ton",
+                "ta",
+                "tes",
+                "un",
+                "une",
+                "dans",
+                "pour",
+                "avec",
+                "moi",
+                "toi",
+                "suis",
+                "c'est",
+                "j'ai",
+                "sur",
+                "au",
+                "aux",
+                "ce",
+            ]
         ),
         "éèêàçùâîôœ",
     ),
@@ -1713,7 +1894,7 @@ def lid_model_path() -> str:
     return found
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _lid_model():
     import hashlib
     import os
@@ -1753,7 +1934,8 @@ def document_language(lines: list[str], allowed: frozenset[str] | set[str]) -> s
     letters outside ASCII, for scripts written without spaces) votes with its letter count when
     fastText is confident. A language is returned only when it is in ``allowed``, holds
     ``DOCUMENT_SHARE`` of the confident weight and the confident lines are ``DOCUMENT_SHARE`` of
-    all voting lines; otherwise None and the caller keeps the generic path."""
+    all voting lines; otherwise None and the caller keeps the generic path.
+    """
     votes: dict[str, float] = {}
     total = 0.0
     for line in lines:
@@ -1803,7 +1985,8 @@ def line_language(line: str, language: str) -> str:
     Any other song (German, French, Spanish, Urdu, ..., or no language): an English line (fastText
     >= 0.8, >= 75 % of >= 2 words in CMUdict) goes to English G2P. Outside German/French songs the line
     must be written in Latin letters only, because the song's hint also selects how its own script is
-    read."""
+    read.
+    """
     words = [
         w.lower().translate(_APOS_MAP)
         for w in _LID_WORD.findall(line)
@@ -1860,7 +2043,8 @@ def latin_run_languages(runs, language: str, rules: LabelRules) -> dict[int, str
         English-known, fastText non-en >= 0.8 -> de/fr when their alphabet fits, else the generic
         Latin path ``auto``). Single words never switch: short words are too ambiguous (die, bin, me).
     Whitespace/punctuation may bridge words; intervening lexical, numeric or symbol runs break groups.
-    Orthographic rule sets have no pronunciation languages, so they get no overrides."""
+    Orthographic rule sets have no pronunciation languages, so they get no overrides.
+    """
     if not rules.v3 or not rules.pronunciation:
         return {}
     latin = [(i, text) for i, (kind, text) in enumerate(runs) if kind == "latin" and _is_word(text)]

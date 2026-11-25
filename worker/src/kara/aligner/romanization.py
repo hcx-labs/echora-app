@@ -383,7 +383,7 @@ _TURKISH_LETTERS = set("ıİşŞğĞ")
 
 
 def latin_lcode(line: str, lang: str) -> str | None:
-    """uroman language rules for Latin runs: Turkish when the hint or the letters say so."""
+    """Uroman language rules for Latin runs: Turkish when the hint or the letters say so."""
     if lang == "tr" or any(char in _TURKISH_LETTERS for char in line):
         return "tur"
     return None

@@ -16,8 +16,8 @@ import torch
 from psycopg.types.json import Jsonb
 
 from core.db.config import DatabaseConfig
-from core.errors import InputUnavailableError, ProcessingError
 from core.embeddings.representations import configure_representations, voice_config
+from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient
 from worker.media.audio import decode_audio
 from worker.models.config import ModelsConfig

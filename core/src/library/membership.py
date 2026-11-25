@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from __future__ import annotations
-from core.db.config import DatabaseConfig
 import uuid
+
 import psycopg
 from psycopg.rows import dict_row
+
+from core.db.config import DatabaseConfig
 from core.revisions import SUPPORTED_PROFILE_MODELS
 
 

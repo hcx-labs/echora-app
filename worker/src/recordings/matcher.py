@@ -6,8 +6,8 @@ silence and never contribute evidence. Malformed/nonfinite inputs raise ValueErr
 Offsets use reference_index - query_index, so negative offsets are valid.
 """
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Callable, Iterable
 
 import numpy as np
 

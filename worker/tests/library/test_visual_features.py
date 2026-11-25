@@ -14,8 +14,8 @@ from worker.library.visual_features import (
     SAMPLE_RATE,
     VISUAL_FEATURE_REVISION,
     _structure,
-    extract_visual_features,
     analyze_visual_features,
+    extract_visual_features,
     store_visual_features,
 )
 

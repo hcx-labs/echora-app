@@ -8,7 +8,6 @@ import pytest
 
 from worker.recordings.matcher import MATCHER_REVISION, MatchPolicy, match_recording
 
-
 POLICY = MatchPolicy(
     window_similarity=0.85,
     min_score=0.65,

@@ -15,7 +15,6 @@ import torch
 from psycopg.types.json import Jsonb
 
 from core.db.config import DatabaseConfig
-from core.errors import InputUnavailableError, ProcessingError
 from core.embeddings.audio_models import (
     AudioEmbeddingModel,
     EmbeddingResult,
@@ -25,6 +24,7 @@ from core.embeddings.audio_models import (
 )
 from core.embeddings.config import EmbeddingConfig
 from core.embeddings.representations import configure_representations, embedding_config
+from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient, NavidromeTrack
 from worker.library.attempts import finish_attempt, record_track, start_attempt
 from worker.library.descriptors import analyze_audio_descriptors, store_audio_descriptors
@@ -353,7 +353,8 @@ class _SongPhase(Processor[None, SongItem, Any]):
 
 class IdentityPhase(_SongPhase):
     """Resolves each song to a canonical track from its bytes (or, without hash checks, from its
-    known source), and binds later phases to those bytes."""
+    known source), and binds later phases to those bytes.
+    """
 
     name = "identity"
     summary_key = "identity"
@@ -657,7 +658,8 @@ class EmbeddingPhase(_SongPhase):
 
 class MelodyPhase(_SongPhase):
     """Extracts melody contours for the hum search (on Modal in one separation and one
-    extraction call)."""
+    extraction call).
+    """
 
     name = "melody"
     summary_key = "melody"
@@ -808,7 +810,8 @@ class RecordingIndexPhase(_SongPhase):
 
 class DescriptorPhase(_SongPhase):
     """Measures the selected songs' sound descriptors. A partial measurement is stored and
-    counted as failed."""
+    counted as failed.
+    """
 
     name = "audio_descriptors"
     summary_key = "audio_descriptors"

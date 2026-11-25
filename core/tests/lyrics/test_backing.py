@@ -1,8 +1,8 @@
 from xml.etree import ElementTree as ET
 
+import echora_analysis.plugin_lyrics as plugin_lyrics
 import pytest
 
-import echora_analysis.plugin_lyrics as plugin_lyrics
 from core.lyrics.backing import separate_text, separate_voices, tag_bracketed_backing
 
 

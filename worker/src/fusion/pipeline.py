@@ -13,9 +13,6 @@ mixes generations.
 
 from __future__ import annotations
 
-from worker.fusion.config import FusionConfig
-from core.db.config import require_database_url
-
 import hashlib
 import json
 import platform
@@ -26,11 +23,12 @@ import numpy as np
 import psycopg
 from psycopg.types.json import Jsonb
 
+from core.db.config import require_database_url
 from core.embeddings.representations import (
     configure_representations,
-    embedding_config,
     model_settings,
 )
+from worker.fusion.config import FusionConfig
 
 MODEL_NAME = "semantic_fusion"
 MODEL_REVISION = "fusion-v1"

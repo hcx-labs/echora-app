@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from core.embeddings.config import EmbeddingConfig
-
-from dataclasses import dataclass
 import threading
 import time
+from dataclasses import dataclass
 
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
+
+from core.embeddings.config import EmbeddingConfig
 
 
 @dataclass(frozen=True)

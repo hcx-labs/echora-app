@@ -1,8 +1,10 @@
-import pytest
-from worker.transcription.budget import decode_song
-from worker.transcription.recovery import WindowDecodeError
-from worker.transcription.config import transcription_enabled
 from unittest.mock import MagicMock
+
+import pytest
+
+from worker.transcription.budget import decode_song
+from worker.transcription.config import transcription_enabled
+from worker.transcription.recovery import WindowDecodeError
 
 
 def test_every_window_attempted_before_retries_and_limits_shared():

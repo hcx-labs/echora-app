@@ -1,13 +1,13 @@
 """PostgreSQL coverage: both projection uniqueness constraints are intentional."""
 
-from pathlib import Path
 import runpy
+from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
 from psycopg.rows import tuple_row
 
-from core.library.visibility import update_memberships, lock_library, source_remapped
+from core.library.visibility import lock_library, source_remapped, update_memberships
 
 
 def setup(db):

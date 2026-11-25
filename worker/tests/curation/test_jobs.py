@@ -1,16 +1,15 @@
 """No live services: transactional fake DB and a fault-injectable remote client."""
 
+import ast
 from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
-import ast
-from pathlib import Path
-import sys
 
 import pytest
-from core.errors import ConflictError, NotFoundError
 
 import worker.curation.jobs as cj
+from core.errors import ConflictError, NotFoundError
 
 
 class Result:
@@ -266,9 +265,8 @@ def test_mutation_guards_unresolved_publication(env):
 
 
 def test_lock_released_on_error(env):
-    with pytest.raises(ValueError):
-        with cj.locked(env.db.curation["id"]):
-            raise ValueError("failure")
+    with pytest.raises(ValueError), cj.locked(env.db.curation["id"]):
+        raise ValueError("failure")
     sql = [e for e in env.db.events if "pg_advisory" in e]
     assert "pg_advisory_lock" in sql[0]
     assert "pg_advisory_unlock" in sql[-1]

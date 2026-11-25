@@ -1,17 +1,10 @@
 from __future__ import annotations
 
-from core.db.config import DatabaseConfig
-from core.errors import InputUnavailableError, ProcessingError
-from worker.kara.aligner import label_rules
-from worker.kara.aligner.request import AlignRequest
-from worker.kara.config import KaraConfig
-
 import functools
 import hashlib
 import json
 import logging
 import os
-from pathlib import Path
 import re
 import selectors
 import subprocess
@@ -21,16 +14,22 @@ import threading
 import time
 import unicodedata
 import uuid
+from pathlib import Path
 
 import psycopg
 from psycopg.types.json import Jsonb
 
-from worker.media.preprocessing import get_check
-from worker.processing import Item, ItemResult, ProcessingContext, Processor
+from core.db.config import DatabaseConfig
+from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient
 from core.lyrics.backing import BACKING_VOICE, tag_bracketed_backing
+from worker.kara.aligner import label_rules
+from worker.kara.aligner.request import AlignRequest
+from worker.kara.config import KaraConfig
 from worker.kara.furigana import ruby_segments
+from worker.media.preprocessing import get_check
 from worker.planning.audio import plan_karaoke, resolve_library_id
+from worker.processing import Item, ItemResult, ProcessingContext, Processor
 
 logger = logging.getLogger(__name__)
 
@@ -365,7 +364,7 @@ def _fa_kara_worker(model_revision: str) -> subprocess.Popen[str]:
     if (
         _FA_KARA_WORKER is not None
         and _FA_KARA_WORKER.poll() is None
-        and _FA_KARA_WORKER_KEY == key
+        and key == _FA_KARA_WORKER_KEY
     ):
         return _FA_KARA_WORKER
     if _FA_KARA_WORKER is not None and _FA_KARA_WORKER.poll() is None:
@@ -567,7 +566,8 @@ def _run_fa_kara(
 
 def _store_supplied_karaoke(connection, track_id, lines, digest) -> None:
     """Word timing that came with the lyrics (TTML or enhanced LRC from Navidrome), stored as the
-    karaoke without alignment. Not AI-generated, so players show no AI disclosure for it."""
+    karaoke without alignment. Not AI-generated, so players show no AI disclosure for it.
+    """
     provenance = {
         "alignment_mode": "supplied",
         "source": "navidrome",

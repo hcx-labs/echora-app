@@ -18,13 +18,13 @@ locally. Results therefore match local processing.
 
 from __future__ import annotations
 
-from core.embeddings.config import EmbeddingConfig
 import json
 import os
 from pathlib import Path
 
 import modal
 
+from core.embeddings.config import EmbeddingConfig
 from worker.remote.constants import APP_NAME, AUDIO_VOLUME, GPU_TYPES, MODELS_VOLUME
 
 # The image keeps an empty /models, which Modal cannot mount over.
@@ -186,8 +186,8 @@ class Analysis:
     @modal.method()
     def embed_audio(self, digest: str, model: tuple[str, str, str], settings: dict[str, object]):
         """Window embeddings for one track, by the local code path."""
-        from worker.library.ingest import embed_track
         from core.embeddings.audio_models import MertModel, MuQMuLanModel
+        from worker.library.ingest import embed_track
 
         self._adopt(settings)
         name, model_id, revision = model
@@ -218,16 +218,16 @@ class Analysis:
     @modal.method()
     def melody(self, digest: str, settings: dict[str, object]):
         """Melody contours for one track (cached Roformer stems, then Melodia)."""
-        from worker.melody.index import track_contours
         from worker.media.roformer import using
+        from worker.melody.index import track_contours
 
         self._adopt(settings)
         with using(self._separator()):
             return track_contours(self._audio(digest))
 
     def _transcriber(self):
-        from worker.transcription.song import SongTranscriber
         from worker.transcription.config import transcription_model
+        from worker.transcription.song import SongTranscriber
 
         config = transcription_model()
         if config is None:
@@ -354,8 +354,8 @@ class Artwork:
         import shutil
         import uuid
 
-        from worker.models.download import model_manifest
         from worker.artwork.pipeline import render_loops
+        from worker.models.download import model_manifest
         from worker.remote.compute import adopt_compute_settings
 
         adopt_compute_settings(settings)

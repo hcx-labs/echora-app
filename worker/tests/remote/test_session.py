@@ -1,6 +1,5 @@
 """Analysis on Modal: deployment checks, sessions and every stage's Modal path, without Modal."""
 
-import core.compute as compute
 import os
 from contextlib import nullcontext
 from hashlib import sha256
@@ -13,8 +12,7 @@ import httpx
 import numpy as np
 import pytest
 
-from worker.processing import ProcessingContext, run_stage
-
+import core.compute as compute
 import core.features as features
 import worker.remote.session as remote_compute
 import worker.remote.settings as external_processing
@@ -23,6 +21,7 @@ from core.embeddings.audio_models import EmbeddingResult
 from core.media.config import MotionArtworkConfig
 from worker.kara.config import KaraConfig
 from worker.models.download import model_manifest
+from worker.processing import ProcessingContext, run_stage
 from worker.remote.compute import adopt_compute_settings, compute_settings
 
 CONFIG = remote_compute.ModalConfig(
@@ -102,9 +101,8 @@ def test_jobs_compute_in_one_location():
     with compute.computing_on("modal"):
         assert compute.location() == "modal"
     assert compute.location() == "local"
-    with pytest.raises(ValueError):
-        with compute.computing_on("elsewhere"):
-            pass
+    with pytest.raises(ValueError), compute.computing_on("elsewhere"):
+        pass
 
 
 def test_feature_switches_follow_the_job_location():

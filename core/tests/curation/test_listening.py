@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from core.curation.listening import (
     Listen,
@@ -13,8 +13,8 @@ from core.curation.listening import (
 def test_track_listen_counts_matches_tracks_and_overnight_periods():
     rows = [{"id": "one", "title": "A Song", "artist": "An Artist"}]
     listens = [
-        Listen("An Artist", "A Song", datetime(2026, 8, 24, 23, 30, tzinfo=timezone.utc)),
-        Listen("An Artist", "A Song", datetime(2026, 8, 24, 12, 0, tzinfo=timezone.utc)),
+        Listen("An Artist", "A Song", datetime(2026, 8, 24, 23, 30, tzinfo=UTC)),
+        Listen("An Artist", "A Song", datetime(2026, 8, 24, 12, 0, tzinfo=UTC)),
     ]
 
     all_counts, period_counts = track_listen_counts(rows, listens, "UTC", "22:00", "02:00")

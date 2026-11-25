@@ -1,16 +1,15 @@
 """Provision dummy pinned artifacts without network or inference."""
 
-from core.config import reset_config_cache
-
-from dataclasses import asdict
 import hashlib
 import json
 import shutil
+from dataclasses import asdict
 from unittest.mock import Mock
 
 import pytest
 
 import worker.recordings.download as downloader
+from core.config import reset_config_cache
 from worker.recordings.encoder import load_config
 from worker.recordings.matcher import MATCHER_REVISION, MatchPolicy
 
