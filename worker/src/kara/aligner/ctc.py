@@ -383,6 +383,7 @@ def paced_minimum_frames(
     group_cap: int,
     pause_frames: int,
     vowel_ids: set[int],
+    unmeasured_frames: int = 3,
 ) -> list[int]:
     """Minimum frames per target, scaled to each line's sung pace in a plain (unconstrained) pass.
 
@@ -391,6 +392,11 @@ def paced_minimum_frames(
     acoustic tokens: cramming can't shrink a span and pauses don't inflate it. Tokens get ``ratio``
     x the line's frames per token (at most ``group_cap``) and letters ``ratio`` x its frames per
     letter (at most ``letter_cap``), so fast rap keeps short syllables and one-frame letters.
+
+    A line the plain pass gives fewer than ``unmeasured_frames`` per token (60 ms: faster than
+    anyone sings) was not heard, not sung fast: a hummed "Mm" or an "Ooh, ooh" the model reads as
+    silence lands on a frame or two, and a floor scaled to that leaves the word a 20 ms blip.
+    Such a line takes the full caps.
     """
     minimums: list[int] = []
     for start, end in line_ranges:
@@ -411,8 +417,11 @@ def paced_minimum_frames(
             for group, found in zip(token_groups[start:end], plain_spans[start:end])
             if found
         )
-        group_floor = max(1, min(group_cap, int(ratio * sung / len(spans))))
-        letter_floor = max(1, min(letter_cap, int(ratio * sung / max(1, letters))))
+        if sung / len(spans) < unmeasured_frames:
+            group_floor, letter_floor = group_cap, letter_cap
+        else:
+            group_floor = max(1, min(group_cap, int(ratio * sung / len(spans))))
+            letter_floor = max(1, min(letter_cap, int(ratio * sung / max(1, letters))))
         minimums.extend(
             token_minimum_frames(token_groups[start:end], letter_floor, group_floor, vowel_ids)
         )
