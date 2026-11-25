@@ -382,3 +382,19 @@ Each branch is based on the previous one and keeps every test suite green.
    plugin move to `/api/v1`.
 4. `refactor/images`: `echora-backend` and `echora-worker` images, compose and the release
    workflow.
+5. `refactor/data-access`: one data-access layer. Today SQL is spread over routes, pipelines and
+   planners (about 360 raw `execute()` calls in 40 files), next to a SQLAlchemy engine that only a
+   few modules use, with ORM models for 8 of 67 tables.
+   - **Store modules.** Each domain gets `core/<domain>/store.py`, which owns its tables' queries
+     and returns typed models. Endpoints, processors and search services call store functions
+     and never write SQL.
+   - **ORM where it fits.** Tables used like records (settings, users, sessions, connections,
+     curations) get SQLAlchemy 2.0 models. A test checks that every model matches the schema the
+     migrations produce.
+   - **SQL where it is the tool.** Job claims (`SKIP LOCKED`), advisory locks, pgvector search
+     and bulk writes stay hand-written SQL, inside their store.
+   - **One connection API.** A single engine and session factory in `core.db` replaces the
+     `psycopg.connect()` calls.
+   - **Order.** One domain at a time, each with its own tests. The schema, migrations and stored
+     formats do not change. Branch 2 prepares this: each processor's queries sit behind its
+     `plan()` and `persist()` helpers, so moving them into a store is mechanical.
