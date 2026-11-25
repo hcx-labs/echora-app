@@ -1,6 +1,8 @@
 """Thin authenticated HTTP routes; all audio inference runs in the analysis worker."""
+
 from __future__ import annotations
 
+from worker.recordings.config import RecordingConfig
 import asyncio
 from uuid import UUID
 from urllib.parse import unquote
@@ -8,16 +10,16 @@ from urllib.parse import unquote
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from starlette.concurrency import run_in_threadpool
 
-from . import recording_calibration, recording_search
-from .settings import get_settings
+import worker.recordings.calibration as recording_calibration
+import worker.recordings.search as recording_search
 
 
 async def _audio_body(request: Request) -> bytes:
     content = bytearray()
     try:
-        async with asyncio.timeout(get_settings().recording_upload_read_timeout_seconds):
+        async with asyncio.timeout(RecordingConfig.load().upload_read_timeout_seconds):
             async for chunk in request.stream():
-                if len(content) + len(chunk) > get_settings().recording_max_upload_bytes:
+                if len(content) + len(chunk) > RecordingConfig.load().max_upload_bytes:
                     raise HTTPException(413, "The recording exceeds the configured upload limit")
                 content.extend(chunk)
     except TimeoutError:
@@ -42,11 +44,17 @@ def create_router(user_dependency) -> APIRouter:
             raise HTTPException(503, "Recording search is not configured") from None
         content = await _audio_body(request)
         try:
-            return await run_in_threadpool(recording_search.enqueue, user["id"], bytes(content),
-                                           config.representation_id, policy_id)
+            return await run_in_threadpool(
+                recording_search.enqueue,
+                user["id"],
+                bytes(content),
+                config.representation_id,
+                policy_id,
+            )
         except recording_search.QueueFull:
-            raise HTTPException(429, "Recording search is busy. Try again shortly.",
-                                headers={"Retry-After": "15"}) from None
+            raise HTTPException(
+                429, "Recording search is busy. Try again shortly.", headers={"Retry-After": "15"}
+            ) from None
 
     @router.get("/search/{job_id}")
     def result(job_id: UUID, user=Depends(user_dependency)):
@@ -57,7 +65,8 @@ def create_router(user_dependency) -> APIRouter:
 
     @router.delete("/search/{job_id}")
     def cancel(job_id: UUID, user=Depends(user_dependency)):
-        from . import jobs
+        import core.jobs.queue as jobs
+
         job = jobs.get_job(job_id, user["id"])
         if job is None or job["kind"] != "recording_search":
             raise HTTPException(404, "Recording search not found")
@@ -66,7 +75,9 @@ def create_router(user_dependency) -> APIRouter:
 
     @router.post("/calibration/samples", status_code=201)
     async def save_calibration(
-        request: Request, expected_track_id: UUID | None = None, not_in_library: bool = False,
+        request: Request,
+        expected_track_id: UUID | None = None,
+        not_in_library: bool = False,
         encoded_notes: str = Header(default="", alias="X-Echora-Calibration-Notes"),
         consent: str | None = Header(default=None, alias="X-Echora-Calibration-Consent"),
         user=Depends(user_dependency),
@@ -76,7 +87,9 @@ def create_router(user_dependency) -> APIRouter:
         if consent != recording_calibration.CONSENT_VERSION:
             raise HTTPException(422, "Explicit consent to save this calibration clip is required")
         if (expected_track_id is not None) == not_in_library:
-            raise HTTPException(422, "Choose the actual song or mark the clip as not in your library")
+            raise HTTPException(
+                422, "Choose the actual song or mark the clip as not in your library"
+            )
         if len(encoded_notes) > 3600:
             raise HTTPException(422, "Calibration notes must be at most 300 characters")
         try:
@@ -88,15 +101,22 @@ def create_router(user_dependency) -> APIRouter:
         content = await _audio_body(request)
         try:
             return await run_in_threadpool(
-                recording_calibration.save, user["id"], content, expected_track_id=expected_track_id,
-                not_in_library=not_in_library, notes=notes, consent=consent,
+                recording_calibration.save,
+                user["id"],
+                content,
+                expected_track_id=expected_track_id,
+                not_in_library=not_in_library,
+                notes=notes,
+                consent=consent,
             )
         except recording_calibration.CalibrationDisabled:
             raise HTTPException(503, "Calibration collection is disabled") from None
         except recording_calibration.TrackUnavailable:
             raise HTTPException(404, "This song is not available in your library") from None
         except recording_search.QueueFull:
-            raise HTTPException(429, "Calibration storage is full or busy. Delete a saved clip or try later.") from None
+            raise HTTPException(
+                429, "Calibration storage is full or busy. Delete a saved clip or try later."
+            ) from None
         except ValueError as error:
             raise HTTPException(422, str(error)) from None
         except OSError:

@@ -44,7 +44,7 @@ Save your Hugging Face token in **Settings → Analysis models → Model downloa
 
 ```sh
 docker compose run --rm --no-deps -e HF_HUB_OFFLINE=0 analysis \
-  python -m echora_analysis.download_models --motion-artwork
+  python -m worker.models.download --motion-artwork
 ```
 
 The command uses the saved token; `-e HF_TOKEN=hf_...` overrides it.

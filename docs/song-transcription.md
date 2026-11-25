@@ -16,7 +16,7 @@ Set both MOSS variables explicitly to empty strings to disable transcription. Ou
 
 To select another checkpoint, set the HF repository ID and its immutable 40-character commit revision. Partial configuration fails explicitly. There is no automatic fallback to base MOSS or an experiment-directory checkpoint.
 
-The shared `echora_analysis.download_models` command downloads the configured MOSS snapshot and pinned Roformer checkpoint. Run it with the same environment and model volumes as the worker, with HF offline mode disabled for provisioning. Inference loads MOSS from local cache only. The HF snapshot must include the fine-tuned model, tokenizer, processor configuration and required custom modeling code. Custom code executes from the reviewed pinned snapshot.
+The shared `worker.models.download` command downloads the configured MOSS snapshot and pinned Roformer checkpoint. Run it with the same environment and model volumes as the worker, with HF offline mode disabled for provisioning. Inference loads MOSS from local cache only. The HF snapshot must include the fine-tuned model, tokenizer, processor configuration and required custom modeling code. Custom code executes from the reviewed pinned snapshot.
 
 The processor is vendored from the upstream repository with its Apache license. The model weights are not included in the application repository. Review the published weights' license and training-data redistribution permissions before release.
 

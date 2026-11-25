@@ -1,4 +1,5 @@
 """Ad-hoc benchmark: embed free-text queries and rank lyrics embeddings by cosine similarity."""
+
 from __future__ import annotations
 
 import os
@@ -9,7 +10,7 @@ import uuid
 import numpy as np
 import psycopg
 
-from echora_analysis.lyrics_analysis import LyricsEmbeddingModel
+from core.embeddings.text import LyricsEmbeddingModel
 
 QUERIES = [
     "relationship breakup broken heart",
@@ -33,10 +34,12 @@ def _run_queries(model: LyricsEmbeddingModel, queries: list[str], top_k: int = 1
             )
             rows = cursor.fetchall()
     print(f"Loaded {len(rows)} track-level lyrics embeddings\n")
+
     def parse(value):
         if isinstance(value, str):
             return np.fromstring(value.strip("[]"), sep=",", dtype=np.float32)
         return np.array(value, dtype=np.float32)
+
     matrix = np.array([parse(row[3]) for row in rows])
     track_ids = [row[0] for row in rows]
 
@@ -48,7 +51,9 @@ def _run_queries(model: LyricsEmbeddingModel, queries: list[str], top_k: int = 1
         sims = matrix @ query_vec
         order = np.argsort(-sims)[:top_k]
         print(f"query: {query!r}  (embed {elapsed_ms:.0f}ms)")
-        print(f"  top similarity: {sims[order[0]]:.4f}   median: {np.median(sims):.4f}   p95: {np.percentile(sims, 95):.4f}")
+        print(
+            f"  top similarity: {sims[order[0]]:.4f}   median: {np.median(sims):.4f}   p95: {np.percentile(sims, 95):.4f}"
+        )
         for rank, idx in enumerate(order, 1):
             row = rows[idx]
             print(f"  {rank:2d}. {sims[idx]:.4f}  {row[1]} — {row[2] or '?'}")
@@ -66,5 +71,6 @@ if __name__ == "__main__":
     try:
         _run_queries(model, queries)
     finally:
-        from echora_analysis.models import release_model
+        from core.embeddings.audio_models import release_model
+
         release_model(model)

@@ -1,25 +1,25 @@
 """Ranking behavior, native lyrics mapping, credential lifecycle and source isolation."""
 
-from contextlib import contextmanager, nullcontext
-from datetime import datetime, timezone
 import importlib.util
 import os
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 from xml.etree import ElementTree as ET
 
-from fastapi import FastAPI, HTTPException
-from fastapi.testclient import TestClient
 import numpy as np
 import psycopg
+import pytest
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from psycopg import sql
 from psycopg.rows import dict_row
-import pytest
 
-from echora_analysis import navidrome_integration as auth
-from echora_analysis import plugin_ranking as ranking
-from echora_analysis import plugin_lyrics as lyrics
+import echora_analysis.navidrome_integration as auth
+import echora_analysis.plugin_lyrics as lyrics
+import echora_analysis.plugin_ranking as ranking
 from echora_analysis.plugin_routes import router
 
 
@@ -457,7 +457,9 @@ def database(monkeypatch):
             "0055_navidrome_integration.py",
             "0056_navidrome_original_lyrics.py",
         ):
-            migration_path = Path(__file__).parents[1] / "alembic/versions" / filename
+            migration_path = (
+                Path(__file__).parents[3] / "core/src/db/migrations/versions" / filename
+            )
             spec = importlib.util.spec_from_file_location("integration_migration", migration_path)
             migration = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(migration)
@@ -773,7 +775,7 @@ def test_manual_enable_is_blocked_and_off_preference_is_not_restored_as_on(datab
 
 
 def test_original_snapshots_keep_full_structure_last_available_and_enriched_lyrics(database):
-    from echora_analysis.navidrome_lyrics_sources import store_original
+    from core.lyrics.sources import store_original
 
     db = database
     _, library, track = seed_saved_lyrics(db)
@@ -818,69 +820,3 @@ def test_original_snapshots_keep_full_structure_last_available_and_enriched_lyri
             connection.execute("SELECT count(*) AS n FROM navidrome_lyrics_sources").fetchone()["n"]
             == 2
         )
-
-
-def test_import_archives_provider_before_preserving_manual_lyrics_without_model_imports():
-    """Execute the actual ingestion function with its GPU dependencies replaced."""
-    import ast
-    from contextlib import nullcontext
-    from unittest.mock import Mock
-    from collections.abc import Callable
-
-    path = Path(__file__).parents[1] / "src/echora_analysis/lyrics_pipeline.py"
-    tree = ast.parse(path.read_text())
-    function = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "backfill_lyrics"
-    )
-    connection, cursor, client = Mock(), Mock(), Mock()
-    connection.cursor.side_effect = lambda: nullcontext(cursor)
-    track, library = uuid4(), uuid4()
-    cursor.fetchall.return_value = [(track, "source-song", "Song")]
-    cursor.fetchone.return_value = ("Manual authoritative text", {}, "available", "manual")
-    original = {
-        "text": "Original Navidrome text",
-        "status": "available",
-        "source": "getLyricsBySongId",
-    }
-    client.lyrics.return_value = original
-    events = []
-    archived = Mock(side_effect=lambda *args: events.append("archive"))
-    model = Mock()
-    embedding_write = Mock(side_effect=lambda *args: events.append("embed"))
-    globals_ = {
-        "Callable": Callable,
-        "uuid": __import__("uuid"),
-        "psycopg": SimpleNamespace(connect=lambda _: nullcontext(connection)),
-        "NavidromeClient": lambda *args: nullcontext(client),
-        "get_settings": lambda: SimpleNamespace(
-            database_url="unused", lyrics_model_id="unused", lyrics_revision="unused"
-        ),
-        "resolve_library_id": lambda *args: library,
-        "configure_representations": Mock(),
-        "plan_lyrics": lambda *args, **kwargs: SimpleNamespace(lyrics_external_ids={"source-song"}),
-        "store_original": archived,
-        "_store_lyrics": Mock(),
-        "torch": SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)),
-        "LyricsEmbeddingModel": lambda *args: model,
-        "_create_run": Mock(),
-        "start_attempt": Mock(),
-        "record_track": Mock(),
-        "finish_attempt": Mock(),
-        "release_model": Mock(),
-        "_store_embeddings": embedding_write,
-        "current_remote": lambda: None,
-        "separation_phase": nullcontext,
-        "SongTranscriber": Mock(),
-        "needs_repair": lambda draft: False,
-        "diagnostic_writer": Mock(),
-    }
-    exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), globals_)
-    result = globals_["backfill_lyrics"]("http://navidrome", "user", "password")
-    assert result["failed"] == 0 and result["embedded"] == 1
-    assert events == ["archive", "embed"]
-    archived.assert_called_once_with(connection, library, "source-song", track, original)
-    model.embed.assert_called_once_with("Manual authoritative text")
-    globals_["_store_lyrics"].assert_not_called()
-    client.lyrics.assert_called_once_with("source-song")

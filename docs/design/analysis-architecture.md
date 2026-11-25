@@ -35,22 +35,27 @@ The repository layout hides the split too: `apps/web` is the only app under `app
 echora/
   web/          Next.js app (was apps/web)
   navidrome/    Navidrome plugin, Go (was plugins/navidrome)
-  core/         shared Python library: echora_core
-  backend/      FastAPI API and search services: echora_backend, image echora-backend
-  worker/       sync processing: echora_worker, image echora-worker (GPU, Modal)
+  core/         shared Python library (imports as `core`)
+  backend/      FastAPI API and search services (imports as `backend`), image echora-backend
+  worker/       sync processing (imports as `worker`), image echora-worker (GPU, Modal)
   database/  configs/  docs/  scripts/  nginx/  testdata/   (unchanged)
 ```
+
+Each Python project keeps its code in `src/` and its tests in `tests/`, beside `pyproject.toml`.
+The code imports under the project's name: `core/src/config.py` is `core.config`, and
+`worker/src/kara/` is `worker.kara`. A three-line `setup.py` maps the name to `src/`, for wheels and
+for editable installs alike.
 
 Dependencies point one way: `backend -> core`, `worker -> core`. The backend never imports the
 worker and the worker never imports the backend. They talk through PostgreSQL: the backend enqueues
 jobs and reads results; the worker claims jobs and writes results.
 
-### core (`echora_core`)
+### core (`core`)
 
 What both apps need, and nothing app-specific:
 
 ```
-echora_core/
+core/src/
   config.py        EchoraConfig base class, env naming, secrets, catalog export
   errors.py        EchoraError hierarchy, JobCancelled
   db/              connections, SQLAlchemy models, Alembic migrations
@@ -65,11 +70,11 @@ echora_core/
     lyrics/        lyrics documents, language detection, storage formats
 ```
 
-### worker (`echora_worker`)
+### worker (`worker`)
 
 ```
-echora_worker/
-  main.py          worker entry point: `python -m echora_worker analysis|scheduled`
+worker/src/
+  main.py          worker entry point: `python -m worker analysis|scheduled`
   executor.py      claim supervision, isolated executor process (was worker.py)
   processing/      the processor framework (below)
   operations.py    which processors an operation runs (sync, import, backfills, hum index)
@@ -78,7 +83,7 @@ echora_worker/
   embedding/       audio embeddings, descriptors, visual features
   lyrics/          retrieval and lyrics embeddings
   transcription/   AI lyrics (MOSS), timing repair, External AI refinement
-  kara/            karaoke alignment (FA-Kara, vendored aligner under kara/vendor/)
+  kara/            karaoke alignment; the aligner itself under kara/aligner/ (began as FA-Kara)
   translation/     lyric translation
   themes/          lyric theme descriptions
   voice/           voice classification
@@ -90,13 +95,15 @@ echora_worker/
   curation/        curation refresh (scheduled worker)
 ```
 
-Each domain package has `README.md` (algorithm and design), `config.py`, `errors.py`,
-`processor.py` and the implementation modules it needs.
+Each domain package has `README.md` (algorithm and design), and as it needs them `config.py`,
+`errors.py` (its exceptions, under `core.errors`), its processors (in `pipeline.py`, or a module
+named for the work, such as `library/ingest.py` and `melody/corpus.py`) and the implementation
+modules. `worker/README.md` indexes the domains.
 
-### backend (`echora_backend`)
+### backend (`backend`)
 
 ```
-echora_backend/
+backend/src/
   app.py           create_app(): middleware, sessions, the v1 router
   api/
     endpoint.py    Endpoint base class
@@ -124,7 +131,7 @@ All routes live under `/api/v1/<category>/<endpoint>`, for example `/api/v1/sear
 folder:
 
 ```python
-# echora_backend/api/v1/search/hum.py
+# backend/src/api/v1/search/hum.py
 class HumSearchRequest(PostRequest):
     """A hummed or sung recording to match against the user's melody index."""
     limit: int = Field(10, ge=1, le=50)
@@ -152,8 +159,8 @@ class HumSearch(Endpoint):
   Query parameters stay function parameters.
 - Responses are Pydantic models, not dicts, so the OpenAPI schema is complete. The web app's
   TypeScript types can be generated from it later.
-- Errors: domain exceptions map to HTTP responses in one place (`InvalidQuery` to 422,
-  `NotFound` to 404, `IntegrationError` to 502), never with provider messages.
+- Errors: domain exceptions map to HTTP responses in one place (`InvalidQueryError` to 422,
+  `NotFoundError` to 404, `IntegrationError` to 502), never with provider messages.
 
 **Cutover:** hard. The web app (`/api/v1/...` through its proxy) and the Navidrome plugin
 (`/api/v1/plugin/...`) change in the same release, and the plugin gets a new build. No legacy paths
@@ -263,7 +270,7 @@ plugin ranking (similar tracks, similar artists, artist radio, sonic path).
 
 ## Configuration
 
-`echora_core.config.EchoraConfig` is a `pydantic_settings.BaseSettings` subclass. Each domain and
+`core.config.EchoraConfig` is a `pydantic_settings.BaseSettings` subclass. Each domain and
 app defines one:
 
 ```python
@@ -278,8 +285,9 @@ class KaraConfig(ProcessorConfig, env_prefix="ECHORA_KARA_"):
   catalog lists them as deprecated.
 - **Secrets.** They are `SecretStr`, excluded from dumps and reprs.
 - **Compute fields.** Fields made with `compute()` change model results. A Modal call ships
-  `config.compute_values()`, and the container builds the same config object from that dict. This
-  replaces `PROCESSING_FIELDS` and `adopt_processing_settings`.
+  `worker.remote.compute.compute_settings()` (each compute config's `compute_values()`), and the
+  container calls `adopt_compute_settings()`, which rebuilds each config with
+  `with_compute_values()` and installs it with `adopt()`.
 - **No hidden globals.** Global state lives on config, context or service objects. The only
   module-level state is declared, typed caches (resident models, persistent search services), each
   behind one accessor.
@@ -294,12 +302,12 @@ EchoraError
 ├── IntegrationError            Navidrome, External AI, Modal, ComfyUI
 │   └── RemoteComputeError
 ├── ProcessingError             one item of one stage failed; the batch continues
-│   ├── InputUnavailable        audio or lyrics could not be read
-│   ├── ModelUnavailable        a model snapshot or file is missing
+│   ├── InputUnavailableError        audio or lyrics could not be read
+│   ├── ModelUnavailableError        a model snapshot or file is missing
 │   └── <domain errors>         kara.AlignmentError, transcription.TranscriptionError, …
 ├── SearchError                 a search request failed
-│   └── InvalidQuery
-└── NotFound                    the requested resource does not exist or is not visible
+│   └── InvalidQueryError
+└── NotFoundError                    the requested resource does not exist or is not visible
 JobCancelled (BaseException)    cooperative cancellation or a lost claim
 ```
 
@@ -376,3 +384,19 @@ Each branch is based on the previous one and keeps every test suite green.
    plugin move to `/api/v1`.
 4. `refactor/images`: `echora-backend` and `echora-worker` images, compose and the release
    workflow.
+5. `refactor/data-access`: one data-access layer. Today SQL is spread over routes, pipelines and
+   planners (about 360 raw `execute()` calls in 40 files), next to a SQLAlchemy engine that only a
+   few modules use, with ORM models for 8 of 67 tables.
+   - **Store modules.** Each domain gets `core/<domain>/store.py`, which owns its tables' queries
+     and returns typed models. Endpoints, processors and search services call store functions
+     and never write SQL.
+   - **ORM where it fits.** Tables used like records (settings, users, sessions, connections,
+     curations) get SQLAlchemy 2.0 models. A test checks that every model matches the schema the
+     migrations produce.
+   - **SQL where it is the tool.** Job claims (`SKIP LOCKED`), advisory locks, pgvector search
+     and bulk writes stay hand-written SQL, inside their store.
+   - **One connection API.** A single engine and session factory in `core.db` replaces the
+     `psycopg.connect()` calls.
+   - **Order.** One domain at a time, each with its own tests. The schema, migrations and stored
+     formats do not change. Branch 2 prepares this: each processor's queries sit behind its
+     `plan()` and `persist()` helpers, so moving them into a store is mechanical.

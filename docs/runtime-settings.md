@@ -1,6 +1,6 @@
 # Runtime settings
 
-`services/analysis/src/echora_analysis/settings.py` owns application deployment settings through Pydantic Settings. `get_settings()` validates and caches them once per process. Restart the API and workers after changing configuration.
+Deployment settings are strict Pydantic config classes, one per domain, each in a `config.py` next to the code it configures (for example `worker/src/kara/config.py`). Every field is the environment variable `<prefix><FIELD>`; older names are still read and listed as deprecated in the catalog. `<Config>.load()` validates and caches a class once per process. Restart the API and workers after changing configuration.
 
 Environment variables override Python defaults. Existing names such as `DATABASE_URL`, `MUQ_REVISION`, and `COOKIE_SECURE` remain supported. New operational controls generally use `ECHORA_` names. Units appear in each setting name. Worker command-line arguments override their environment defaults.
 
@@ -9,16 +9,16 @@ The application does not load dotenv files implicitly. Docker Compose passes the
 Start with `configs/env.example`. The complete, commented catalog is `configs/runtime.env.example`. Copy only the overrides you need into `.env` and uncomment them. Regenerate the catalog without reading environment values:
 
 ```sh
-PYTHONPATH=services/analysis/src services/analysis/.venv/bin/python scripts/export-runtime-settings.py > configs/runtime.env.example
+PYTHONPATH=services/analysis/src python scripts/export-runtime-settings.py  # with core and worker installed (pip install -e core -e worker) > configs/runtime.env.example
 ```
 
 Browser polling uses the same defaults, exported to `web/components/runtime/runtimeConfig.defaults.json`. The browser loads overrides from the API once after mount. During an API outage it keeps the generated defaults. Regenerate the fallback after changing those settings:
 
 ```sh
-PYTHONPATH=services/analysis/src services/analysis/.venv/bin/python scripts/export-runtime-settings.py --ui > web/components/runtime/runtimeConfig.defaults.json
+PYTHONPATH=services/analysis/src python scripts/export-runtime-settings.py  # with core and worker installed (pip install -e core -e worker) --ui > web/components/runtime/runtimeConfig.defaults.json
 ```
 
-Secrets are blank in that catalog and excluded from Settings representations and serialization. Do not log the settings object or publish its complete contents. `/settings/runtime` returns only an explicit allowlist of browser polling intervals and request timeouts.
+Secrets are blank in that catalog and excluded from config representations and serialization. Do not log a config object or publish its complete contents. `/settings/runtime` returns only an explicit allowlist of browser polling intervals and request timeouts.
 
 ## Sessions
 
@@ -54,4 +54,4 @@ Embedding dimensions, sample rates, calibrated matching rules, preprocessing rec
 
 ## Tests
 
-Tests that change environment variables must call `get_settings.cache_clear()` before reading them and after the test. Pure model utilities can load settings without a database or authentication secrets; database entry points still require a database URL. Invalid values fail validation without echoing the supplied input in the rendered error.
+Tests that change environment variables must call `core.config.reset_config_cache()` before reading them and after the test. Pure model utilities can load settings without a database or authentication secrets; database entry points still require a database URL. Invalid values fail validation without echoing the supplied input in the rendered error.

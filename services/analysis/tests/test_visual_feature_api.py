@@ -4,17 +4,16 @@ Database-backed coverage also lives in test_representations.py.
 """
 
 import ast
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
-import uuid
 
 import pytest
+from worker.library.visual_features import VISUAL_FEATURE_REVISION
+from worker.planning.audio import audio_prerequisites, plan_audio
 
-from echora_analysis.settings import Settings
 from echora_analysis.melody_preview import melody_preview
-from echora_analysis.processing_plan import audio_prerequisites, plan_audio
-from echora_analysis.visual_features import VISUAL_FEATURE_REVISION
 
 
 class HttpError(Exception):
@@ -41,7 +40,7 @@ def endpoint(rows):
     cursor.fetchone.side_effect = rows
     session = MagicMock(return_value={"id": "user"})
     namespace = dict(
-        get_settings=lambda: Settings.model_construct(database_url="fake"),
+        DatabaseConfig=SimpleNamespace(load=lambda: SimpleNamespace(database_url="fake")),
         Cookie=lambda **kw: None,
         _session_user=session,
         psycopg=SimpleNamespace(connect=connect),
@@ -120,10 +119,10 @@ def test_api_reports_unsupported_cache_without_serving_empty_features():
 
 
 def test_planner_revision_two_missing_cache_only_requires_shared_mono_decode(monkeypatch):
-    from echora_analysis.settings import get_settings
+    from core.config import reset_config_cache
 
     monkeypatch.delenv("ECHORA_RECORDING_MODEL_MANIFEST", raising=False)
-    get_settings.cache_clear()
+    reset_config_cache()
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     # All older pipelines complete, only the visual cache missing/stale.

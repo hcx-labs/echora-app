@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+from core.config import reset_config_cache
 
 from echora_analysis.media_cache import StreamCacheWriter
 
@@ -34,9 +34,9 @@ class FakeRedis:
 
 
 def test_stream_writer_renews_staging_ttl_and_publishes_with_cache_ttl(monkeypatch):
-    import echora_analysis.media_cache as media_cache
 
-    monkeypatch.setattr(media_cache, "get_settings", lambda: SimpleNamespace(media_cache_ttl_seconds=12))
+    monkeypatch.setenv("ECHORA_MEDIA_CACHE_TTL_SECONDS", "12")
+    reset_config_cache()
     client = FakeRedis()
     writer = StreamCacheWriter(client, "cached", "audio/mpeg")
 
@@ -51,9 +51,9 @@ def test_stream_writer_renews_staging_ttl_and_publishes_with_cache_ttl(monkeypat
 
 
 def test_stream_writer_does_not_recreate_expired_staging_key(monkeypatch):
-    import echora_analysis.media_cache as media_cache
 
-    monkeypatch.setattr(media_cache, "get_settings", lambda: SimpleNamespace(media_cache_ttl_seconds=12))
+    monkeypatch.setenv("ECHORA_MEDIA_CACHE_TTL_SECONDS", "12")
+    reset_config_cache()
     client = FakeRedis()
     writer = StreamCacheWriter(client, "cached", "audio/mpeg")
     client.delete(writer.staging_key)

@@ -34,8 +34,12 @@ def fit_artist_profile(embeddings: np.ndarray, maximum_components: int = 4) -> A
     best_bic = float("inf")
     for components in range(1, maximum + 1):
         candidate = GaussianMixture(
-            n_components=components, covariance_type="diag", max_iter=150,
-            n_init=3, random_state=42, reg_covar=1e-5,
+            n_components=components,
+            covariance_type="diag",
+            max_iter=150,
+            n_init=3,
+            random_state=42,
+            reg_covar=1e-5,
         ).fit(matrix)
         bic = float(candidate.bic(matrix))
         if bic < best_bic:
@@ -54,7 +58,9 @@ def weighted_center(profile: ArtistProfile) -> np.ndarray:
     return normalize_rows(value[None, :])[0]
 
 
-def soft_chamfer_similarity(left: ArtistProfile, right: ArtistProfile) -> tuple[float, float, float, np.ndarray]:
+def soft_chamfer_similarity(
+    left: ArtistProfile, right: ArtistProfile
+) -> tuple[float, float, float, np.ndarray]:
     similarities = np.clip(normalize_rows(left.centers) @ normalize_rows(right.centers).T, -1, 1)
     forward = float(np.sum(left.weights * similarities.max(axis=1)))
     backward = float(np.sum(right.weights * similarities.max(axis=0)))

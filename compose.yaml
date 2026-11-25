@@ -65,7 +65,7 @@ services:
       FA_KARA_MODEL_ID: ${FA_KARA_MODEL_ID:-hcxlabs/echora-kara-700m-muq}
       FA_KARA_REVISION: ${FA_KARA_REVISION:-7c0cda150c8be886ed5ff2f903460f112cf4c7a2}
       # Vocal-only analysis always uses the pinned Roformer overlap-2 recipe.
-      # Optional recording bundle for `python -m echora_analysis.download_models`.
+      # Optional recording bundle for `python -m worker.models.download`.
       # Serving and --prune-only never download models.
       ECHORA_RECORDING_MODEL_ID: ${ECHORA_RECORDING_MODEL_ID:-}
       ECHORA_RECORDING_MODEL_REVISION: ${ECHORA_RECORDING_MODEL_REVISION:-}
@@ -116,7 +116,7 @@ services:
       ECHORA_SOURCE_RECHECK_SECONDS: ${ECHORA_SOURCE_RECHECK_SECONDS:-0}
     volumes: *analysis-volumes
     user: "1001"
-    command: ["python", "-m", "echora_analysis.worker", "analysis"]
+    command: ["python", "-m", "worker.executor", "analysis"]
     depends_on:
       analysis: { condition: service_healthy }
     gpus: all
@@ -133,7 +133,7 @@ services:
     environment: *analysis-environment
     volumes: *analysis-volumes
     user: "1001"
-    command: ["python", "-m", "echora_analysis.worker", "scheduled"]
+    command: ["python", "-m", "worker.executor", "scheduled"]
     depends_on:
       analysis: { condition: service_healthy }
     extra_hosts:

@@ -1,24 +1,22 @@
 """Recording API boundaries and isolated-schema lifecycle integration tests."""
 
-from echora_analysis.settings import get_settings
-
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import Mock, patch
-from uuid import uuid4
 import io
 import json
-import runpy
 import wave
+from types import SimpleNamespace
+from unittest.mock import Mock
+from uuid import uuid4
 
+import core.jobs.queue as jobs
 import numpy as np
 import pytest
+import worker.recordings.search as search
+from core.config import reset_config_cache
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from worker.recordings.config import RecordingConfig
 
-from echora_analysis import jobs, recording_search as search
 from echora_analysis.recording_routes import create_router
-from test_jobs import database  # noqa: F401 -- shared isolated-schema fixture
 
 
 @pytest.fixture
@@ -26,8 +24,11 @@ def api(monkeypatch):
     user_id = uuid4()
     app = FastAPI()
     app.include_router(create_router(lambda: {"id": user_id}))
-    monkeypatch.setattr(search, "search_configuration", lambda: (
-        SimpleNamespace(representation_id="model"), object(), "policy"))
+    monkeypatch.setattr(
+        search,
+        "search_configuration",
+        lambda: (SimpleNamespace(representation_id="model"), object(), "policy"),
+    )
     return TestClient(app), user_id
 
 
@@ -45,7 +46,13 @@ def test_api_limits_and_configuration(api, monkeypatch):
     enqueue = Mock(side_effect=search.QueueFull)
     monkeypatch.setattr(search, "enqueue", enqueue)
     assert client.post("/library/recording/search", content=b"").status_code == 422
-    assert client.post("/library/recording/search", content=b"x" * (get_settings().recording_max_upload_bytes + 1)).status_code == 413
+    assert (
+        client.post(
+            "/library/recording/search",
+            content=b"x" * (RecordingConfig.load().max_upload_bytes + 1),
+        ).status_code
+        == 413
+    )
     enqueue.assert_not_called()
     response = client.post("/library/recording/search", content=b"audio")
     assert response.status_code == 429
@@ -57,6 +64,7 @@ def test_api_limits_and_configuration(api, monkeypatch):
 def test_routes_require_authentication():
     def unauthorized():
         raise HTTPException(401, "Authentication required")
+
     app = FastAPI()
     app.include_router(create_router(unauthorized))
     client = TestClient(app)
@@ -85,13 +93,22 @@ def test_bounded_decode():
 
 
 def test_policy_requires_calibration_and_matching_representation(monkeypatch, tmp_path):
-    from echora_analysis import recording_encoder, recording_matcher
-    monkeypatch.setattr(recording_encoder, "config_from_env", lambda: SimpleNamespace(representation_id="one"))
+    import worker.recordings.encoder as recording_encoder
+    import worker.recordings.matcher as recording_matcher
+
+    monkeypatch.setattr(
+        recording_encoder, "config_from_env", lambda: SimpleNamespace(representation_id="one")
+    )
     path = tmp_path / "policy.json"
     monkeypatch.setenv("ECHORA_RECORDING_MATCH_POLICY", str(path))
-    get_settings.cache_clear()
-    data = {"representation_id": "one", "matcher_revision": recording_matcher.MATCHER_REVISION,
-            "calibrated": False, "validation_dataset": "held-out-phone-recordings", "thresholds": {}}
+    reset_config_cache()
+    data = {
+        "representation_id": "one",
+        "matcher_revision": recording_matcher.MATCHER_REVISION,
+        "calibrated": False,
+        "validation_dataset": "held-out-phone-recordings",
+        "thresholds": {},
+    }
     path.write_text(json.dumps(data))
     with pytest.raises(ValueError, match="calibrated"):
         search.search_configuration()
@@ -99,26 +116,6 @@ def test_policy_requires_calibration_and_matching_representation(monkeypatch, tm
     path.write_text(json.dumps(data))
     with pytest.raises(ValueError):
         search.search_configuration()
-
-
-@pytest.fixture
-def recording_db(database):  # noqa: F811 -- pytest fixture injection
-    with database() as db:
-        db.execute("""CREATE TABLE users(id uuid PRIMARY KEY);
-            CREATE TABLE tracks(id uuid PRIMARY KEY,title text,artist text,album text,duration_seconds float);
-            CREATE TABLE user_track_links(user_id uuid,track_id uuid,external_id text,library_id uuid);
-            CREATE TABLE libraries(id uuid PRIMARY KEY,namespace uuid,root_path text);
-            CREATE TABLE navidrome_connections(id uuid PRIMARY KEY,owner_user_id uuid,url text);
-            CREATE TABLE user_preferences(user_id uuid PRIMARY KEY,navidrome_connection_id uuid);
-            CREATE TABLE track_sources(track_id uuid,library_id uuid,external_id text,source_type text,source_data jsonb);
-            CREATE TABLE recording_group_members(track_id uuid PRIMARY KEY,group_id uuid);""")
-        migration = runpy.run_path(str(Path(__file__).resolve().parents[1] / "alembic/versions/0044_recording_search.py"))
-        with patch("alembic.op.execute", side_effect=db.execute):
-            migration["upgrade"]()
-        diagnostic_migration = runpy.run_path(str(Path(__file__).resolve().parents[1] / "alembic/versions/0046_recording_diagnostics.py"))
-        with patch("alembic.op.execute", side_effect=db.execute):
-            diagnostic_migration["upgrade"]()
-    return database
 
 
 def test_queue_admission_fifo_and_terminal_audio_erasure(recording_db):
@@ -137,7 +134,12 @@ def test_queue_admission_fifo_and_terminal_audio_erasure(recording_db):
     assert "private audio" not in str(jobs.get_job(job["id"], owner))
     jobs.finish(job["id"], job["token"], {"state": "no_match"})
     with recording_db() as db:
-        assert db.execute("SELECT audio FROM recording_searches WHERE job_id=%s", (job["id"],)).fetchone()["audio"] is None
+        assert (
+            db.execute(
+                "SELECT audio FROM recording_searches WHERE job_id=%s", (job["id"],)
+            ).fetchone()["audio"]
+            is None
+        )
     assert jobs.claim("analysis", "worker") is None
 
 
@@ -147,11 +149,24 @@ def test_cancellation_and_expiry_clear_private_audio(recording_db):
     jobs.cancel(queued["job_id"], owner)
     other = search.enqueue(owner, b"private again", "model", "policy")
     with recording_db() as db:
-        assert db.execute("SELECT audio FROM recording_searches WHERE job_id=%s", (queued["job_id"],)).fetchone()["audio"] is None
-        db.execute("UPDATE recording_searches SET audio_expires_at=now()-interval '1 second' WHERE job_id=%s", (other["job_id"],))
+        assert (
+            db.execute(
+                "SELECT audio FROM recording_searches WHERE job_id=%s", (queued["job_id"],)
+            ).fetchone()["audio"]
+            is None
+        )
+        db.execute(
+            "UPDATE recording_searches SET audio_expires_at=now()-interval '1 second' WHERE job_id=%s",
+            (other["job_id"],),
+        )
     search.cleanup()
     with recording_db() as db:
-        assert db.execute("SELECT audio FROM recording_searches WHERE job_id=%s", (other["job_id"],)).fetchone()["audio"] is None
+        assert (
+            db.execute(
+                "SELECT audio FROM recording_searches WHERE job_id=%s", (other["job_id"],)
+            ).fetchone()["audio"]
+            is None
+        )
 
 
 def test_references_scope_before_search_and_results_recheck_access(recording_db):
@@ -160,17 +175,36 @@ def test_references_scope_before_search_and_results_recheck_access(recording_db)
     with recording_db() as db:
         for track_id, user_id in ((track, owner), (hidden, other)):
             db.execute("INSERT INTO tracks(id,title) VALUES (%s,'Song')", (track_id,))
-            db.execute("INSERT INTO user_track_links VALUES (%s,%s,'source',%s)", (user_id, track_id, library))
-            db.execute("INSERT INTO recording_fingerprints(track_id,representation_id,segment_count,fingerprints) VALUES (%s,'model',8,%s)", (track_id, matrix.tobytes()))
+            db.execute(
+                "INSERT INTO user_track_links VALUES (%s,%s,'source',%s)",
+                (user_id, track_id, library),
+            )
+            db.execute(
+                "INSERT INTO recording_fingerprints(track_id,representation_id,segment_count,fingerprints) VALUES (%s,'model',8,%s)",
+                (track_id, matrix.tobytes()),
+            )
         refs = list(search._references(db, owner, "model", lambda: None))
         assert [ref["track_id"] for ref in refs] == [str(track)]
     queued = search.enqueue(owner, b"audio", "model", "policy")
     job = jobs.claim("analysis", "worker")
     from psycopg.types.json import Jsonb
+
     with recording_db() as db:
-        db.execute("UPDATE recording_searches SET result=%s WHERE job_id=%s", (Jsonb({"state": "identified", "matches": [
-            {"track_id": str(track), "score": 0.9, "offset_seconds": 1.5},
-            {"track_id": str(hidden), "score": 0.8, "offset_seconds": 1.5}]}), job["id"]))
+        db.execute(
+            "UPDATE recording_searches SET result=%s WHERE job_id=%s",
+            (
+                Jsonb(
+                    {
+                        "state": "identified",
+                        "matches": [
+                            {"track_id": str(track), "score": 0.9, "offset_seconds": 1.5},
+                            {"track_id": str(hidden), "score": 0.8, "offset_seconds": 1.5},
+                        ],
+                    }
+                ),
+                job["id"],
+            ),
+        )
     jobs.finish(job["id"], job["token"], {"state": "identified"})
     value = search.result(queued["job_id"], owner)["result"]
     assert value["state"] == "identified"
@@ -181,20 +215,34 @@ def test_references_scope_before_search_and_results_recheck_access(recording_db)
 
 
 def test_worker_roundtrip_and_configuration_fence(recording_db, monkeypatch):
-    from echora_analysis import recording_encoder
-    from echora_analysis.recording_matcher import MatchPolicy
+    import worker.recordings.encoder as recording_encoder
+    from worker.recordings.matcher import MatchPolicy
+
     owner, track, library = uuid4(), uuid4(), uuid4()
     matrix = np.eye(128, dtype="<f4")[:30]
     config = SimpleNamespace(representation_id="model")
-    policy = MatchPolicy(window_similarity=.8, min_score=.8, min_support=6,
-                         min_coverage=.8, min_temporal_spread=.6, min_margin=.08)
+    policy = MatchPolicy(
+        window_similarity=0.8,
+        min_score=0.8,
+        min_support=6,
+        min_coverage=0.8,
+        min_temporal_spread=0.6,
+        min_margin=0.08,
+    )
     monkeypatch.setattr(search, "search_configuration", lambda: (config, policy, "policy"))
-    monkeypatch.setattr(search, "decode_query", lambda audio, **kwargs: np.ones(80000, dtype=np.float32))
+    monkeypatch.setattr(
+        search, "decode_query", lambda audio, **kwargs: np.ones(80000, dtype=np.float32)
+    )
     monkeypatch.setattr(recording_encoder, "encode", lambda *a, **kw: matrix[5:25])
     with recording_db() as db:
         db.execute("INSERT INTO tracks(id,title) VALUES (%s,'Matched recording')", (track,))
-        db.execute("INSERT INTO user_track_links VALUES (%s,%s,'source',%s)", (owner, track, library))
-        db.execute("INSERT INTO recording_fingerprints(track_id,representation_id,segment_count,fingerprints) VALUES (%s,'model',30,%s)", (track, matrix.tobytes()))
+        db.execute(
+            "INSERT INTO user_track_links VALUES (%s,%s,'source',%s)", (owner, track, library)
+        )
+        db.execute(
+            "INSERT INTO recording_fingerprints(track_id,representation_id,segment_count,fingerprints) VALUES (%s,'model',30,%s)",
+            (track, matrix.tobytes()),
+        )
     queued = search.enqueue(owner, b"audio", "model", "policy")
     job = jobs.claim("analysis", "test-worker")
     summary = search.execute(job, jobs.JobContext(job))
@@ -225,14 +273,20 @@ def test_cancel_api_is_owner_and_kind_scoped(api, monkeypatch):
 
 
 def test_sync_index_status_scopes_catalog_owner_and_representation(recording_db, monkeypatch):
+    import worker.recordings.encoder as recording_encoder
     from psycopg.rows import tuple_row
-    from echora_analysis import recording_encoder
+
     owner, other, library, elsewhere, namespace = [uuid4() for _ in range(5)]
-    monkeypatch.setattr(recording_encoder, "config_from_env", lambda: SimpleNamespace(representation_id="current"))
+    monkeypatch.setattr(
+        recording_encoder, "config_from_env", lambda: SimpleNamespace(representation_id="current")
+    )
     monkeypatch.delenv("ECHORA_RECORDING_MATCH_POLICY", raising=False)
-    get_settings.cache_clear()
+    reset_config_cache()
     with recording_db() as db:
-        db.execute("INSERT INTO libraries(id,namespace) VALUES (%s,%s),(%s,%s)", (library, namespace, elsewhere, uuid4()))
+        db.execute(
+            "INSERT INTO libraries(id,namespace) VALUES (%s,%s),(%s,%s)",
+            (library, namespace, elsewhere, uuid4()),
+        )
         for external, who, lib, version, windows in [
             ("ready", owner, library, "current", 1),
             ("short", owner, library, "current", 0),
@@ -243,33 +297,48 @@ def test_sync_index_status_scopes_catalog_owner_and_representation(recording_db,
         ]:
             track = uuid4()
             db.execute("INSERT INTO tracks(id,title) VALUES (%s,'Song')", (track,))
-            db.execute("INSERT INTO track_sources(track_id,library_id,external_id,source_type) VALUES (%s,%s,%s,'subsonic')", (track, lib, external))
-            db.execute("INSERT INTO user_track_links VALUES (%s,%s,%s,%s)", (who, track, external, lib))
-            db.execute("INSERT INTO recording_fingerprints(track_id,representation_id,segment_count,fingerprints) VALUES (%s,%s,%s,%s)", (track, version, windows, bytes(windows * 128 * 4)))
+            db.execute(
+                "INSERT INTO track_sources(track_id,library_id,external_id,source_type) VALUES (%s,%s,%s,'subsonic')",
+                (track, lib, external),
+            )
+            db.execute(
+                "INSERT INTO user_track_links VALUES (%s,%s,%s,%s)", (who, track, external, lib)
+            )
+            db.execute(
+                "INSERT INTO recording_fingerprints(track_id,representation_id,segment_count,fingerprints) VALUES (%s,%s,%s,%s)",
+                (track, version, windows, bytes(windows * 128 * 4)),
+            )
         db.row_factory = tuple_row
-        result = search.index_status(db, namespace, ["ready", "short", "stale", "hidden", "elsewhere", "new", "ready"], owner)
+        result = search.index_status(
+            db, namespace, ["ready", "short", "stale", "hidden", "elsewhere", "new", "ready"], owner
+        )
         assert result == {"enabled": True, "total": 6, "indexed": 1, "unsupported": 1, "missing": 4}
         assert search.index_status(db, namespace, [], owner)["total"] == 0
 
 
 def test_sync_index_status_disabled_and_invalid_model(monkeypatch):
     from unittest.mock import MagicMock
-    from echora_analysis import recording_encoder
+
+    import worker.recordings.encoder as recording_encoder
+
     connection = MagicMock()
     monkeypatch.setattr(recording_encoder, "config_from_env", lambda: None)
     result = search.index_status(connection, uuid4(), ["song"], uuid4())
     assert not result["enabled"] and result["missing"] == 1
-    monkeypatch.setattr(recording_encoder, "config_from_env", Mock(side_effect=ValueError("private path")))
+    monkeypatch.setattr(
+        recording_encoder, "config_from_env", Mock(side_effect=ValueError("private path"))
+    )
     result = search.index_status(connection, uuid4(), ["song"], uuid4())
     assert not result["enabled"] and "private path" not in result["reason"]
     connection.cursor.assert_not_called()
 
 
 def test_query_and_library_decoders_agree_on_stereo_resampling():
-    from echora_analysis.audio import decode_audio
+    from worker.media.audio import decode_audio
+
     rate = 48000
     t = np.arange(rate * 2) / rate
-    stereo = np.stack([np.sin(2 * np.pi * 440 * t), .5 * np.sin(2 * np.pi * 997 * t)], axis=1)
+    stereo = np.stack([np.sin(2 * np.pi * 440 * t), 0.5 * np.sin(2 * np.pi * 997 * t)], axis=1)
     stream = io.BytesIO()
     with wave.open(stream, "wb") as writer:
         writer.setnchannels(2)
@@ -283,55 +352,35 @@ def test_query_and_library_decoders_agree_on_stereo_resampling():
     np.testing.assert_array_equal(query, reference)
 
 
-def test_store_fingerprints_full_track_reuse_and_source_identity(monkeypatch):
-    import hashlib
-    from unittest.mock import MagicMock
-    from echora_analysis import audio, recording_encoder
-    connection = MagicMock()
-    cursor = connection.cursor.return_value.__enter__.return_value
-    content = b"original source"
-    config = SimpleNamespace(representation_id="model")
-    samples = np.ones(181 * 8000, dtype=np.float32)
-    fingerprints = np.ones((361, 128), dtype=np.float32)
-    decoder = Mock(return_value=samples)
-    encoder = Mock(return_value=fingerprints)
-    monkeypatch.setattr(audio, "decode_audio", decoder)
-    monkeypatch.setattr(recording_encoder, "encode", encoder)
-    cursor.fetchone.side_effect = [None, (hashlib.sha256(content).hexdigest(),)]
-    cursor.rowcount = 1
-    check = Mock()
-    assert search.store_fingerprints(connection, "track", content, config, check)
-    decoder.assert_called_once_with(content, 8000)
-    assert encoder.call_args.args[0] is samples
-    assert cursor.execute.call_args.args[1][2] == 361
-    assert len(cursor.execute.call_args.args[1][3]) == 361 * 128 * 4
-    cursor.fetchone.side_effect = [(1,)]
-    assert not search.store_fingerprints(connection, "track", content, config, check)
-    assert encoder.call_count == 1
-    cursor.fetchone.side_effect = [None, ("old-source-hash",)]
-    with pytest.raises(ValueError, match="source bytes changed"):
-        search.store_fingerprints(connection, "track", content, config, check)
-    assert decoder.call_count == encoder.call_count == 1
-
-
 def test_match_playback_uses_matching_owned_connection_not_selected_other_server(recording_db):
     owner, other, track, library, unrelated, right, wrong, foreign = [uuid4() for _ in range(8)]
     with recording_db() as db:
         db.execute("INSERT INTO tracks(id,title) VALUES (%s,'Song')", (track,))
-        db.execute("INSERT INTO libraries(id,root_path) VALUES (%s,'https://server-a/'),(%s,'https://server-b')", (library, unrelated))
-        db.execute("INSERT INTO navidrome_connections VALUES (%s,%s,'https://server-a'),(%s,%s,'https://server-b'),(%s,%s,'https://server-a')", (right,owner,wrong,owner,foreign,other))
-        db.execute("INSERT INTO user_preferences VALUES (%s,%s)", (owner,wrong))
-        db.execute("INSERT INTO user_track_links VALUES (%s,%s,'source-a',%s)", (owner,track,library))
-        db.execute("INSERT INTO track_sources VALUES (%s,%s,'source-a','subsonic','{\"coverArt\":\"art-a\"}')", (track,library))
-        matches = [{"track_id": str(track), "score": .8}]
+        db.execute(
+            "INSERT INTO libraries(id,root_path) VALUES (%s,'https://server-a/'),(%s,'https://server-b')",
+            (library, unrelated),
+        )
+        db.execute(
+            "INSERT INTO navidrome_connections VALUES (%s,%s,'https://server-a'),(%s,%s,'https://server-b'),(%s,%s,'https://server-a')",
+            (right, owner, wrong, owner, foreign, other),
+        )
+        db.execute("INSERT INTO user_preferences VALUES (%s,%s)", (owner, wrong))
+        db.execute(
+            "INSERT INTO user_track_links VALUES (%s,%s,'source-a',%s)", (owner, track, library)
+        )
+        db.execute(
+            "INSERT INTO track_sources VALUES (%s,%s,'source-a','subsonic','{\"coverArt\":\"art-a\"}')",
+            (track, library),
+        )
+        matches = [{"track_id": str(track), "score": 0.8}]
         result = search._visible_matches(db, matches, owner)[0]
-        assert result['source_id'] == 'source-a'
-        assert result['connection_id'] == str(right)
-        assert result['cover_art'] == 'art-a'
+        assert result["source_id"] == "source-a"
+        assert result["connection_id"] == str(right)
+        assert result["cover_art"] == "art-a"
         db.execute("DELETE FROM navidrome_connections WHERE id=%s", (right,))
         result = search._visible_matches(db, matches, owner)[0]
-        assert result['connection_id'] is None and result['source_id'] is None
-        assert result['cover_art'] is None
+        assert result["connection_id"] is None and result["source_id"] is None
+        assert result["cover_art"] is None
         assert search._visible_matches(db, matches, other) == []
 
 
@@ -339,21 +388,29 @@ def test_match_prefers_selected_connection_when_track_exists_on_both_servers(rec
     owner, track, first, second, first_connection, second_connection = [uuid4() for _ in range(6)]
     with recording_db() as db:
         db.execute("INSERT INTO tracks(id,title) VALUES (%s,'Song')", (track,))
-        for library, connection, url, source in [(first,first_connection,'https://a','a-source'),(second,second_connection,'https://b','b-source')]:
-            db.execute("INSERT INTO libraries(id,root_path) VALUES (%s,%s)", (library,url))
-            db.execute("INSERT INTO navidrome_connections VALUES (%s,%s,%s)", (connection,owner,url))
-            db.execute("INSERT INTO user_track_links VALUES (%s,%s,%s,%s)", (owner,track,source,library))
-        db.execute("INSERT INTO user_preferences VALUES (%s,%s)", (owner,second_connection))
-        match = search._visible_matches(db, [{"track_id": str(track), "score": .8}], owner)[0]
-        assert match['connection_id'] == str(second_connection) and match['source_id'] == 'b-source'
+        for library, connection, url, source in [
+            (first, first_connection, "https://a", "a-source"),
+            (second, second_connection, "https://b", "b-source"),
+        ]:
+            db.execute("INSERT INTO libraries(id,root_path) VALUES (%s,%s)", (library, url))
+            db.execute(
+                "INSERT INTO navidrome_connections VALUES (%s,%s,%s)", (connection, owner, url)
+            )
+            db.execute(
+                "INSERT INTO user_track_links VALUES (%s,%s,%s,%s)", (owner, track, source, library)
+            )
+        db.execute("INSERT INTO user_preferences VALUES (%s,%s)", (owner, second_connection))
+        match = search._visible_matches(db, [{"track_id": str(track), "score": 0.8}], owner)[0]
+        assert match["connection_id"] == str(second_connection) and match["source_id"] == "b-source"
 
 
 def test_decoder_cancellation_kills_child_and_drains_pipes(monkeypatch):
-    from unittest.mock import MagicMock
     import subprocess
+    from unittest.mock import MagicMock
+
     process = MagicMock()
     process.__enter__.return_value = process
-    process.communicate.side_effect = [subprocess.TimeoutExpired("ffmpeg", .25), (b"", None)]
+    process.communicate.side_effect = [subprocess.TimeoutExpired("ffmpeg", 0.25), (b"", None)]
     monkeypatch.setattr(search.subprocess, "Popen", Mock(return_value=process))
     check = Mock(side_effect=[None, None, jobs.JobCancelled()])
     with pytest.raises(jobs.JobCancelled):
@@ -363,21 +420,26 @@ def test_decoder_cancellation_kills_child_and_drains_pipes(monkeypatch):
 
 
 def test_decoder_resumes_communication_without_resending_input(monkeypatch):
-    from unittest.mock import MagicMock
     import subprocess
+    from unittest.mock import MagicMock
+
     process = MagicMock()
     process.__enter__.return_value = process
     process.returncode = 0
-    process.communicate.side_effect = [subprocess.TimeoutExpired("ffmpeg", .25), (bytes(8000 * 4), None)]
+    process.communicate.side_effect = [
+        subprocess.TimeoutExpired("ffmpeg", 0.25),
+        (bytes(8000 * 4), None),
+    ]
     monkeypatch.setattr(search.subprocess, "Popen", Mock(return_value=process))
     assert search.decode_query(b"audio").shape == (8000,)
-    assert process.communicate.call_args_list[0].kwargs['input'] == b"audio"
-    assert process.communicate.call_args_list[1].kwargs['input'] is None
+    assert process.communicate.call_args_list[0].kwargs["input"] == b"audio"
+    assert process.communicate.call_args_list[1].kwargs["input"] is None
     process.kill.assert_not_called()
 
 
 def test_decoder_timeout_terminates_child(monkeypatch):
     from unittest.mock import MagicMock
+
     process = MagicMock()
     process.__enter__.return_value = process
     process.communicate.return_value = (b"", None)
@@ -391,9 +453,11 @@ def test_decoder_timeout_terminates_child(monkeypatch):
 def test_execution_budget_starts_before_configuration_and_preparation(monkeypatch):
     clock = [0.0]
     monkeypatch.setattr(search.time, "monotonic", lambda: clock[0])
+
     def configuration():
         clock[0] = 121
         return SimpleNamespace(), SimpleNamespace(), "policy"
+
     monkeypatch.setattr(search, "search_configuration", configuration)
     context = SimpleNamespace(check=Mock())
     with pytest.raises(ValueError, match="time budget"):

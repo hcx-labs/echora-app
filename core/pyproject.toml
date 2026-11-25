@@ -1,0 +1,18 @@
+[project]
+name = "echora-core"
+version = "0.1.0"
+description = "Configuration, errors, storage and algorithms shared by the Echora backend and worker"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic-settings==2.15.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.0.2", "ruff==0.15.6"]
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
