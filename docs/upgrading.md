@@ -25,8 +25,9 @@ reprocessed.
    need the new names. Modal runs `echora-worker`; the Modal app keeps the name
    `echora-analysis`.
 7. **Retired settings.** `FA_KARA_ALIGNER` and `FA_KARA_AUDIO_INPUT` are ignored (the aligner
-   always reads the full mix; step 9 covers the separated vocals it now reads as well), and `ECHORA_LANGUAGE_BACKFILL_BATCH_SIZE` no longer exists. Other
-   old setting names keep working and are listed as deprecated in `configs/runtime.env.example`.
+   always reads the full mix; step 9 covers the separated vocals it now reads as well), and
+   `ECHORA_LANGUAGE_BACKFILL_BATCH_SIZE` no longer exists. Other old setting names keep working
+   and are listed as deprecated in `configs/runtime.env.example`.
 8. **Backfill routes.** The lyrics, voice, karaoke and recordings backfills are now
    administrator-only.
 9. **Karaoke realignment.** The karaoke pipeline revision changes, so every song's word timing is
