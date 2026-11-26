@@ -10,10 +10,13 @@ from fastapi import Depends
 from backend.api.deps import SessionUser, current_user
 from backend.api.endpoint import Endpoint
 from backend.api.responses import ResponseModel
+from backend.plugin.lyrics import smoothed
+from backend.settings.plugin_integration import profile_from
 from core.db.connection import connect
 from core.errors import NotFoundError
 from core.lyrics import store
 from core.lyrics.translations import load_translations
+from core.plugin import store as plugin_store
 from worker.translation.pipeline import source_lines as translation_source_lines
 
 
@@ -55,8 +58,12 @@ class TrackLyricsEndpoint(Endpoint):
     def handle(self, track_id: uuid.UUID, user: SessionUser = Depends(current_user)) -> dict:
         with connect() as connection:
             row = store.user_lyrics(connection, user["id"], track_id)
+            # TEMPORARY: preview the Navidrome plugin's karaoke smoothing in the web player.
+            # Remove with the import of ``smoothed`` once the switches are tuned.
+            profile = profile_from(plugin_store.integration(connection, user["id"]))
         if row is None:
             raise NotFoundError("Track is not in your library")
+        row = smoothed(row, profile)  # TEMPORARY, see above
         provenance = row.get("provenance") or {}
         source_lines = provenance.get("lines") or []
         karaoke_lines = row.get("karaoke_lines") or []
