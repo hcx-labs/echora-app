@@ -349,7 +349,6 @@ export default function NavidromePluginSettings({ connectionId }: { connectionId
               <ChoiceItem value="lrc">Line timing and language variants (LRC)</ChoiceItem>
             </Choice>
           </SettingRow>
-          {/* TEMPORARY: these also apply in Echora's own karaoke view, for previewing. */}
           <Toggle
             label="Close gaps inside words"
             description="Each syllable runs until the next one in its word starts, so the highlight does not pause and jump mid-word."
