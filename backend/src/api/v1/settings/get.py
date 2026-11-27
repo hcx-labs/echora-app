@@ -32,6 +32,9 @@ class ModelSwitches(ResponseModel):
     karaoke_modal_enabled: bool
     hum_modal_enabled: bool
     transcription_modal_enabled: bool
+    karaoke_stems_processing_enabled: bool
+    """Karaoke stems (vocals and instrumental for the Stage player) for syncs here."""
+    karaoke_stems_modal_enabled: bool
     huggingface_account: str | None
     """The account of the stored Hugging Face token (the token itself is never returned)."""
     has_huggingface_token: bool
@@ -116,6 +119,8 @@ def _models(row) -> dict[str, object]:
         "karaoke_modal_enabled": True if row is None else bool(row["karaoke_modal_enabled"]),
         "hum_modal_enabled": True if row is None else bool(row["hum_modal_enabled"]),
         "transcription_modal_enabled": bool(row and row["transcription_modal_enabled"]),
+        "karaoke_stems_processing_enabled": bool(row and row["karaoke_stems_processing_enabled"]),
+        "karaoke_stems_modal_enabled": bool(row and row["karaoke_stems_modal_enabled"]),
         "huggingface_account": row["hf_token_account"] if row else None,
         "has_huggingface_token": bool(row and row["has_huggingface_token"]),
     }

@@ -35,6 +35,7 @@ import motionStyles from "./FullscreenMotion.module.css";
 import Artwork from "../ui/Artwork";
 import { Spinner } from "../ui/spinner";
 import AiLyricsIndicator from "./AiLyricsIndicator";
+import KaraokeStemsControl from "./KaraokeStemsControl";
 import LyricsGlow from "./LyricsGlow";
 import { StageBackdrop } from "./StageBackdrop";
 import {
@@ -531,9 +532,12 @@ export default function FullscreenPlayer() {
   }
   const hasLyrics = timedLines.length > 0 || translationVisible || Boolean(currentLyrics?.text);
   // Fullscreen has room for the complete quality breakdown, one tag per fact.
-  const qualityParts = player.audioQuality
-    ? audioQualityLabel(player.audioQuality).split(" · ")
-    : [];
+  // With karaoke stems the player streams Echora's Opus stems, not the original file.
+  const qualityParts = player.karaokeStems.playing
+    ? ["Opus", "Karaoke stems"]
+    : player.audioQuality
+      ? audioQualityLabel(player.audioQuality).split(" · ")
+      : [];
   // Lyrics lead when there are any; otherwise the panel opens on the queue.
   const activePanel = panel ?? (hasLyrics || player.lyricsLoading ? "lyrics" : "queue");
   const upcoming = Math.max(0, player.queue.length - player.queueIndex - 1);
@@ -552,9 +556,9 @@ export default function FullscreenPlayer() {
           onValueChange={(value) => setKaraokeMode(value === "karaoke")}
         >
           <TabsList aria-label="Lyrics timing mode" className={styles.segmented}>
-            <TabsTrigger value="karaoke" title="Word-by-word timing">
+            <TabsTrigger value="karaoke" title="Syllable-by-syllable timing">
               <MicVocal />
-              <span className={styles.optionLabel}>Karaoke</span>
+              <span className={styles.optionLabel}>Syllable</span>
             </TabsTrigger>
             <TabsTrigger value="synced" title="Line timing">
               <ListMusic />
@@ -564,7 +568,7 @@ export default function FullscreenPlayer() {
         </Tabs>
       )}
       {hasLyrics && (
-        // Built from the same frame and trigger styles as the Karaoke / Lines group beside it.
+        // Built from the same frame and trigger styles as the Syllable / Lines group beside it.
         <div
           data-slot="tabs-list"
           data-variant="segmented"
@@ -638,6 +642,7 @@ export default function FullscreenPlayer() {
           )}
         </div>
       )}
+      <KaraokeStemsControl className={styles.group} activeClassName={styles.toggleOn} />
     </>
   );
   // The cover, with its motion loop when there is one; desktop also puts the style switch on it.

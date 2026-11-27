@@ -73,5 +73,21 @@ def select_sync_tracks(
         library_id=library_id,
     )
     selected.update(karaoke.karaoke_external_ids)
+    selected.update(songs_needing_stems(connection, library_id, ids))
     selected.update(sync_selection(connection, library_id, ids))
     return [item for item in ids if item in selected]
+
+
+def songs_needing_stems(connection, library_id, ids: list[str]) -> set[str]:
+    """Songs without karaoke stems, when stems are on anywhere (here or on Modal)."""
+    from core.features import feature_enabled
+    from core.stems import store as stems
+    from worker.stems.pipeline import stems_recipe
+
+    if not (
+        feature_enabled(connection, "karaoke_stems", "local")
+        or feature_enabled(connection, "karaoke_stems", "modal")
+    ):
+        return set()
+    rows = stems.songs_without_stems(connection, library_id, ids, stems_recipe())
+    return {str(row["external_id"]) for row in rows}

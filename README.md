@@ -34,7 +34,7 @@ Navidrome keeps hosting and streaming your files. Echora never modifies them, an
 - **Karaoke timing.** When a song has synced lyrics, Echora times every syllable with its own forced-alignment model, trained on singing in several languages, and highlights the words as they are sung.
 - **Lyrics for songs that have none.** For vocal tracks without lyrics, an optional transcription model listens to the isolated vocals and writes them out.
 - **Translations.** Connect any OpenAI-compatible model and Echora translates lyrics line by line, keeping each line paired with its timing.
-- **Things to watch.** Pick from several audio-reactive visualizers, a waveform of the whole track and an optional melody line. On a capable GPU, Echora can also render a short looping animation from each album cover ([motion artwork](docs/motion-artwork.md)).
+- **Things to watch.** Pick from several audio-reactive visualizers, a waveform of the whole track and an optional melody line. On a capable GPU, Echora can also render a short looping animation from each album cover ([motion artwork](docs/motion-artwork.md)). With [karaoke stems](docs/karaoke-stems.md) on, the Stage player can turn the singer down, or play the vocals alone, with one slider.
 - Playback carries on while you browse. The queue, the mini player and the full-screen view stay in sync across pages.
 
 ### Find something without knowing its name

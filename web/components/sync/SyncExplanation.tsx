@@ -57,9 +57,10 @@ const models: {
   },
   {
     name: "Mel-Band-Roformer",
-    phases: ["preprocess"],
+    phases: ["preprocess", "karaoke_stems"],
     role: "Vocal separation",
-    detail: "Isolates vocals for hum search and transcription.",
+    detail:
+      "Isolates vocals for hum search and transcription, and for karaoke stems when they are on.",
   },
   {
     name: "Essentia MELODIA",

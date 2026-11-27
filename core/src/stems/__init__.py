@@ -1,0 +1,1 @@
+"""Karaoke stems queries (``store``)."""

@@ -323,6 +323,16 @@ class Analysis:
         return _run_fa_kara(self._audio(digest), text, language, source_lines or [])
 
     @modal.method()
+    def karaoke_stems(self, digest: str, bitrate_kbps: int, settings: dict[str, object]):
+        """One track's karaoke stems file and duration (resident Roformer, then Opus)."""
+        from worker.media.roformer import using
+        from worker.stems.pipeline import encode_stems
+
+        self._adopt(settings)
+        with using(self._separator()):
+            return encode_stems(self._audio(digest), bitrate_kbps)
+
+    @modal.method()
     def voice(self, digest: str, settings: dict[str, object]):
         """Voice and vocal-gender evidence for one track."""
         from worker.voice.pipeline import classify_track

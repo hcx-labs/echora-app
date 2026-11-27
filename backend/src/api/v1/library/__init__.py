@@ -17,6 +17,7 @@ from backend.api.v1.library.track_audio_descriptors import TrackAudioDescriptors
 from backend.api.v1.library.track_audio_profile import TrackAudioProfile
 from backend.api.v1.library.track_audio_quality import TrackAudioQuality
 from backend.api.v1.library.track_info import TrackInfoEndpoint
+from backend.api.v1.library.track_karaoke_stems import TrackKaraokeStems
 from backend.api.v1.library.track_lyrics import TrackLyricsEndpoint
 from backend.api.v1.library.track_lyrics_status import TrackLyricsStatus
 from backend.api.v1.library.track_lyrics_update import TrackLyricsUpdate
@@ -41,6 +42,7 @@ CATEGORY = Category(
         TrackWaveform,
         TrackVisualFeatures,
         TrackMotionArtwork,
+        TrackKaraokeStems,
         TrackLyricsEndpoint,
         TrackLyricsUpdate,
         TrackLyricsStatus,

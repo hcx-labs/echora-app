@@ -68,6 +68,8 @@ type Settings = {
     transcription_modal_enabled: boolean;
     karaoke_modal_enabled: boolean;
     hum_modal_enabled: boolean;
+    karaoke_stems_processing_enabled: boolean;
+    karaoke_stems_modal_enabled: boolean;
     huggingface_account: string | null;
     has_huggingface_token: boolean;
   };

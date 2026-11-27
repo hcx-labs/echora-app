@@ -18,6 +18,7 @@ per-song endpoints answer 404 for songs outside the user's library (except `simi
 | `GET /tracks/{id}/waveform` | `track_waveform.py` |
 | `GET /tracks/{id}/visual-features` | `track_visual_features.py` |
 | `GET /tracks/{id}/motion-artwork` | `track_motion_artwork.py` (the video is `/media/motion-artwork/<id>.mp4`) |
+| `GET /tracks/{id}/karaoke-stems` | `track_karaoke_stems.py` (the audio is `/media/karaoke-stems/<id>.webm`) |
 | `GET /tracks/{id}/lyrics` | `track_lyrics.py` |
 | `PUT /tracks/{id}/lyrics` | `track_lyrics_update.py` |
 | `PUT /tracks/{id}/lyrics/status` | `track_lyrics_status.py` |

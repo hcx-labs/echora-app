@@ -31,6 +31,8 @@ SWITCH_COLUMNS = frozenset(
         "hum_modal_enabled",
         "transcription_processing_enabled",
         "transcription_modal_enabled",
+        "karaoke_stems_processing_enabled",
+        "karaoke_stems_modal_enabled",
     }
 )
 
@@ -45,6 +47,7 @@ def model_switches(db: Connection) -> dict[str, Any] | None:
         """SELECT karaoke_processing_enabled, hum_processing_enabled,
                   transcription_processing_enabled, karaoke_modal_enabled,
                   hum_modal_enabled, transcription_modal_enabled,
+                  karaoke_stems_processing_enabled, karaoke_stems_modal_enabled,
                   hf_token_account, hf_token_encrypted IS NOT NULL AS has_huggingface_token
            FROM analysis_settings WHERE singleton=true""",
     )

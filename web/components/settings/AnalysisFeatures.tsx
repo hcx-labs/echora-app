@@ -11,7 +11,7 @@ import { SettingsNotice } from "./SettingsNotice";
 import { Notice } from "../ui/notice";
 import styles from "./SettingsView.module.css";
 
-type Feature = "transcription" | "karaoke" | "hum";
+type Feature = "transcription" | "karaoke" | "karaoke_stems" | "hum";
 type Location = "local" | "modal";
 type Models = {
   transcription_processing_enabled: boolean;
@@ -20,12 +20,15 @@ type Models = {
   transcription_modal_enabled: boolean;
   karaoke_modal_enabled: boolean;
   hum_modal_enabled: boolean;
+  karaoke_stems_processing_enabled: boolean;
+  karaoke_stems_modal_enabled: boolean;
   huggingface_account: string | null;
   has_huggingface_token: boolean;
 };
 const featureNames: Record<Feature, string> = {
   transcription: "AI lyrics generation",
   karaoke: "Karaoke timing",
+  karaoke_stems: "Karaoke stems",
   hum: "Query by humming",
 };
 
@@ -57,8 +60,10 @@ export default function AnalysisFeatures() {
   const [features, setFeatures] = useState<Record<Feature, Record<Location, boolean>>>({
     transcription: { local: false, modal: false },
     karaoke: { local: true, modal: true },
+    karaoke_stems: { local: false, modal: false },
     hum: { local: true, modal: true },
   });
+  const [stemsUsage, setStemsUsage] = useState<{ complete: number; bytes: number } | null>(null);
 
   useEffect(() => {
     api<{ models: Models }>("/settings")
@@ -73,6 +78,10 @@ export default function AnalysisFeatures() {
             local: models.karaoke_processing_enabled,
             modal: models.karaoke_modal_enabled,
           },
+          karaoke_stems: {
+            local: models.karaoke_stems_processing_enabled,
+            modal: models.karaoke_stems_modal_enabled,
+          },
           hum: { local: models.hum_processing_enabled, modal: models.hum_modal_enabled },
         });
         setLoaded(true);
@@ -86,6 +95,9 @@ export default function AnalysisFeatures() {
         setMotionArtwork({ enabled, generate_during_sync, generate_on_modal }),
       )
       .catch(() => setMotionArtwork(null));
+    api<{ complete: number; bytes: number }>("/settings/models/karaoke-stems")
+      .then(setStemsUsage)
+      .catch(() => setStemsUsage(null));
   }, []);
 
   function fail(title: string, reason: unknown) {
@@ -149,7 +161,8 @@ export default function AnalysisFeatures() {
     const name = featureNames[feature];
     setBusy(true);
     try {
-      const result = await api<{ pending?: number }>(`/settings/models/${feature}`, {
+      const path = feature.replace("_", "-");
+      const result = await api<{ pending?: number }>(`/settings/models/${path}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ enabled: next, location }),
@@ -198,6 +211,18 @@ export default function AnalysisFeatures() {
         modal={features.karaoke.modal}
         disabled={busy}
         onChange={(location, next) => saveFeature("karaoke", location, next)}
+      />
+      <LocationToggles
+        label="Karaoke stems"
+        description={`Store each song's separated vocals and instrumental (Opus, about 10 MB per song) so the Stage player can turn the singer down. Needs persistent storage for ECHORA_KARAOKE_STEMS_DIR. Off by default.${
+          stemsUsage?.complete
+            ? ` ${stemsUsage.complete} songs stored, ${(stemsUsage.bytes / 1e9).toFixed(1)} GB.`
+            : ""
+        }`}
+        local={features.karaoke_stems.local}
+        modal={features.karaoke_stems.modal}
+        disabled={busy}
+        onChange={(location, next) => saveFeature("karaoke_stems", location, next)}
       />
       <LocationToggles
         label="Query by humming"

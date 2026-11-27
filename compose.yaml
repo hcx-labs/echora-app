@@ -87,6 +87,8 @@ services:
       HF_HUB_OFFLINE: "1"
       # Generated motion artwork videos, kept apart from model storage.
       ECHORA_MOTION_ARTWORK_DIR: /motion-artwork
+      # Karaoke stems (encoded vocals + instrumental per song). Durable, not a cache.
+      ECHORA_KARAOKE_STEMS_DIR: /karaoke-stems
     volumes: &analysis-volumes
       - ${MUSIC_LIBRARY_PATH:-./testdata/music}:/music:ro
       - ./data:/data
@@ -94,6 +96,8 @@ services:
       - ./data/models/torch:/models/torch
       # Generated motion artwork videos, written by the analysis worker.
       - ${ECHORA_MOTION_ARTWORK_PATH:-./data/motion-artwork}:/motion-artwork
+      # Karaoke stems, written by the analysis worker and served by the backend.
+      - ${ECHORA_KARAOKE_STEMS_PATH:-./data/karaoke-stems}:/karaoke-stems
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

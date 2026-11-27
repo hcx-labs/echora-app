@@ -16,6 +16,7 @@ import {
   type VisualFeatureTimeline,
 } from "./visualFeatures";
 import { mediaUrl } from "../media/mediaOrigin";
+import { StemMixer, stemsSupported } from "./karaokeStems";
 import { SESSION_EXPIRED_EVENT } from "../session/sessionUser";
 
 export type PlayerTrack = {
@@ -89,8 +90,25 @@ export type MelodyPreview = {
   points: { time_seconds: number; pitch: number | null }[];
 };
 
+/** The Stage player's karaoke stems: the song's vocals and instrumental, remixed live. */
+export type KaraokeStemsState = {
+  /** The browser can play and remix the stems file. */
+  supported: boolean;
+  /** The current song has stems. */
+  available: boolean;
+  /** The listener wants stems (kept across songs and visits). */
+  enabled: boolean;
+  /** The player is streaming the stems now, not the original song. */
+  playing: boolean;
+  /** -1 vocals only, 0 the full song, 1 instrumental only. */
+  balance: number;
+  setEnabled: (value: boolean) => void;
+  setBalance: (value: number) => void;
+};
+
 type PlayerState = {
   track: PlayerTrack | null;
+  karaokeStems: KaraokeStemsState;
   audioQuality: AudioQuality | null;
   lyrics: PlayerLyrics | null;
   lyricsLoading: boolean;
@@ -121,6 +139,25 @@ type PlayerState = {
 
 const PlayerContext = createContext<PlayerState | null>(null);
 const volumeStorageKey = "echora:volume";
+const stemsEnabledStorageKey = "echora:karaoke-stems";
+const stemsBalanceStorageKey = "echora:karaoke-stems-balance";
+// Waiting longer than this for the stems lookup plays the original song instead.
+const STEMS_LOOKUP_TIMEOUT_MS = 3000;
+
+function readStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function writeStorage(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* storage may be unavailable */
+  }
+}
 
 const rgb = (color: [number, number, number]) => `rgb(${color.join(" ")})`;
 
@@ -311,12 +348,36 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [muted, setMuted] = useState(false);
   const [volume, setVolumeState] = useState(1);
   const [expanded, setExpanded] = useState(false);
+  const stemMixer = useRef<StemMixer | null>(null);
+  const stemsEnabledRef = useRef(false);
+  const stemsRef = useRef<{ trackId: string; url: string } | null>(null);
+  // Known after mount: the server render has no Audio to ask.
+  const [stemsSupport, setStemsSupport] = useState(false);
+  const [stems, setStems] = useState<{ trackId: string; url: string } | null>(null);
+  const [stemsEnabled, setStemsEnabledState] = useState(false);
+  const [stemsBalance, setStemsBalanceState] = useState(1);
+  const [stemsPlaying, setStemsPlaying] = useState(false);
   const [queue, setQueue] = useState<PlayerTrack[]>([]);
   const [queueIndex, setQueueIndex] = useState(-1);
 
   useEffect(() => {
     const player = new Audio();
     audio.current = player;
+    const mixer = new StemMixer(player);
+    stemMixer.current = mixer;
+    const storedBalance = Number(readStorage(stemsBalanceStorageKey));
+    const balance =
+      readStorage(stemsBalanceStorageKey) !== null && Number.isFinite(storedBalance)
+        ? Math.min(1, Math.max(-1, storedBalance))
+        : 1;
+    mixer.setBalance(balance);
+    stemsEnabledRef.current = readStorage(stemsEnabledStorageKey) === "true";
+    const supported = stemsSupported();
+    queueMicrotask(() => {
+      setStemsSupport(supported);
+      setStemsBalanceState(balance);
+      setStemsEnabledState(stemsEnabledRef.current);
+    });
     const storedVolume = Number(localStorage.getItem(volumeStorageKey));
     if (localStorage.getItem(volumeStorageKey) !== null && Number.isFinite(storedVolume)) {
       player.volume = Math.min(1, Math.max(0, storedVolume));
@@ -374,6 +435,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setLyrics(null);
       setLyricsLoading(false);
       setAudioQuality(null);
+      stemsRef.current = null;
+      setStems(null);
+      setStemsPlaying(false);
       setWaveformData(null);
       setCurrentTime(0);
       setDuration(0);
@@ -430,6 +494,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
     const ready = () => setBuffering(false);
     const started = () => {
+      mixer.resume();
       window.dispatchEvent(new CustomEvent("echora:playback-state", { detail: true }));
       setPlaying(true);
       setBuffering(false);
@@ -639,11 +704,98 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {});
     startAnalysis();
-    player.src = streamUrlForQuality(next.streamUrl, streamQuality);
     setTrack(next);
     setCurrentTime(0);
     setDuration(next.durationSeconds || 0);
+    stemsRef.current = null;
+    setStems(null);
+    const lookup = stemsSupported() ? lookUpStems(next, session) : null;
+    if (lookup && stemsEnabledRef.current) {
+      // Start on the stems rather than switching a moment into the song; the previous song
+      // stops meanwhile.
+      player.pause();
+      lookup.then((url) => {
+        if (playbackSessionRef.current !== session || trackRef.current?.id !== next.id) return;
+        applySource(next, url);
+        player.play().catch(() => setPlaying(false));
+      });
+      return;
+    }
+    applySource(next, null);
     player.play().catch(() => setPlaying(false));
+  }
+
+  /** The current song's stems URL, or null; also records whether the song has stems. */
+  function lookUpStems(next: PlayerTrack, session: number): Promise<string | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), STEMS_LOOKUP_TIMEOUT_MS);
+    return fetch(`/api/v1/library/tracks/${encodeURIComponent(next.id)}/karaoke-stems`, {
+      signal: controller.signal,
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
+        const url =
+          body?.track_id === next.id && body.available && typeof body.url === "string"
+            ? (body.url as string)
+            : null;
+        if (url && playbackSessionRef.current === session && trackRef.current?.id === next.id) {
+          stemsRef.current = { trackId: next.id, url };
+          setStems(stemsRef.current);
+        }
+        return url;
+      })
+      .catch(() => null)
+      .finally(() => clearTimeout(timeout));
+  }
+
+  /** Point the player at the stems (a URL) or the original song (null). With ``resume``, keep
+   * the position and play state, for a switch in the middle of the song. */
+  function applySource(
+    next: PlayerTrack,
+    stemsUrl: string | null,
+    resume?: { time: number; play: boolean },
+  ) {
+    const player = audio.current;
+    const mixer = stemMixer.current;
+    if (!player || !mixer) return;
+    // Route first: building the graph sets the CORS mode the new source loads with.
+    if (stemsUrl || mixer.active) mixer.route(Boolean(stemsUrl));
+    player.src = stemsUrl
+      ? mediaUrl(stemsUrl)
+      : streamUrlForQuality(next.streamUrl, readPlaybackPreferences().quality);
+    setStemsPlaying(Boolean(stemsUrl));
+    if (!resume) return;
+    const session = playbackSessionRef.current;
+    player.addEventListener(
+      "loadedmetadata",
+      () => {
+        if (playbackSessionRef.current !== session || trackRef.current?.id !== next.id) return;
+        player.currentTime = resume.time;
+        if (resume.play) player.play().catch(() => setPlaying(false));
+      },
+      { once: true },
+    );
+  }
+
+  function setStemsEnabled(value: boolean) {
+    stemsEnabledRef.current = value;
+    setStemsEnabledState(value);
+    writeStorage(stemsEnabledStorageKey, String(value));
+    const player = audio.current;
+    const current = trackRef.current;
+    const available = stemsRef.current?.trackId === current?.id ? stemsRef.current : null;
+    if (!player || !current || !available || value === stemsPlaying) return;
+    applySource(current, value ? available.url : null, {
+      time: player.currentTime || 0,
+      play: !player.paused,
+    });
+  }
+
+  function setStemsBalance(value: number) {
+    const next = Math.min(1, Math.max(-1, value));
+    stemMixer.current?.setBalance(next);
+    setStemsBalanceState(next);
+    writeStorage(stemsBalanceStorageKey, String(next));
   }
   function activateQueueIndex(index: number) {
     const nextTrack = queueRef.current[index];
@@ -793,6 +945,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     <PlayerContext.Provider
       value={{
         track,
+        karaokeStems: {
+          supported: stemsSupport,
+          available: Boolean(stems && stems.trackId === track?.id),
+          enabled: stemsEnabled,
+          playing: stemsPlaying,
+          balance: stemsBalance,
+          setEnabled: setStemsEnabled,
+          setBalance: setStemsBalance,
+        },
         waveform,
         melody,
         audioQuality,

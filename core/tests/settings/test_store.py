@@ -22,6 +22,8 @@ def db():
             hum_modal_enabled boolean NOT NULL DEFAULT true,
             transcription_processing_enabled boolean NOT NULL DEFAULT false,
             transcription_modal_enabled boolean NOT NULL DEFAULT false,
+            karaoke_stems_processing_enabled boolean NOT NULL DEFAULT false,
+            karaoke_stems_modal_enabled boolean NOT NULL DEFAULT false,
             karaoke_bound_to_synced_lines boolean NOT NULL DEFAULT true,
             hf_token_account text, hf_token_encrypted bytea,
             updated_at timestamptz)""")
@@ -36,6 +38,8 @@ def test_switches_start_unset_and_save_one_column(db):
     switches = store.model_switches(db)
     assert switches["transcription_modal_enabled"] is True
     assert switches["has_huggingface_token"] is False
+    assert switches["karaoke_stems_processing_enabled"] is False
+    assert switches["karaoke_stems_processing_enabled"] is False
     assert store.transcription_enabled(db) is True
     bound = db.execute("SELECT karaoke_bound_to_synced_lines FROM analysis_settings").fetchone()
     assert bound == (True,)

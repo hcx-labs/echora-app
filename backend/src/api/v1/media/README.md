@@ -8,6 +8,7 @@ belong to the signed-in user (404 otherwise).
 | `GET /connections/{id}/stream/{song_id}` | `stream.py` | The song, transcoded by `quality` (`original`, `320`, `120`), with range requests |
 | `GET /connections/{id}/cover/{cover_id}` | `cover.py` | Cover art at `size` (64 to 1600 px) |
 | `GET /motion-artwork/{artwork_id}.mp4` | `motion_artwork.py` | A motion artwork loop for a cover in the user's library (immutable) |
+| `GET /karaoke-stems/{stems_id}.webm` | `karaoke_stems.py` | A song's karaoke stems (4-channel Opus: vocals, then instrumental), with range requests (immutable) |
 | `POST /scrobble` | `scrobble.py` | Reports playback to Navidrome; 204, or a bare 502 the player ignores |
 
 Covers, and streams requested with `cache=player`, go through the Redis media cache
