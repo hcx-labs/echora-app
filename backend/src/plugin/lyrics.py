@@ -13,6 +13,7 @@ from backend.plugin.scope import library_namespace
 from core.db.connection import connect
 from core.lyrics import store as lyrics
 from core.lyrics.backing import BACKING_VOICE, separate_text, separate_voices, tag_bracketed_backing
+from core.lyrics.smoothing import smooth_karaoke
 from core.lyrics.sources import lyrics_paused
 from core.lyrics.translations import source_checksum
 from core.plugin import store
@@ -233,6 +234,21 @@ def lrc(lines):
     return "\n".join(result)
 
 
+def smoothed(row, profile):
+    """The row with its karaoke syllables smoothed per the profile's karaoke switches."""
+    if not row.get("karaoke_lines"):
+        return row
+    return {
+        **row,
+        "karaoke_lines": smooth_karaoke(
+            row["karaoke_lines"],
+            close_gaps=profile.karaoke_close_gaps,
+            even_pacing=profile.karaoke_even_pacing,
+            min_syllable=profile.karaoke_min_syllable,
+        ),
+    }
+
+
 def lyrics_response(row, translations, profile):
     if not row or not row.get("text") or not profile.serve_lyrics:
         return {"lyrics": []}
@@ -241,6 +257,7 @@ def lyrics_response(row, translations, profile):
     if not re.fullmatch(r"[a-zA-Z0-9-]{1,35}", language):
         language = "und"
     if profile.lyrics_format == "ttml":
+        row = smoothed(row, profile)
         return {
             "lyrics": [
                 {

@@ -31,6 +31,10 @@ class RankingProfile(BaseModel):
     serve_lyrics: bool = True
     include_translations: bool = True
     lyrics_format: Literal["ttml", "lrc"] = "ttml"
+    # Karaoke smoothing inside words (core.lyrics.smoothing), applied to TTML syllable timing.
+    karaoke_close_gaps: bool = False
+    karaoke_even_pacing: bool = False
+    karaoke_min_syllable: bool = False
     key_expiry_days: int = Field(default=90, ge=1, le=3650)
 
 

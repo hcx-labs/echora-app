@@ -41,6 +41,9 @@ class PluginSettingsView(ResponseModel):
     serve_lyrics: bool
     include_translations: bool
     lyrics_format: str
+    karaoke_close_gaps: bool
+    karaoke_even_pacing: bool
+    karaoke_min_syllable: bool
     key_expiry_days: int
     enabled: bool
     connection_id: uuid.UUID | None

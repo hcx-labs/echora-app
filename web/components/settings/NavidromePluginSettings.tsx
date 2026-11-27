@@ -30,6 +30,9 @@ type Profile = {
   serve_lyrics: boolean;
   include_translations: boolean;
   lyrics_format: "ttml" | "lrc";
+  karaoke_close_gaps: boolean;
+  karaoke_even_pacing: boolean;
+  karaoke_min_syllable: boolean;
 };
 type Settings = Profile & { keys: Key[]; lyrics_paused: boolean };
 type GeneratedKey = { id: string; secret: string; expires_at: string };
@@ -44,6 +47,9 @@ const initial: Profile = {
   serve_lyrics: true,
   include_translations: true,
   lyrics_format: "ttml",
+  karaoke_close_gaps: false,
+  karaoke_even_pacing: false,
+  karaoke_min_syllable: false,
 };
 const endpoint = "/api/v1/settings/integrations/navidrome";
 
@@ -343,6 +349,27 @@ export default function NavidromePluginSettings({ connectionId }: { connectionId
               <ChoiceItem value="lrc">Line timing and language variants (LRC)</ChoiceItem>
             </Choice>
           </SettingRow>
+          <Toggle
+            label="Close gaps inside words"
+            description="Each syllable runs until the next one in its word starts, so the highlight does not pause and jump mid-word."
+            checked={profile.karaoke_close_gaps}
+            disabled={disabled || lyricsOff || profile.lyrics_format !== "ttml"}
+            onChange={(next) => update("karaoke_close_gaps", next)}
+          />
+          <Toggle
+            label="Even out uneven words"
+            description="When one syllable of a word is far longer than another and it is not the held last syllable, share the word's time out by letters."
+            checked={profile.karaoke_even_pacing}
+            disabled={disabled || lyricsOff || profile.lyrics_format !== "ttml"}
+            onChange={(next) => update("karaoke_even_pacing", next)}
+          />
+          <Toggle
+            label="Minimum syllable length"
+            description="Syllables shorter than 100 ms borrow time from their neighbours in the word, so they do not flash past."
+            checked={profile.karaoke_min_syllable}
+            disabled={disabled || lyricsOff || profile.lyrics_format !== "ttml"}
+            onChange={(next) => update("karaoke_min_syllable", next)}
+          />
         </fieldset>
 
         <div className="flex justify-end">
