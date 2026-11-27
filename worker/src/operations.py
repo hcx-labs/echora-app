@@ -30,6 +30,7 @@ from worker.media.preprocessing import preprocessing_session
 from worker.stages import (
     AUDIO_PROFILES,
     KARAOKE,
+    KARAOKE_STEMS,
     LIBRARY,
     LYRICS,
     MELODY,
@@ -59,7 +60,16 @@ class Operation:
     """A parent job expands into batches; otherwise the parent runs the stages itself."""
 
 
-SONG_STAGES = (LIBRARY, LYRICS, TRANSLATIONS, THEMES, KARAOKE, VOICE, MOTION_ARTWORK)
+SONG_STAGES = (
+    LIBRARY,
+    LYRICS,
+    TRANSLATIONS,
+    THEMES,
+    KARAOKE,
+    KARAOKE_STEMS,
+    VOICE,
+    MOTION_ARTWORK,
+)
 
 OPERATIONS: dict[str, Operation] = {
     "navidrome_sync": Operation(SONG_STAGES),

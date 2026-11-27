@@ -22,6 +22,7 @@ test("session expiry clears account data, stops audio, and invalidates pending w
     paletteRef: ref({ accent: [1, 2, 3] }), paletteTrackRef: ref("old"),
     visualRequest: ref({ abort: () => calls.push("abort") }), visualFeatures: ref({}),
     listenedRef: ref(10), announcedRef: ref("old"), analysisFrame: ref(12),
+    stemsRef: ref({ trackId: "old", url: "/media/karaoke-stems/x.webm" }),
     player: { pause: () => calls.push("pause"), removeAttribute: value => calls.push(value), load: () => calls.push("load") },
     cancelAnimationFrame: value => calls.push(value), resetVisuals: () => calls.push("reset"),
     publishPlaybackTime: value => state.time = value, publishPalette: value => state.palette = value,
@@ -30,7 +31,7 @@ test("session expiry clears account data, stops audio, and invalidates pending w
     hasMediaSession: () => true,
     navigator: { mediaSession: { metadata: {}, playbackState: "playing", setPositionState: () => calls.push("position") } },
   };
-  for (const name of ["Track", "Queue", "QueueIndex", "Lyrics", "LyricsLoading", "AudioQuality", "WaveformData", "CurrentTime", "Duration", "Buffered", "Playing", "Buffering", "Expanded"]) {
+  for (const name of ["Track", "Queue", "QueueIndex", "Lyrics", "LyricsLoading", "AudioQuality", "Stems", "StemsPlaying", "WaveformData", "CurrentTime", "Duration", "Buffered", "Playing", "Buffering", "Expanded"]) {
     context[`set${name}`] = value => state[name] = value;
   }
   vm.runInNewContext(`(() => {${handler[1]}})()`, context);
@@ -43,7 +44,9 @@ test("session expiry clears account data, stops audio, and invalidates pending w
   assert.equal(context.visualRequest.current, null);
   assert.equal(context.visualFeatures.current, null);
   assert.equal(context.analysisFrame.current, 0);
-  for (const name of ["Track", "Lyrics", "AudioQuality", "WaveformData"]) assert.equal(state[name], null);
+  for (const name of ["Track", "Lyrics", "AudioQuality", "Stems", "WaveformData"]) assert.equal(state[name], null);
+  assert.equal(context.stemsRef.current, null);
+  assert.equal(state.StemsPlaying, false);
   for (const name of ["Playing", "Buffering", "Expanded", "LyricsLoading"]) assert.equal(state[name], false);
   assert.equal(state.Queue.length, 0);
   assert.equal(state.time, 0);

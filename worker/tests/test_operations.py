@@ -182,7 +182,16 @@ def test_stage_order_and_summary_keys_are_stable():
     from worker.operations import OPERATIONS
 
     keys = {name: [stage.key for stage in op.stages] for name, op in OPERATIONS.items()}
-    sync = ["library", "lyrics", "translations", "themes", "karaoke", "voice", "motion_artwork"]
+    sync = [
+        "library",
+        "lyrics",
+        "translations",
+        "themes",
+        "karaoke",
+        "karaoke_stems",
+        "voice",
+        "motion_artwork",
+    ]
     assert keys["navidrome_sync"] == keys["import"] == sync
     assert keys["lyrics_backfill"] == ["lyrics", "translations", "themes", "karaoke"]
     assert keys["karaoke_backfill"] == ["lyrics", "karaoke"]

@@ -15,6 +15,8 @@ FEATURES = {
     "transcription": ("transcription_processing_enabled", "transcription_modal_enabled", False),
     "karaoke": ("karaoke_processing_enabled", "karaoke_modal_enabled", True),
     "hum": ("hum_processing_enabled", "hum_modal_enabled", True),
+    # Off until an administrator gives the stems a persistent volume and turns them on.
+    "karaoke_stems": ("karaoke_stems_processing_enabled", "karaoke_stems_modal_enabled", False),
 }
 
 

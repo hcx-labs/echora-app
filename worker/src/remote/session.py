@@ -374,6 +374,20 @@ class ModalSession:
             len(digests),
         )
 
+    def karaoke_stems(self, digests: list[str], bitrate_kbps: int) -> Iterator[object]:
+        """(stems file, duration) for uploaded tracks, separated and encoded on Modal."""
+        if not digests:
+            return iter(())
+        return _complete(
+            self.analysis.karaoke_stems.map(
+                digests,
+                kwargs={"bitrate_kbps": bitrate_kbps, "settings": self.settings},
+                order_outputs=True,
+                return_exceptions=True,
+            ),
+            len(digests),
+        )
+
     def voice(self, digests: list[str]) -> Iterator[object]:
         """(activations, vocal activity) for uploaded tracks."""
         return self._map(self.analysis.voice, digests)

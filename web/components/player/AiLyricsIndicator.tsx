@@ -66,8 +66,9 @@ export default function AiLyricsIndicator({
           </Item>
         )}
         {alignedKaraoke && (
-          <Item icon={<MicVocal />} title="Karaoke">
-            AI timed each word of the lyrics to the singing. Words can light up early or late.
+          <Item icon={<MicVocal />} title="Syllable timing">
+            AI timed each syllable of the lyrics to the singing. Syllables can light up early or
+            late.
           </Item>
         )}
         {languages.length > 0 && (

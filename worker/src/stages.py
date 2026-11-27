@@ -168,6 +168,15 @@ def _translation_processor() -> Processor:
     return TranslationProcessor()
 
 
+def _karaoke_stems(batch: Batch) -> dict[str, Any]:
+    from worker.stems.pipeline import KaraokeStemsProcessor
+
+    processor = KaraokeStemsProcessor()
+    summary = run_stage(processor, batch.context()).as_dict()
+    # Off at this location: the batch summary has no karaoke stems key.
+    return {"karaoke_stems": summary} if processor.enabled else {}
+
+
 # Audio analysis.
 
 
@@ -225,6 +234,8 @@ LYRICS = Stage("lyrics", _lyrics)
 TRANSLATIONS = processor_stage("translations", _translation_processor)
 THEMES = processor_stage("themes", _theme_processor)
 KARAOKE = processor_stage("karaoke", _karaoke_processor)
+# After karaoke, whose stem reading may already have separated the vocals into the cache.
+KARAOKE_STEMS = Stage("karaoke_stems", _karaoke_stems)
 VOICE = processor_stage("voice", _voice_processor)
 # Last in a sync, so earlier stages have released their models before ComfyUI needs the GPU.
 # Prompts come first, so no GPU (here or on Modal) idles while External AI writes them.

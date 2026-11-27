@@ -33,6 +33,7 @@ def planner(monkeypatch):
     monkeypatch.setattr(sync_plan, "plan_karaoke", karaoke)
     monkeypatch.setattr(sync_plan, "sources_needing_refresh", Mock(return_value=set()))
     monkeypatch.setattr(sync_plan, "sync_selection", Mock(return_value=set()))
+    monkeypatch.setattr(sync_plan, "songs_needing_stems", Mock(return_value=set()))
     return connection, cursor, audio, karaoke
 
 
@@ -188,3 +189,12 @@ def test_skip_hash_visits_known_tracks_for_metadata_and_translation(planner):
     ) == ["known", "new"]
     audio.assert_not_called()
     karaoke.assert_not_called()
+
+
+def test_entire_library_visits_songs_without_karaoke_stems(planner, monkeypatch):
+    connection, cursor, _, _ = planner
+    cursor.fetchall.side_effect = [[{"external_id": "a"}, {"external_id": "b"}], [], []]
+    stems = Mock(return_value={"a"})
+    monkeypatch.setattr(sync_plan, "songs_needing_stems", stems)
+    assert sync_plan.select_sync_tracks(connection, "https://music", ["a", "b"]) == ["a"]
+    assert stems.call_args.args[2] == ["a", "b"]
