@@ -170,8 +170,13 @@ export default function FullscreenPlayer() {
   );
   // Whether the audio-reactive backdrop is moving behind the panel (its blur only matters then).
   const [backdropMoving, setBackdropMoving] = useState(defaultPlaybackPreferences.wavesEnabled);
+  // Phones show the cover shader too when the viewer turned on visual effects on small screens.
+  const [smallScreenEffects, setSmallScreenEffects] = useState(
+    defaultPlaybackPreferences.smallScreenEffects,
+  );
   useEffect(() => {
     const accept = (value: PlaybackPreferences) => {
+      setSmallScreenEffects(Boolean(value.smallScreenEffects));
       const style = value.karaokeHighlightStyle;
       setHighlightStyle(style === "syllable" ? style : "lava");
       setBackdropMoving(value.wavesEnabled !== false);
@@ -394,8 +399,11 @@ export default function FullscreenPlayer() {
   const lineSinging = singingFlag === "1";
   // The line before is still being sung (backing vocals running past this line's start).
   const previousSinging = previousFlag === "1";
+  const stageBackdrop = staged || smallScreenEffects;
   const stageCover =
-    staged && player.track?.coverUrl ? sizedPlayerCoverArtUrl(player.track.coverUrl, 1200) : "";
+    stageBackdrop && player.track?.coverUrl
+      ? sizedPlayerCoverArtUrl(player.track.coverUrl, 1200)
+      : "";
   // The cover fades in once it has actually loaded (cached or fetched), never pops in half-drawn.
   const [stageCoverLoaded, setStageCoverLoaded] = useState("");
   useEffect(() => {
@@ -957,7 +965,7 @@ export default function FullscreenPlayer() {
           aria-label="Now playing"
         >
           <DialogTitle className="sr-only">Now playing</DialogTitle>
-          {staged && fullCover && (
+          {stageBackdrop && fullCover && (
             // Not keyed by track: the renderer crossfades from one cover to the next.
             <StageBackdrop
               cover={fullCover}

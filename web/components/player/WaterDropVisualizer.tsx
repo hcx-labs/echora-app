@@ -3,6 +3,7 @@
 import * as THREE from "three";
 import { useEffect, useRef } from "react";
 import { readPlaybackPreferences, type PlaybackPreferences } from "./playbackPreferences";
+import { SMALL_SCREEN_QUERY, effectsHiddenBySize } from "./smallScreen";
 import { neutralVisualFrame, type VisualFrame } from "./visualFeatures";
 import type { TrackPalette } from "./artworkPalette";
 import { WaterSurface, waterControls } from "./waterPhysics";
@@ -62,7 +63,7 @@ export default function WaterDropVisualizer() {
     const canvas = ref.current;
     if (!canvas) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const compact = window.matchMedia("(max-width:1199px), (max-height:719px)");
+    const compact = window.matchMedia(SMALL_SCREEN_QUERY);
     let preferences = readPlaybackPreferences();
     let renderer: THREE.WebGLRenderer | null = null;
     let failed = false,
@@ -238,7 +239,7 @@ export default function WaterDropVisualizer() {
         !failed &&
         preferences.wavesEnabled &&
         preferences.backdropPreset === "waterdrops" &&
-        !compact.matches &&
+        !effectsHiddenBySize(compact, preferences) &&
         !reduced.matches &&
         !document.hidden;
       canvas.style.display = next ? "block" : "none";

@@ -21,6 +21,8 @@ export type PlaybackPreferences = {
   animationSpeed: "slow" | "normal" | "fast";
   waveFrameRate: "30" | "60" | "uncapped";
   karaokeHighlightStyle: "syllable" | "lava";
+  /** Animated backdrops, visualizers and the Stage cover shader also below 1200 x 720. */
+  smallScreenEffects: boolean;
 };
 
 export const defaultPlaybackPreferences: PlaybackPreferences = {
@@ -34,6 +36,7 @@ export const defaultPlaybackPreferences: PlaybackPreferences = {
   animationSpeed: "normal",
   waveFrameRate: "30",
   karaokeHighlightStyle: "lava",
+  smallScreenEffects: false,
 };
 
 const storageKey = "echora:playback-preferences";

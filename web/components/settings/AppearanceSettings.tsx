@@ -88,8 +88,8 @@ export default function AppearanceSettings({
           htmlFor="settings-field-9"
           description={
             <>
-              All styles use the playing track and its album-derived color palette. Backdrops are
-              hidden in the compact mobile layout.
+              All styles use the playing track and its album-derived color palette. Below 1200 × 720
+              they are off unless Visual effects on small screens is on.
             </>
           }
         >
@@ -173,6 +173,14 @@ export default function AppearanceSettings({
               checked={playback.wavesEnabled}
 
               onChange={() => savePlayback({ ...playback, wavesEnabled: !playback.wavesEnabled })}
+            />
+            <Toggle
+              label="Visual effects on small screens"
+              description="Also show the animated backdrop, visualizers and the Stage cover shader on phones, tablets and windows smaller than 1200 × 720. Uses more battery and may run warm."
+              checked={playback.smallScreenEffects}
+              onChange={() =>
+                savePlayback({ ...playback, smallScreenEffects: !playback.smallScreenEffects })
+              }
             />
             <div>
               <SettingRow
