@@ -40,24 +40,45 @@ def request(
     )
 
 
-def request_library(
+# Songs of a pipeline whose stored output is of another revision than ``current`` (the %s).
+_OUTDATED = {
+    "karaoke": """EXISTS (SELECT 1 FROM karaoke_lyrics_variants kv
+        WHERE kv.track_id=ts.track_id AND NOT kv.bounded AND kv.model<>'navidrome'
+          AND kv.provenance->>'pipeline_revision' || ' ' || kv.model_revision <> %s)""",
+    "karaoke_stems": """EXISTS (SELECT 1 FROM karaoke_stems ks
+        WHERE ks.track_id=ts.track_id AND ks.recipe<>%s)""",
+    "translation": """EXISTS (SELECT 1 FROM lyric_translations lt
+        WHERE lt.track_id=ts.track_id AND lt.provenance='ai'
+          AND lt.model || ' ' || lt.prompt_revision <> %s)""",
+    "themes": """EXISTS (SELECT 1 FROM track_lyric_themes th
+        WHERE th.track_id=ts.track_id AND th.prompt_revision::text <> %s)""",
+}
+
+
+def request_outdated(
     db: Connection,
     library_id: uuid.UUID,
     external_ids: list[str],
-    pipelines: Iterable[str],
+    current: dict[str, str],
     requested_by: uuid.UUID | None = None,
 ) -> None:
-    """Ask the next sync to redo ``pipelines`` for every known song of the library's selection."""
-    for pipeline in pipelines:
+    """Ask the next sync to redo pipelines for the selection's songs of an older revision.
+
+    ``current`` is each pipeline's current revision, as stored: karaoke
+    ``"<pipeline revision> <model revision>"``, stems the recipe, translations ``"<model>
+    <prompt sha256>"``, themes the prompt revision. Songs without output are left to the sync.
+    """
+    for pipeline, revision in current.items():
         if pipeline not in BULK_PIPELINES:
             raise ValueError(f"Pipeline {pipeline!r} cannot be resynced for every song")
         db.execute(
-            """INSERT INTO track_resync_requests (track_id, pipeline, requested_by)
-               SELECT DISTINCT ts.track_id, %s, %s FROM track_sources ts
+            f"""INSERT INTO track_resync_requests (track_id, pipeline, requested_by)
+               SELECT DISTINCT ts.track_id, %s::text, %s::uuid FROM track_sources ts
                WHERE ts.source_type='subsonic' AND ts.library_id=%s AND ts.external_id=ANY(%s)
+                 AND {_OUTDATED[pipeline]}
                ON CONFLICT (track_id, pipeline) DO UPDATE
                SET requested_by=EXCLUDED.requested_by, requested_at=now()""",
-            (pipeline, requested_by, library_id, list(external_ids)),
+            (pipeline, requested_by, library_id, list(external_ids), revision),
         )
 
 

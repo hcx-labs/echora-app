@@ -39,7 +39,7 @@ class SyncRequest(PostRequest):
     resync: list[Literal["karaoke", "karaoke_stems", "translation", "themes"]] = Field(
         default_factory=list, max_length=4
     )
-    """Pipelines to redo for every song of the library, whatever their revision (full sync)."""
+    """Pipelines to redo for every song whose output is of an older revision (full sync)."""
 
 
 class TrackSummary(ResponseModel):

@@ -217,6 +217,34 @@ def _expand(job: dict, context, name: str, operation: Operation, batch: Batch, c
         raise jobs.JobCancelled()
 
 
+def current_revision(pipeline: str) -> str:
+    """A pipeline's current revision as its stored output records it (``request_outdated``)."""
+    if pipeline == "karaoke":
+        from worker.kara.pipeline import (
+            KARAOKE_PIPELINE_REVISION,
+            _stored_model_revision,
+            current_model_revision,
+        )
+
+        return f"{KARAOKE_PIPELINE_REVISION} {_stored_model_revision(current_model_revision())}"
+    if pipeline == "karaoke_stems":
+        from worker.stems.pipeline import stems_recipe
+
+        return stems_recipe()
+    if pipeline == "translation":
+        import hashlib
+
+        from core.lyrics.translations import load_settings
+
+        settings, _ = load_settings()
+        return f"{settings.model} {hashlib.sha256(settings.prompt.encode()).hexdigest()}"
+    if pipeline == "themes":
+        from worker.themes.pipeline import PROMPT_REVISION
+
+        return str(PROMPT_REVISION)
+    raise ValueError(f"Unknown pipeline {pipeline!r}")
+
+
 def _plan_sync(batch: Batch) -> list[str]:
     """The songs of a full scan that need processing; reconciles the user's library first."""
     from core.planning import store
@@ -235,14 +263,18 @@ def _plan_sync(batch: Batch) -> list[str]:
         relink_renumbered_sources(connection, batch.url, catalog)
         pipelines = [p for p in payload.get("resync") or () if p in resync.BULK_PIPELINES]
         if pipelines:
-            # "Resync every song" for these pipelines: the library's known songs get a request,
-            # so the selection below takes them whatever their revision.
+            # "Bring every song up to date" for these pipelines: songs whose output is of an
+            # older revision get a request, so the selection below takes them.
             library_id = store.library_with_namespace(
                 connection, uuid.uuid5(uuid.NAMESPACE_URL, batch.url.rstrip("/"))
             )
             if library_id is not None:
-                resync.request_library(
-                    connection, library_id, catalog_ids, pipelines, batch.user_id
+                resync.request_outdated(
+                    connection,
+                    library_id,
+                    catalog_ids,
+                    {p: current_revision(p) for p in pipelines},
+                    batch.user_id,
                 )
                 connection.commit()
         ids = select_sync_tracks(

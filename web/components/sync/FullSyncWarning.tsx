@@ -14,28 +14,29 @@ import {
   DialogFooter,
 } from "../ui/dialog";
 
-/** Pipelines a full sync can redo for every song, whatever their stored revision. */
+/** Pipelines a full sync can bring up to date for every song of an older revision. */
 export type ResyncPipeline = "karaoke" | "karaoke_stems" | "translation" | "themes";
 const PIPELINES: { key: ResyncPipeline; label: string; description: string }[] = [
   {
     key: "karaoke",
     label: "Karaoke alignment",
-    description: "Realign every song (fast for songs with a stored model reading).",
+    description: "Realign songs aligned by an older pipeline or model.",
   },
   {
     key: "karaoke_stems",
     label: "Karaoke stems",
-    description: "Separate and encode every song's vocals and instrumental again.",
+    description: "Separate and encode again the songs whose stems use an older recipe.",
   },
   {
     key: "translation",
     label: "Translations",
-    description: "Translate every song again; provider charges apply.",
+    description:
+      "Translate again the songs translated with another model or prompt; provider charges apply.",
   },
   {
     key: "themes",
     label: "Lyric themes",
-    description: "Describe every song's themes again; provider charges apply.",
+    description: "Describe again the songs described with an older prompt; provider charges apply.",
   },
 ];
 
@@ -78,11 +79,11 @@ export default function FullSyncWarning({ onClose, onConfirm }: Props) {
         </p>
         <fieldset className="grid gap-3 border-t border-border pt-4">
           <legend className="mb-1 text-[13px] font-medium text-foreground">
-            Redo for every song
+            Bring every song up to date
           </legend>
           <p className="-mt-1 text-[12px] leading-relaxed text-muted-foreground">
-            Whatever their current revision. To redo a single song, use Processing information in
-            its menu.
+            Redoes only songs made by an older revision; up-to-date songs are left alone. To redo a
+            single song regardless, use Processing information in its menu.
           </p>
           {PIPELINES.map((pipeline) => (
             <div key={pipeline.key} className="flex items-start gap-3">
