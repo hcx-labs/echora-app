@@ -28,3 +28,17 @@ def test_karaoke_planning_honours_requests_and_the_realign_switch():
 def test_a_stems_request_retries_a_failed_recipe():
     sql, _ = _executed(lambda db: stems.songs_without_stems(db, "library", ["a"], "recipe"))
     assert "r.pipeline='karaoke_stems'" in sql
+
+
+def test_every_known_song_of_the_selection_can_be_asked_for():
+    import pytest
+
+    from core.resync import store as resync
+
+    connection = MagicMock()
+    resync.request_library(connection, "library", ["a", "b"], ["karaoke", "themes"], "user")
+    calls = [call.args for call in connection.execute.call_args_list]
+    assert [params[0] for _, params in calls] == ["karaoke", "themes"]
+    assert calls[0][1] == ("karaoke", "user", "library", ["a", "b"])
+    with pytest.raises(ValueError):
+        resync.request_library(connection, "library", ["a"], ["transcription"])

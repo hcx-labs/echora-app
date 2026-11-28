@@ -11,6 +11,7 @@ belongs to the job envelope, not the payload.
 from __future__ import annotations
 
 import logging
+import uuid
 from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import Any
@@ -218,6 +219,8 @@ def _expand(job: dict, context, name: str, operation: Operation, batch: Batch, c
 
 def _plan_sync(batch: Batch) -> list[str]:
     """The songs of a full scan that need processing; reconciles the user's library first."""
+    from core.planning import store
+    from core.resync import store as resync
     from worker.planning.sync import select_sync_tracks
 
     payload = batch.payload
@@ -230,6 +233,18 @@ def _plan_sync(batch: Batch) -> list[str]:
     with connect() as connection:
         # A renumbered song keeps its analysis; it is not new work.
         relink_renumbered_sources(connection, batch.url, catalog)
+        pipelines = [p for p in payload.get("resync") or () if p in resync.BULK_PIPELINES]
+        if pipelines:
+            # "Resync every song" for these pipelines: the library's known songs get a request,
+            # so the selection below takes them whatever their revision.
+            library_id = store.library_with_namespace(
+                connection, uuid.uuid5(uuid.NAMESPACE_URL, batch.url.rstrip("/"))
+            )
+            if library_id is not None:
+                resync.request_library(
+                    connection, library_id, catalog_ids, pipelines, batch.user_id
+                )
+                connection.commit()
         ids = select_sync_tracks(
             connection,
             batch.url,

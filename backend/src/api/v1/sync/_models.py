@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -36,6 +36,10 @@ class SyncRequest(PostRequest):
     mode: str = Field(default="all", pattern="^(all|missing)$")
     compute: str | None = Field(default=None, pattern="^(local|modal)$")
     """Where model computation runs (docs/modal-compute.md); omitted uses the instance default."""
+    resync: list[Literal["karaoke", "karaoke_stems", "translation", "themes"]] = Field(
+        default_factory=list, max_length=4
+    )
+    """Pipelines to redo for every song of the library, whatever their revision (full sync)."""
 
 
 class TrackSummary(ResponseModel):

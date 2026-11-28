@@ -13,7 +13,7 @@ import { Notice } from "../ui/notice";
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from "../ui/table";
 import { Pane } from "../layout/pane";
 import { LoadingState } from "../ui/spinner";
-import FullSyncWarning from "./FullSyncWarning";
+import FullSyncWarning, { type ResyncPipeline } from "./FullSyncWarning";
 import { SidePanel } from "../layout/side-panel";
 import { SectionHeader } from "../layout/section-header";
 import { EmptyState } from "../layout/empty-state";
@@ -107,7 +107,7 @@ export default function SyncLibrary() {
     return () => window.clearTimeout(timer);
   }, [connectionId, terminal]);
 
-  async function start(verifyAudioHashes = true) {
+  async function start(verifyAudioHashes = true, resync: ResyncPipeline[] = []) {
     if (!connectionId || busy) return;
     setBusy(true);
     setStarting(true);
@@ -121,6 +121,7 @@ export default function SyncLibrary() {
             mode,
             verify_audio_hashes: verifyAudioHashes,
             compute: modalAvailable ? compute : "local",
+            ...(resync.length ? { resync } : {}),
           }),
         },
       );
@@ -558,9 +559,9 @@ export default function SyncLibrary() {
       {confirmFullSync && (
         <FullSyncWarning
           onClose={() => setConfirmFullSync(false)}
-          onConfirm={(verifyAudioHashes) => {
+          onConfirm={(verifyAudioHashes, resync) => {
             setConfirmFullSync(false);
-            void start(verifyAudioHashes);
+            void start(verifyAudioHashes, resync);
           }}
         />
       )}

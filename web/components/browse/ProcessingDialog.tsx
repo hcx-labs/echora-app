@@ -65,6 +65,100 @@ function Revision({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
+function Panel({
+  pipeline,
+  busy,
+  language,
+  setLanguage,
+  change,
+}: {
+  pipeline: Pipeline;
+  busy: string;
+  language: string;
+  setLanguage: (code: string) => void;
+  change: (pipeline: Pipeline, request: boolean) => Promise<void>;
+}) {
+  const requested = pipeline.requested;
+  const transcription = pipeline.key === "transcription";
+  return (
+    <>
+      <div className={styles.head}>
+        <h3 className={styles.label}>{pipeline.label}</h3>
+        <StatusBadge status={pipeline.status} />
+      </div>
+      {pipeline.detail && <p className={styles.detail}>{pipeline.detail}</p>}
+      <dl className={styles.revisions}>
+        <Revision label="Stored" value={pipeline.stored_revision} />
+        {pipeline.status === "outdated" || !pipeline.stored_revision ? (
+          <Revision label="Current" value={pipeline.current_revision} />
+        ) : null}
+      </dl>
+      {pipeline.translations && pipeline.translations.length > 0 && (
+        <ul className={styles.translations}>
+          {pipeline.translations.map((item) => (
+            <li key={`${item.source}:${item.target}`}>
+              <span>
+                {item.source === "mul" ? "Foreign lines" : languageName(item.source)} →{" "}
+                {languageName(item.target)}
+              </span>
+              <StatusBadge status={item.status} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {requested && (
+        <Notice tone="info" title="Resync on next sync">
+          {requested.options.language
+            ? `Transcribed in ${languageName(requested.options.language)} when the next sync reaches the song.`
+            : "The next sync, partial or full, redoes it."}
+        </Notice>
+      )}
+      {pipeline.resyncable && (
+        <div className={styles.actions}>
+          {transcription && !requested && (
+            <LanguagePicker
+              aria-label="Transcription language"
+              placeholder="Language to transcribe in"
+              value={language}
+              onChange={setLanguage}
+              className={styles.language}
+            />
+          )}
+          {requested ? (
+            <Button
+              variant="outline"
+              size="sm"
+              loading={busy === pipeline.key}
+              disabled={Boolean(busy)}
+              onClick={() => void change(pipeline, false)}
+            >
+              <X />
+              Withdraw resync
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              loading={busy === pipeline.key}
+              disabled={Boolean(busy) || (transcription && !language)}
+              onClick={() => void change(pipeline, true)}
+            >
+              <RotateCcw />
+              {transcription ? "Transcribe on next sync" : "Resync on next sync"}
+            </Button>
+          )}
+        </div>
+      )}
+      {transcription && pipeline.resyncable && !requested && (
+        <p className={styles.hint}>
+          Replaces the current lyrics with an AI transcription in this language when the sync
+          reaches the song. AI lyrics generation must be on in Settings.
+        </p>
+      )}
+    </>
+  );
+}
+
 const path = (trackId: string, pipeline = "") =>
   `/api/v1/library/tracks/${encodeURIComponent(trackId)}/processing${pipeline ? `/${pipeline}` : ""}`;
 
@@ -87,6 +181,11 @@ export default function ProcessingDialog({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [language, setLanguage] = useState("");
+  const [selected, setSelected] = useState("");
+  const current =
+    pipelines?.find((pipeline) => pipeline.key === selected) ??
+    pipelines?.find((pipeline) => pipeline.status === "outdated" || pipeline.status === "failed") ??
+    pipelines?.[0];
 
   useEffect(() => {
     if (!open) return;
@@ -167,90 +266,44 @@ export default function ProcessingDialog({
         {error && <Notice tone="error">{error}</Notice>}
         {!pipelines && !error && <LoadingState label="Loading processing information" />}
         {pipelines && (
-          <ul className={styles.list}>
-            {pipelines.map((pipeline) => {
-              const requested = pipeline.requested;
-              const transcription = pipeline.key === "transcription";
-              return (
-                <li key={pipeline.key} className={styles.item}>
-                  <div className={styles.head}>
-                    <span className={styles.label}>{pipeline.label}</span>
-                    <StatusBadge status={pipeline.status} />
-                    {requested && (
-                      <Badge variant="info">
-                        Resync on next sync
-                        {requested.options.language
-                          ? ` · ${languageName(requested.options.language)}`
-                          : ""}
-                      </Badge>
-                    )}
-                  </div>
-                  {pipeline.detail && <p className={styles.detail}>{pipeline.detail}</p>}
-                  <dl className={styles.revisions}>
-                    <Revision label="Stored" value={pipeline.stored_revision} />
-                    {pipeline.status === "outdated" || !pipeline.stored_revision ? (
-                      <Revision label="Current" value={pipeline.current_revision} />
-                    ) : null}
-                  </dl>
-                  {pipeline.translations && pipeline.translations.length > 0 && (
-                    <ul className={styles.translations}>
-                      {pipeline.translations.map((item) => (
-                        <li key={`${item.source}:${item.target}`}>
-                          <span>
-                            {item.source === "mul" ? "Foreign lines" : languageName(item.source)} →{" "}
-                            {languageName(item.target)}
-                          </span>
-                          <StatusBadge status={item.status} />
-                        </li>
-                      ))}
-                    </ul>
+          <div className={styles.layout}>
+            <div role="tablist" aria-orientation="vertical" className={styles.tabs}>
+              {pipelines.map((pipeline) => (
+                <button
+                  key={pipeline.key}
+                  type="button"
+                  role="tab"
+                  id={`processing-tab-${pipeline.key}`}
+                  aria-selected={pipeline.key === current?.key}
+                  aria-controls="processing-panel"
+                  className={styles.tab}
+                  onClick={() => setSelected(pipeline.key)}
+                >
+                  <span className={styles.dot} data-status={pipeline.status} aria-hidden="true" />
+                  <span className={styles.tabLabel}>{pipeline.label}</span>
+                  {pipeline.requested && (
+                    <RotateCcw className={styles.queued} aria-label="Resync queued" />
                   )}
-                  {pipeline.resyncable && (
-                    <div className={styles.actions}>
-                      {transcription && !requested && (
-                        <LanguagePicker
-                          aria-label="Transcription language"
-                          placeholder="Language to transcribe in"
-                          value={language}
-                          onChange={setLanguage}
-                          className={styles.language}
-                        />
-                      )}
-                      {requested ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          loading={busy === pipeline.key}
-                          disabled={Boolean(busy)}
-                          onClick={() => void change(pipeline, false)}
-                        >
-                          <X />
-                          Withdraw resync
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          loading={busy === pipeline.key}
-                          disabled={Boolean(busy) || (transcription && !language)}
-                          onClick={() => void change(pipeline, true)}
-                        >
-                          <RotateCcw />
-                          {transcription ? "Transcribe on next sync" : "Resync on next sync"}
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                  {transcription && pipeline.resyncable && !requested && (
-                    <p className={styles.hint}>
-                      Replaces the current lyrics with an AI transcription in this language when the
-                      sync reaches the song. AI lyrics generation must be on in Settings.
-                    </p>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+                </button>
+              ))}
+            </div>
+            {current && (
+              <section
+                id="processing-panel"
+                role="tabpanel"
+                aria-labelledby={`processing-tab-${current.key}`}
+                className={styles.panel}
+              >
+                <Panel
+                  pipeline={current}
+                  busy={busy}
+                  language={language}
+                  setLanguage={setLanguage}
+                  change={change}
+                />
+              </section>
+            )}
+          </div>
         )}
         {pipelines && (
           <Notice tone="info">

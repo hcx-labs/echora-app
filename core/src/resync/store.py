@@ -17,6 +17,8 @@ from psycopg.types.json import Jsonb
 from core.db.connection import fetch_all
 
 PIPELINES = ("transcription", "karaoke", "karaoke_stems", "translation", "themes")
+BULK_PIPELINES = ("karaoke", "karaoke_stems", "translation", "themes")
+"""The pipelines a full sync can redo for every song (a transcription needs a language)."""
 
 
 def request(
@@ -36,6 +38,27 @@ def request(
                requested_at=now()""",
         (track_id, pipeline, Jsonb(options or {}), requested_by),
     )
+
+
+def request_library(
+    db: Connection,
+    library_id: uuid.UUID,
+    external_ids: list[str],
+    pipelines: Iterable[str],
+    requested_by: uuid.UUID | None = None,
+) -> None:
+    """Ask the next sync to redo ``pipelines`` for every known song of the library's selection."""
+    for pipeline in pipelines:
+        if pipeline not in BULK_PIPELINES:
+            raise ValueError(f"Pipeline {pipeline!r} cannot be resynced for every song")
+        db.execute(
+            """INSERT INTO track_resync_requests (track_id, pipeline, requested_by)
+               SELECT DISTINCT ts.track_id, %s, %s FROM track_sources ts
+               WHERE ts.source_type='subsonic' AND ts.library_id=%s AND ts.external_id=ANY(%s)
+               ON CONFLICT (track_id, pipeline) DO UPDATE
+               SET requested_by=EXCLUDED.requested_by, requested_at=now()""",
+            (pipeline, requested_by, library_id, list(external_ids)),
+        )
 
 
 def cancel(db: Connection, track_id: uuid.UUID, pipeline: str) -> None:

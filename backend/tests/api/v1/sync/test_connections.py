@@ -212,3 +212,13 @@ def test_sync_endpoints_need_a_session(anonymous):
     assert anonymous.get(f"/api/v1/sync/connections/{uuid4()}/status").status_code == 401
     assert anonymous.get("/api/v1/sync/semantic-fusion").status_code == 401
     assert anonymous.post("/api/v1/sync/audio-profiles").status_code == 401
+
+
+def test_a_full_sync_can_redo_pipelines_for_every_song(client, monkeypatch, enqueue, owned):
+    monkeypatch.setattr(start, "compute_for", Mock(return_value="local"))
+    url = f"/api/v1/sync/connections/{uuid4()}"
+    body = {"mode": "all", "resync": ["themes", "karaoke", "karaoke"]}
+    assert client.post(url, json=body).status_code == 202
+    assert enqueue.call_args.kwargs["payload"]["resync"] == ["karaoke", "themes"]
+    # A transcription needs a language, so it is redone per song only.
+    assert client.post(url, json={"resync": ["transcription"]}).status_code == 422

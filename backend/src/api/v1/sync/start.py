@@ -38,5 +38,6 @@ class StartSync(Endpoint):
                 "mode": request.mode,
                 "verify_audio_hashes": request.verify_audio_hashes,
                 "compute": compute,
+                **({"resync": sorted(set(request.resync))} if request.resync else {}),
             },
         )

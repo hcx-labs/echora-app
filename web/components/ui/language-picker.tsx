@@ -190,9 +190,9 @@ export function LanguagePicker(props: Single | Multiple) {
               <span className="truncate text-subtle-foreground">{placeholder}</span>
             )}
             {!props.multiple && selected[0] && (
-              <span className="truncate">
-                {languageName(selected[0])}{" "}
-                <span className="text-subtle-foreground">{selected[0]}</span>
+              <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                <span className="truncate">{languageName(selected[0])}</span>
+                <span className="shrink-0 text-xs text-subtle-foreground">{selected[0]}</span>
               </span>
             )}
             {props.multiple &&
