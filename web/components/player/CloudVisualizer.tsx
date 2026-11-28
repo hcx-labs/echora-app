@@ -4,6 +4,7 @@ import type { VisualFrame } from "./visualFeatures";
 import * as THREE from "three";
 import { useEffect, useRef } from "react";
 import { readPlaybackPreferences, type PlaybackPreferences } from "./playbackPreferences";
+import { SMALL_SCREEN_QUERY, effectsHiddenBySize } from "./smallScreen";
 import { CloudResponse } from "./cloudResponse";
 import { cloudFragmentShader } from "./cloudShader";
 import { SongJourney } from "./songJourney";
@@ -14,7 +15,7 @@ export default function CloudVisualizer() {
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
-    const compact = window.matchMedia("(max-width:1199px), (max-height:719px)");
+    const compact = window.matchMedia(SMALL_SCREEN_QUERY);
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
     let preferences = readPlaybackPreferences();
     let renderer: THREE.WebGLRenderer | null = null;
@@ -125,7 +126,7 @@ export default function CloudVisualizer() {
         !failed &&
         preferences.wavesEnabled &&
         preferences.backdropPreset === "clouds" &&
-        !compact.matches &&
+        !effectsHiddenBySize(compact, preferences) &&
         !reduced.matches &&
         !document.hidden;
       canvas.style.display = next ? "block" : "none";

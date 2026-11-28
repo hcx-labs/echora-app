@@ -9,7 +9,7 @@
 
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BackdropPreset,
   PlaybackPreferences,
@@ -22,6 +22,7 @@ import CloudVisualizer from "../player/CloudVisualizer";
 import MeshGridVisualizer from "../player/MeshGridVisualizer";
 import LightningFallVisualizer from "../player/LightningFallVisualizer";
 import WaterDropVisualizer from "../player/WaterDropVisualizer";
+import { SMALL_SCREEN_QUERY, applySmallScreenEffects } from "../player/smallScreen";
 import styles from "./Backdrop.module.css";
 import { advanceWaveSpring } from "./waveSpring";
 import { SongJourney } from "../player/songJourney";
@@ -356,8 +357,12 @@ function presetScene(
 
 export default function Backdrop() {
   const backdropRef = useRef<HTMLDivElement>(null);
+  // Whether to draw below 1200 x 720 too (the viewer's choice); the loop restarts when it changes.
+  const [smallScreenEffects, setSmallScreenEffects] = useState(false);
   useEffect(() => {
     const apply = (preferences: PlaybackPreferences) => {
+      applySmallScreenEffects(preferences);
+      setSmallScreenEffects(Boolean(preferences.smallScreenEffects));
       const value = preferences.backdropOpacity;
       const opacity =
         typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0.5;
@@ -372,7 +377,7 @@ export default function Backdrop() {
   const sceneRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (window.matchMedia("(max-width: 1199px), (max-height: 719px)").matches) return;
+    if (!smallScreenEffects && window.matchMedia(SMALL_SCREEN_QUERY).matches) return;
     const maybeGlCanvas = glRef.current;
     const maybeSceneCanvas = sceneRef.current;
     if (!maybeGlCanvas || !maybeSceneCanvas) return;
@@ -646,7 +651,7 @@ export default function Backdrop() {
       window.removeEventListener("echora:track-palette", receivePalette);
       window.removeEventListener("echora:playback-preferences", receivePreferences);
     };
-  }, []);
+  }, [smallScreenEffects]);
 
   return (
     <div ref={backdropRef} className={styles.backdrop} aria-hidden="true">

@@ -5,6 +5,7 @@ import type { VisualFrame } from "./visualFeatures";
 import * as THREE from "three";
 import { useEffect, useRef } from "react";
 import { readPlaybackPreferences, type PlaybackPreferences } from "./playbackPreferences";
+import { SMALL_SCREEN_QUERY, effectsHiddenBySize } from "./smallScreen";
 import { SongJourney } from "./songJourney";
 import styles from "./LightningFallVisualizer.module.css";
 
@@ -59,7 +60,7 @@ export default function LightningFallVisualizer() {
     const canvas = ref.current;
     if (!canvas) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const compact = window.matchMedia("(max-width:1199px), (max-height:719px)");
+    const compact = window.matchMedia(SMALL_SCREEN_QUERY);
     let preferences = readPlaybackPreferences();
     let renderer: THREE.WebGLRenderer | null = null;
     const scene = new THREE.Scene();
@@ -179,7 +180,7 @@ export default function LightningFallVisualizer() {
         !failed &&
         preferences.wavesEnabled &&
         preferences.backdropPreset === "lightningfall" &&
-        !compact.matches &&
+        !effectsHiddenBySize(compact, preferences) &&
         !reduced.matches &&
         !document.hidden;
       canvas.style.display = next ? "block" : "none";
