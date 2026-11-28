@@ -107,3 +107,10 @@ class KaraConfig(EchoraConfig, env_prefix="ECHORA_KARA_"):
     )
     kill_grace_seconds: float = setting(5, gt=0, legacy="ECHORA_KARAOKE_KILL_GRACE_SECONDS")
     lock_poll_seconds: float = setting(0.25, gt=0, legacy="ECHORA_KARAOKE_LOCK_POLL_SECONDS")
+    readings_dir: str = setting(
+        "",
+        description=(
+            "Where each song's model reading is kept (about 20 MB a song); a song whose decoder "
+            "changed is then decoded from it, without separation or the model (blank: off)."
+        ),
+    )

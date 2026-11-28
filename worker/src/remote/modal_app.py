@@ -309,18 +309,22 @@ class Analysis:
         language: str | None,
         source_lines,
         settings: dict[str, object],
+        keep_reading: bool = False,
     ):
         """FA-Kara alignment of one track's lyrics on its full mix.
 
         With the stem reading the separated vocals come from the container's cache, which the
-        stage's separation phase (``prepare_vocals``) filled first.
+        stage's separation phase (``prepare_vocals``) filled first. ``keep_reading`` returns the
+        model's reading of the song with the result, for the worker to keep.
         """
         from worker.kara.pipeline import _run_fa_kara
 
         self._adopt(settings)
         # The aligner runs in a resident worker process; other models leave the GPU first.
         self._resident("fa_kara", lambda: None)
-        return _run_fa_kara(self._audio(digest), text, language, source_lines or [])
+        return _run_fa_kara(
+            self._audio(digest), text, language, source_lines or [], keep_reading=keep_reading
+        )
 
     @modal.method()
     def karaoke_stems(self, digest: str, bitrate_kbps: int, settings: dict[str, object]):

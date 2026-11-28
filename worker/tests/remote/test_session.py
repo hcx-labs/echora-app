@@ -340,10 +340,11 @@ def test_every_call_carries_the_exact_model_and_settings():
         "model": ("mert", "m-a-p/MERT-v1-95M", "rev"),
         "settings": compute_settings(),
     }
-    session.karaoke(["a"], ["text"], ["ja"], [[]])
+    session.karaoke(["a"], ["text"], ["ja"], [[]], keep_reading=True)
     args, kwargs = modal.analysis.karaoke.map.call_args
     assert args == (["a"], ["text"], ["ja"], [[]]) and kwargs["kwargs"] == {
-        "settings": compute_settings()
+        "settings": compute_settings(),
+        "keep_reading": True,
     }
     assert kwargs["order_outputs"] and kwargs["return_exceptions"]
 
@@ -574,7 +575,7 @@ def test_modal_batch_aligns_karaoke_remotely(monkeypatch):
     remote = Mock()
     remote.upload_audio.side_effect = lambda audio: sha256(audio).hexdigest()
     remote.prepare_vocals.side_effect = lambda digests, **artifacts: [None for _ in digests]
-    remote.karaoke.side_effect = lambda digests, texts, languages, lines: [
+    remote.karaoke.side_effect = lambda digests, texts, languages, lines, **_: [
         aligned,
         RuntimeError("failed"),
     ]
@@ -628,7 +629,7 @@ def test_modal_karaoke_skips_a_song_whose_vocals_could_not_be_separated(monkeypa
         RuntimeError("separation failed"),
         None,
     ]
-    remote.karaoke.side_effect = lambda digests, texts, languages, lines: [aligned]
+    remote.karaoke.side_effect = lambda digests, texts, languages, lines, **_: [aligned]
     context = ProcessingContext(
         remote=remote, user_id="user", library=("url", "user", "password"), track_ids=("a", "b")
     )
