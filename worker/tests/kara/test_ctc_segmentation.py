@@ -6,6 +6,7 @@ from worker.kara.aligner.decoder import (  # noqa: E402
     _decode_background_blocks,
     _inference_chunk_starts,
     _place_inline_backing,
+    with_backing_rest,
     with_stem_reading,
 )
 
@@ -385,6 +386,28 @@ def test_a_stem_a_frame_shorter_than_the_mix_is_read_as_far_as_it_goes():
 
     assert fused.shape == mix.shape
     assert torch.allclose(fused[28:], mix[28:])
+
+
+def test_the_lead_may_rest_only_through_a_sustained_backing_block():
+    # 20 ms frames. The lead head hears "a" throughout (it takes the backing singing for its own).
+    # The background head hears a 4 s answer block (frames 50-250), a 1 s echo (300-350) and a
+    # faint 4 s reading (400-600).
+    lead = _heard(700, [(1, 0, 700, 8.0)])
+    logits = torch.zeros(700, 4)
+    logits[:, 0] = 6.0
+    logits[50:250, 0], logits[50:250, 2] = 0.0, 8.0
+    logits[300:350, 0], logits[300:350, 2] = 0.0, 8.0
+    logits[400:600, 0] = 2.0  # P(voice) about 0.3
+    background = torch.log_softmax(logits, dim=-1)
+
+    rested = with_backing_rest(lead, background, blank=0, frame_shift=0.02)
+
+    assert torch.allclose(rested.exp().sum(dim=-1), torch.ones(700), atol=1e-5)
+    # Inside the block silence is as likely as the backing voice; outside it nothing changes.
+    assert (rested[60:240, 0].exp() > 0.45).all()
+    assert torch.allclose(rested[:40], lead[:40], atol=1e-4)
+    assert torch.allclose(rested[300:350], lead[300:350], atol=1e-4)
+    assert torch.allclose(rested[400:600], lead[400:600], atol=1e-4)
 
 
 def test_the_text_head_places_an_inline_backing_word_the_background_head_cannot_read():

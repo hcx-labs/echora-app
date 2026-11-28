@@ -564,6 +564,7 @@ def _run_fa_kara(
             gap_onset_pull=config.gap_onset_pull,
             text_bonus=config.text_bonus,
             in_line_gap_cost=config.in_line_gap_cost,
+            backing_rest=config.backing_rest,
             fusion=config.fusion,
             audio_speed=config.audio_speed,
         )
