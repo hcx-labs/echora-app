@@ -1,11 +1,11 @@
 "use client";
 
-import { Ellipsis, Languages, ListPlus, Music2, Play, SquarePen, VolumeX } from "lucide-react";
+import { Ellipsis, Info, ListPlus, Music2, Play, SquarePen, VolumeX, X } from "lucide-react";
 import { useRef, useState } from "react";
 import type { PlayerTrack } from "../player/PlayerProvider";
 import { usePlayer } from "../player/PlayerProvider";
 import { Button } from "../ui/button";
-import { Input } from "../ui/input";
+import { LanguagePicker } from "../ui/language-picker";
 import { Textarea } from "../ui/textarea";
 import { Notice } from "../ui/notice";
 import { toast } from "sonner";
@@ -24,6 +24,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "../ui/dropdown-menu";
+import ProcessingDialog from "./ProcessingDialog";
 import styles from "./TrackMenu.module.css";
 
 type Track = {
@@ -45,19 +46,24 @@ type Lyrics = {
   availability_status?: string | null;
 };
 
-export default function TrackMenu({ track, onSaved }: { track: Track; onSaved: () => void }) {
+/** What changed about the song, for the list to show without reloading. */
+export type TrackPatch = { lyrics_status?: string };
+
+export default function TrackMenu({
+  track,
+  onSaved,
+}: {
+  track: Track;
+  onSaved: (patch: TrackPatch) => void;
+}) {
   const player = usePlayer();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [transcriptionOpen, setTranscriptionOpen] = useState(false);
-  const [transcriptionLanguage, setTranscriptionLanguage] = useState("");
+  const [processingOpen, setProcessingOpen] = useState(false);
   const [lyrics, setLyrics] = useState("");
   const [language, setLanguage] = useState("");
   const [busy, setBusy] = useState(false);
-  const closeTranscription = () => {
-    if (!busy) setTranscriptionOpen(false);
-  };
   const closeEditor = () => {
     if (!busy) setEditorOpen(false);
   };
@@ -112,41 +118,12 @@ export default function TrackMenu({ track, onSaved }: { track: Track; onSaved: (
       if (!response.ok) throw new Error(body.detail || "Could not save lyrics");
       setEditorOpen(false);
       window.dispatchEvent(new CustomEvent("echora:lyrics-update", { detail: track.id }));
-      onSaved();
+      onSaved({ lyrics_status: "available" });
       toast.success("Lyrics saved", { description: track.title });
     } catch (reason) {
       toast.error("Could not save lyrics", {
         description:
           reason instanceof Error && reason.message !== "Could not save lyrics"
-            ? reason.message
-            : undefined,
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function forceTranscription() {
-    setBusy(true);
-    try {
-      const response = await fetch(
-        `/api/v1/library/tracks/${encodeURIComponent(track.id)}/lyrics/transcription-language`,
-        {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ language: transcriptionLanguage }),
-        },
-      );
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.detail || "Could not queue transcription");
-      setTranscriptionOpen(false);
-      window.dispatchEvent(new CustomEvent("echora:lyrics-update", { detail: track.id }));
-      onSaved();
-      toast.success("Transcription queued", { description: "It runs during the next sync." });
-    } catch (reason) {
-      toast.error("Could not queue transcription", {
-        description:
-          reason instanceof Error && reason.message !== "Could not queue transcription"
             ? reason.message
             : undefined,
       });
@@ -170,7 +147,7 @@ export default function TrackMenu({ track, onSaved }: { track: Track; onSaved: (
       const body = await response.json();
       if (!response.ok) throw new Error(body.detail || "Could not update lyric status");
       window.dispatchEvent(new CustomEvent("echora:lyrics-update", { detail: track.id }));
-      onSaved();
+      onSaved({ lyrics_status: status });
       toast.success(
         status === "instrumental" ? "Marked as instrumental" : "No longer marked as instrumental",
         { description: track.title },
@@ -226,9 +203,9 @@ export default function TrackMenu({ track, onSaved }: { track: Track; onSaved: (
             <SquarePen />
             Edit lyrics
           </DropdownMenuItem>
-          <DropdownMenuItem disabled={busy} onSelect={() => setTranscriptionOpen(true)}>
-            <Languages />
-            Transcribe in language
+          <DropdownMenuItem disabled={busy} onSelect={() => setProcessingOpen(true)}>
+            <Info />
+            Processing information
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={busy}
@@ -241,50 +218,12 @@ export default function TrackMenu({ track, onSaved }: { track: Track; onSaved: (
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <Dialog
-        open={transcriptionOpen}
-        onOpenChange={(next) => {
-          if (!busy) setTranscriptionOpen(next);
-        }}
-      >
-        <DialogContent
-          className={`${styles.dialog} sm:max-w-[620px]`}
-          showCloseButton={!busy}
-          onCloseAutoFocus={() => triggerRef.current?.focus()}
-        >
-          <DialogHeader>
-            <DialogTitle>Transcribe {track.title}</DialogTitle>
-            <DialogDescription>
-              {track.artist || "Choose the recording language."}
-            </DialogDescription>
-          </DialogHeader>
-          <label>
-            Language code
-            <Input
-              value={transcriptionLanguage}
-              onChange={(event) => setTranscriptionLanguage(event.target.value)}
-              placeholder="en or pt-BR"
-              maxLength={5}
-            />
-          </label>
-          <Notice tone="warning" title="Replaces the current lyrics">
-            MOSS transcribes in this language during the next sync. AI lyrics generation must be
-            enabled in Settings.
-          </Notice>
-          <DialogFooter>
-            <Button variant="outline" onClick={closeTranscription} disabled={busy}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => void forceTranscription()}
-              loading={busy}
-              disabled={!/^[a-z]{2,3}(?:-[A-Z]{2})?$/.test(transcriptionLanguage)}
-            >
-              {busy ? "Queueing" : "Queue transcription"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ProcessingDialog
+        track={track}
+        open={processingOpen}
+        onOpenChange={setProcessingOpen}
+        onCloseAutoFocus={() => triggerRef.current?.focus()}
+      />
       <Dialog
         open={editorOpen}
         onOpenChange={(next) => {
@@ -302,15 +241,28 @@ export default function TrackMenu({ track, onSaved }: { track: Track; onSaved: (
               {track.artist || "Edit the lyrics and optional language."}
             </DialogDescription>
           </DialogHeader>
-          <label>
-            Language, optional
-            <Input
-              value={language}
-              onChange={(event) => setLanguage(event.target.value)}
-              placeholder="en"
-              maxLength={12}
-            />
-          </label>
+          <div className={styles.field}>
+            <span>Language, optional</span>
+            <div className={styles.languageRow}>
+              <LanguagePicker
+                aria-label="Lyrics language"
+                placeholder="Identify from the lyrics"
+                value={language}
+                onChange={setLanguage}
+              />
+              {language && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Clear the language"
+                  onClick={() => setLanguage("")}
+                >
+                  <X />
+                </Button>
+              )}
+            </div>
+          </div>
           <label>
             Lyrics
             <Textarea

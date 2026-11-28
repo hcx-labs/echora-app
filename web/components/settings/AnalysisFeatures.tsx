@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { LoadingState } from "../ui/spinner";
-import { SectionHeading, LocationToggles } from "./Presentation";
+import { SectionHeading, LocationToggles, Toggle } from "./Presentation";
 import { SettingRow } from "./SettingRow";
 import { SettingsNotice } from "./SettingsNotice";
 import { Notice } from "../ui/notice";
@@ -22,6 +22,7 @@ type Models = {
   hum_modal_enabled: boolean;
   karaoke_stems_processing_enabled: boolean;
   karaoke_stems_modal_enabled: boolean;
+  karaoke_realign_outdated: boolean;
   huggingface_account: string | null;
   has_huggingface_token: boolean;
 };
@@ -63,6 +64,7 @@ export default function AnalysisFeatures() {
     karaoke_stems: { local: false, modal: false },
     hum: { local: true, modal: true },
   });
+  const [realign, setRealign] = useState(true);
   const [stemsUsage, setStemsUsage] = useState<{ complete: number; bytes: number } | null>(null);
 
   useEffect(() => {
@@ -84,6 +86,7 @@ export default function AnalysisFeatures() {
           },
           hum: { local: models.hum_processing_enabled, modal: models.hum_modal_enabled },
         });
+        setRealign(models.karaoke_realign_outdated ?? true);
         setLoaded(true);
       })
       .catch((reason) => setLoadError(reason.message));
@@ -184,6 +187,29 @@ export default function AnalysisFeatures() {
       setBusy(false);
     }
   }
+  async function saveRealign(enabled: boolean) {
+    setBusy(true);
+    try {
+      await api("/settings/models/karaoke/realign", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      setRealign(enabled);
+      toast.success(
+        enabled
+          ? "Full syncs bring karaoke to the latest revision"
+          : "Full syncs keep existing karaoke",
+      );
+    } catch (reason) {
+      toast.error("Could not save the setting", {
+        description: reason instanceof Error ? reason.message : undefined,
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (loadError) return <Notice tone="error">{loadError}</Notice>;
   if (!loaded) return <LoadingState label="Loading analysis settings…" />;
   return (
@@ -211,6 +237,13 @@ export default function AnalysisFeatures() {
         modal={features.karaoke.modal}
         disabled={busy}
         onChange={(location, next) => saveFeature("karaoke", location, next)}
+      />
+      <Toggle
+        label="Realign karaoke on full sync"
+        description="When the aligner or its decoder gets a new revision, a full sync realigns every song to it. Off: full syncs only align songs without karaoke (or whose lyrics changed); realign a song from its Processing information in your library."
+        checked={realign}
+        disabled={busy || !(features.karaoke.local || features.karaoke.modal)}
+        onChange={(next) => void saveRealign(next)}
       />
       <LocationToggles
         label="Karaoke stems"

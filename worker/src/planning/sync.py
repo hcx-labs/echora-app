@@ -2,7 +2,8 @@
 
 Workers recheck artifacts at execution time. This selection never loads models.
 Known missing/instrumental/unavailable lyrics are terminal for ordinary sync;
-explicit lyrics backfills remain the way to retry retrieval for those songs.
+explicit lyrics backfills remain the way to retry retrieval for those songs. Songs with a resync
+request (``core.resync``) join partial and full syncs alike.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import uuid
 
 from core.planning import store
+from core.resync import store as resync
 from worker.artwork.settings import sync_selection
 from worker.planning.audio import plan_audio, plan_karaoke
 from worker.planning.freshness import sources_needing_refresh
@@ -36,6 +38,8 @@ def select_sync_tracks(
         return ids
     known = store.known_sources(connection, library_id, ids)
     selected = set(ids) - known
+    # Songs asked to be redone (a pipeline of theirs, whatever its revision) join every sync.
+    selected.update(resync.requested_sources(connection, library_id, ids))
     if mode == "missing":
         return [item for item in ids if item in selected]
 

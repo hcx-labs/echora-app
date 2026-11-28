@@ -10,6 +10,7 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "real_compute_choice: use the database-backed compute choice"
     )
+    config.addinivalue_line("markers", "real_resync: use the database's resync requests")
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +34,23 @@ def local_compute_by_default(monkeypatch, request):
     monkeypatch.setattr(
         external_processing, "compute_for", lambda user_id, requested: requested or "local"
     )
+    yield
+
+
+@pytest.fixture(autouse=True)
+def no_resync_requests(monkeypatch, request):
+    """Songs have no resync requests unless a test says so.
+
+    Unit tests queue their database results; database-backed tests are marked ``real_resync``.
+    """
+    if "real_resync" in request.keywords:
+        yield
+        return
+    from core.resync import store as resync
+
+    monkeypatch.setattr(resync, "requested", lambda db, pipeline, track_ids: {})
+    monkeypatch.setattr(resync, "requested_sources", lambda db, library_id, ids: set())
+    monkeypatch.setattr(resync, "done", lambda db, track_id, pipeline: None)
     yield
 
 

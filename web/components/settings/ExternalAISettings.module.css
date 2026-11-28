@@ -4,7 +4,9 @@
 .keyControls{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
 .keyControls>input{flex:1 1 180px;min-width:0}
 .pairs{display:grid;gap:8px;min-width:0}
-.pairHeader,.pair{display:grid;grid-template-columns:minmax(0,1fr) 16px minmax(0,1fr) 32px;align-items:center;gap:8px;min-width:0}
+.pairHeader,.pair{display:grid;grid-template-columns:minmax(0,2fr) 16px minmax(0,3fr) 32px;align-items:start;gap:8px;min-width:0}
+.pair>svg{margin-top:10px}
+.pair>button:last-child{margin-top:2px}
 .pairHeader{font-size:12px;font-weight:500;color:var(--muted-foreground)}
 .pair input{min-width:0}
 .pairArrow{width:16px;height:16px;color:var(--muted-foreground)}

@@ -263,6 +263,7 @@ def test_catalog_reconciliation_deduplicates_identical_source_tracks(db, visible
     ).fetchall() == [("alias",)]
 
 
+@pytest.mark.real_resync
 def test_sync_selection_respects_mode_and_library_scope(db, visible_track):
     from worker.planning.sync import select_sync_tracks
 

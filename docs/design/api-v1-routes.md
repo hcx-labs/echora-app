@@ -42,6 +42,7 @@ redirect URI change with the release (`…/api/v1/auth/oidc/callback`).
 | `DELETE /settings/lastfm` | `DELETE /api/v1/settings/lastfm` | `settings/lastfm_disconnect.py` |
 | `GET /settings/runtime` | `GET /api/v1/settings/runtime` | `settings/runtime.py` |
 | `PUT /settings/models/karaoke` | `PUT /api/v1/settings/models/karaoke` | `settings/models_karaoke.py` |
+| (new) | `PUT /api/v1/settings/models/karaoke/realign` | `settings/models_karaoke_realign.py` |
 | `PUT /settings/models/huggingface` | `PUT /api/v1/settings/models/huggingface` | `settings/models_huggingface.py` |
 | `PUT /settings/models/transcription` | `PUT /api/v1/settings/models/transcription` | `settings/models_transcription.py` |
 | `PUT /settings/models/hum` | `PUT /api/v1/settings/models/hum` | `settings/models_hum.py` |
@@ -106,6 +107,8 @@ The four backfills are now for administrators only (any signed-in user before).
 | `PUT /library/tracks/{id}/lyrics` | same under `/api/v1` | `library/track_lyrics_update.py` |
 | `PUT /library/tracks/{id}/lyrics/status` | same under `/api/v1` | `library/track_lyrics_status.py` |
 | `PUT /library/tracks/{id}/lyrics/transcription-language` | same under `/api/v1` | `library/track_transcription_language.py` |
+| (new) | `GET /api/v1/library/tracks/{id}/processing` | `library/track_processing.py` |
+| (new) | `PUT, DELETE /api/v1/library/tracks/{id}/processing/{pipeline}` | `library/track_processing_resync.py` |
 | `GET /library/lyrics/status` | `GET /api/v1/library/lyrics/status` | `library/lyrics_status.py` |
 | `GET /library/artists/profile` | same under `/api/v1` | `library/artist_profile.py` |
 | `GET /library/artists/similar` | same under `/api/v1` | `library/artists_similar.py` |

@@ -1,5 +1,7 @@
 .root{position:relative;min-width:0}
 .dialog{width:min(620px,calc(100% - 32px));max-height:90dvh;overflow:auto}
-.dialog label{display:grid;gap:8px;font-size:13px;font-weight:500;color:var(--foreground)}
+.dialog label,.field{display:grid;gap:8px;font-size:13px;font-weight:500;color:var(--foreground)}
 .dialog p{margin:0;font-size:13px;line-height:1.6;color:var(--muted-foreground)}
 .lyrics{min-height:240px;resize:vertical}
+.field>span{display:block}
+.languageRow{display:flex;align-items:center;gap:8px;min-width:0}

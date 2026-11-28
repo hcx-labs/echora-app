@@ -24,6 +24,7 @@ from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient
 from core.lyrics import store
 from core.lyrics.backing import BACKING_VOICE, tag_bracketed_backing
+from core.resync import store as resync
 from core.revisions import KARAOKE_PIPELINE_REVISION
 from worker.kara.aligner import label_rules
 from worker.kara.aligner.request import AlignRequest
@@ -746,6 +747,10 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
                 list(context.track_ids),
                 model_revision,
                 library_id=self.library_id,
+                # An administrator's karaoke backfill realigns; syncs follow the setting.
+                realign_outdated=True
+                if context.options.get("operation") == "karaoke_backfill"
+                else None,
             ).karaoke_external_ids
             if not planned:
                 return []
@@ -955,7 +960,8 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
                 )
             else:
                 _store_alignment(self.connection, item.track_id, output)
-                self.connection.commit()
+            resync.done(self.connection, item.track_id, "karaoke")
+            self.connection.commit()
         except Exception:
             self.connection.rollback()
             raise

@@ -745,7 +745,7 @@ def test_karaoke_scope_and_cleanup_on_cancellation(monkeypatch):
     with pytest.raises(_Cancelled):
         align_batch(ids=("shared-id",))
     assert planner.call_args.args[2] == ["shared-id"]
-    assert planner.call_args.kwargs == {"library_id": "library"}
+    assert planner.call_args.kwargs == {"library_id": "library", "realign_outdated": None}
     sql, params = cursor.execute.call_args.args
     assert "ts.library_id=%s" in sql and params == (["shared-id"], "library")
     assert stops.call_count == 2  # Before preparing, and when the stage ends.

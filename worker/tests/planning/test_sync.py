@@ -198,3 +198,15 @@ def test_entire_library_visits_songs_without_karaoke_stems(planner, monkeypatch)
     monkeypatch.setattr(sync_plan, "songs_needing_stems", stems)
     assert sync_plan.select_sync_tracks(connection, "https://music", ["a", "b"]) == ["a"]
     assert stems.call_args.args[2] == ["a", "b"]
+
+
+def test_songs_asked_to_resync_join_a_partial_sync(planner, monkeypatch):
+    from core.resync import store as resync
+
+    connection, cursor, audio, karaoke = planner
+    cursor.fetchall.return_value = [{"external_id": song} for song in ("known", "asked")]
+    monkeypatch.setattr(resync, "requested_sources", lambda db, library, ids: {"asked"})
+    assert sync_plan.select_sync_tracks(
+        connection, "https://music", ["known", "asked", "new"], "missing"
+    ) == ["asked", "new"]
+    karaoke.assert_not_called()

@@ -26,6 +26,7 @@ from backend.api.v1.settings.lastfm_disconnect import DisconnectLastFm
 from backend.api.v1.settings.models_huggingface import HuggingFaceTokenUpdate
 from backend.api.v1.settings.models_hum import HumSwitch
 from backend.api.v1.settings.models_karaoke import KaraokeSwitch
+from backend.api.v1.settings.models_karaoke_realign import KaraokeRealignSwitch
 from backend.api.v1.settings.models_karaoke_stems import KaraokeStemsStatus, KaraokeStemsSwitch
 from backend.api.v1.settings.models_transcription import TranscriptionSwitch
 from backend.api.v1.settings.motion_artwork import MotionArtworkSettingsRead
@@ -61,6 +62,7 @@ CATEGORY = Category(
         UpdateLastFm,
         DisconnectLastFm,
         KaraokeSwitch,
+        KaraokeRealignSwitch,
         KaraokeStemsSwitch,
         KaraokeStemsStatus,
         TranscriptionSwitch,

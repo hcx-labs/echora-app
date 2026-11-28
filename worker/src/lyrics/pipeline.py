@@ -25,6 +25,7 @@ from core.library.connections import credential_cipher
 from core.lyrics import store
 from core.lyrics.language import detect_distribution
 from core.lyrics.sources import store_original
+from core.resync import store as resync
 from worker.library.attempts import finish_attempt, record_track, start_attempt
 from worker.media.preprocessing import prepare_audio
 from worker.media.roformer import separation_phase
@@ -214,6 +215,7 @@ class LyricsProcessor(Processor[None, LyricsItem, LyricsResult]):
             planned = plan_lyrics(connection, ids, library_id=self.library_id).lyrics_external_ids
             if context.options.get("refresh_lyrics", False):
                 planned = frozenset(ids)
+            planned = frozenset(planned) | self._requested_transcriptions(connection, ids)
             if not planned:
                 return []
             rows = store.source_titles(connection, list(planned), self.library_id)
@@ -226,6 +228,28 @@ class LyricsProcessor(Processor[None, LyricsItem, LyricsResult]):
             )
             for row in rows
         ]
+
+    def _requested_transcriptions(self, connection, ids: list[str]) -> frozenset[str]:
+        """Songs asked to be transcribed again, in a language.
+
+        They become forced transcriptions, whose lyrics this stage replaces, and the request is
+        fulfilled. Without AI lyrics generation the requests wait for a sync that has it.
+        """
+        from worker.transcription.config import transcription_enabled, transcription_model
+
+        sources = {
+            row["track_id"]: str(row["external_id"])
+            for row in store.source_titles(connection, ids, self.library_id)
+        }
+        requests = resync.requested(connection, "transcription", sources)
+        if not requests or not (transcription_model() and transcription_enabled(connection)):
+            return frozenset()
+        for track_id, options in requests.items():
+            store.force_transcription(connection, track_id, str(options.get("language") or ""))
+            store.discard_derived(connection, track_id)
+            resync.done(connection, track_id, "transcription")
+        connection.commit()
+        return frozenset(sources[track_id] for track_id in requests)
 
     def open(self, context, items) -> None:
         self.stack = ExitStack()

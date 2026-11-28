@@ -739,13 +739,14 @@ export default function BrowseLibrary() {
                             streamUrl: playerTrack(track)?.streamUrl,
                             coverUrl: playerTrack(track)?.coverUrl,
                           }}
-                          onSaved={() => {
-                            if (searchMode) return;
-                            setTracks([]);
-                            setTotal(0);
-                            setBatch(0);
-                            setRefreshToken((value) => value + 1);
-                          }}
+                          onSaved={(patch) =>
+                            // The row changes in place: the list keeps its pages and scroll.
+                            setTracks((current) =>
+                              current.map((item) =>
+                                item.id === track.id ? { ...item, ...patch } : item,
+                              ),
+                            )
+                          }
                         />
                       </TableCell>
                     </TableRow>

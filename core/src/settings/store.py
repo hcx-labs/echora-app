@@ -37,6 +37,23 @@ SWITCH_COLUMNS = frozenset(
 )
 
 
+def karaoke_realign_outdated(db: Connection) -> bool:
+    """Whether syncs realign karaoke of an older pipeline or model revision (default on)."""
+    row = fetch_one(
+        db, "SELECT karaoke_realign_outdated FROM analysis_settings WHERE singleton=true"
+    )
+    return True if row is None else bool(row["karaoke_realign_outdated"])
+
+
+def set_karaoke_realign_outdated(db: Connection, enabled: bool) -> None:
+    db.execute(
+        """INSERT INTO analysis_settings (singleton, karaoke_realign_outdated, updated_at)
+           VALUES (true,%s,now()) ON CONFLICT (singleton) DO UPDATE
+           SET karaoke_realign_outdated=EXCLUDED.karaoke_realign_outdated, updated_at=now()""",
+        (enabled,),
+    )
+
+
 def model_switches(db: Connection) -> dict[str, Any] | None:
     """The feature switches and the stored Hugging Face account (``None`` before any save).
 
@@ -48,7 +65,7 @@ def model_switches(db: Connection) -> dict[str, Any] | None:
                   transcription_processing_enabled, karaoke_modal_enabled,
                   hum_modal_enabled, transcription_modal_enabled,
                   karaoke_stems_processing_enabled, karaoke_stems_modal_enabled,
-                  hf_token_account, hf_token_encrypted IS NOT NULL AS has_huggingface_token
+                  karaoke_realign_outdated, hf_token_account, hf_token_encrypted IS NOT NULL AS has_huggingface_token
            FROM analysis_settings WHERE singleton=true""",
     )
 

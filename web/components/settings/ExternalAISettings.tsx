@@ -1,7 +1,7 @@
 "use client";
 
 import { toast } from "sonner";
-import { ArrowRight, X } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 import { Notice } from "../ui/notice";
 
 import { SettingsNotice } from "./SettingsNotice";
@@ -10,6 +10,7 @@ import { SectionHeading, Toggle } from "./Presentation";
 import { Button } from "../ui/button";
 import { LoadingState } from "../ui/spinner";
 import { Input } from "../ui/input";
+import { LanguagePicker } from "../ui/language-picker";
 import { Textarea } from "../ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { SettingRow } from "./SettingRow";
@@ -18,6 +19,8 @@ import layout from "./SettingsView.module.css";
 import ClearTranslationsWarning from "./ClearTranslationsWarning";
 
 type LanguagePair = { source: string; target: string };
+/** One target and every source translated into it: the editor's rows. */
+type LanguageGroup = { target: string; sources: string[] };
 type Provider = "openai" | "anthropic";
 type Configuration = {
   enabled: boolean;
@@ -26,6 +29,8 @@ type Configuration = {
   model: string;
   prompt: string;
   language_pairs: LanguagePair[];
+  /** ``language_pairs`` as the editor shows them; saved back as pairs. */
+  language_groups: LanguageGroup[];
   has_key: boolean;
   transcription_refinement: boolean;
   transcription_prompt: string;
@@ -37,6 +42,26 @@ type Configuration = {
 type Section = "endpoint" | "translation" | "transcription" | "themes";
 const endpoint = "/api/v1/settings/external-ai";
 const normalizeTag = (value: string) => value.trim().replaceAll("_", "-").toLowerCase();
+
+function groupPairs(pairs: LanguagePair[]): LanguageGroup[] {
+  const groups: LanguageGroup[] = [];
+  for (const pair of pairs) {
+    const target = normalizeTag(pair.target);
+    const group = groups.find((item) => item.target === target);
+    if (group) group.sources.push(normalizeTag(pair.source));
+    else groups.push({ target, sources: [normalizeTag(pair.source)] });
+  }
+  return groups;
+}
+
+function pairsOf(groups: LanguageGroup[]): LanguagePair[] {
+  return groups.flatMap((group) =>
+    group.sources.map((source) => ({
+      source: normalizeTag(source),
+      target: normalizeTag(group.target),
+    })),
+  );
+}
 
 function validate(value: Configuration, section: Section): string {
   if (section === "themes") return "";
@@ -63,8 +88,18 @@ function validate(value: Configuration, section: Section): string {
       ? "Enter an API URL before enabling External AI."
       : "";
   if (!value.prompt.trim()) return "Enter a translation prompt.";
+  for (const group of value.language_groups) {
+    if (!group.target) return "Choose the target language of every row.";
+    if (!group.sources.length)
+      return `Choose at least one language to translate into ${group.target}.`;
+  }
+  const targets = value.language_groups.map((group) => normalizeTag(group.target));
+  if (new Set(targets).size !== targets.length)
+    return "Each target language needs only one row; add its sources there.";
+  const pairs = pairsOf(value.language_groups);
+  if (pairs.length > 64) return "Up to 64 source and target combinations are supported.";
   const seen = new Set<string>();
-  for (const pair of value.language_pairs) {
+  for (const pair of pairs) {
     const source = normalizeTag(pair.source),
       target = normalizeTag(pair.target);
     if (![source, target].every((tag) => /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/.test(tag)))
@@ -113,7 +148,11 @@ async function request(
       default_transcription_prompt: body.default_transcription_prompt,
     };
   if (section === "/themes") return { enabled: body.enabled, lyric_themes: body.lyric_themes };
-  return { prompt: body.prompt, language_pairs: body.language_pairs };
+  return {
+    prompt: body.prompt,
+    language_pairs: body.language_pairs,
+    language_groups: groupPairs(body.language_pairs ?? []),
+  };
 }
 
 export default function ExternalAISettings() {
@@ -151,6 +190,7 @@ function SettingsSection({ section }: { section: Section }) {
             model: "",
             prompt: "",
             language_pairs: [],
+            language_groups: [],
             transcription_refinement: true,
             transcription_prompt: "",
             transcription_model: "",
@@ -206,10 +246,7 @@ function SettingsSection({ section }: { section: Section }) {
               }
             : {
                 prompt: value.prompt.trim(),
-                language_pairs: value.language_pairs.map((pair) => ({
-                  source: normalizeTag(pair.source),
-                  target: normalizeTag(pair.target),
-                })),
+                language_pairs: pairsOf(value.language_groups),
               };
     try {
       const result = await request(
@@ -397,73 +434,82 @@ function SettingsSection({ section }: { section: Section }) {
                     description="Missing translations are generated during sync when External AI is enabled."
                   />
                   <SettingRow
-                    label="Language pairs"
-                    description="Choose source and target language tags, such as ja, en or pt-BR."
+                    label="Languages"
+                    description="For each language to translate into, choose the languages it translates from."
                   >
                     <div className={styles.pairs}>
-                      {value.language_pairs.length > 0 && (
+                      {value.language_groups.length > 0 && (
                         <div className={styles.pairHeader} aria-hidden="true">
-                          <span>Source</span>
+                          <span>Translate into</span>
                           <span />
-                          <span>Target</span>
+                          <span>From</span>
                         </div>
                       )}
-                      {value.language_pairs.map((pair, index) => (
-                        <div className={styles.pair} key={index}>
-                          <Input
-                            required
-                            aria-label={`Source language ${index + 1}`}
-                            value={pair.source}
-                            placeholder="ja"
-                            onChange={(event) =>
-                              update({
-                                language_pairs: value.language_pairs.map((item, i) =>
-                                  i === index ? { ...item, source: event.target.value } : item,
-                                ),
-                              })
-                            }
-                          />
-                          <ArrowRight className={styles.pairArrow} aria-hidden="true" />
-                          <Input
-                            required
-                            aria-label={`Target language ${index + 1}`}
-                            value={pair.target}
-                            placeholder="en"
-                            onChange={(event) =>
-                              update({
-                                language_pairs: value.language_pairs.map((item, i) =>
-                                  i === index ? { ...item, target: event.target.value } : item,
-                                ),
-                              })
-                            }
-                          />
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={`Remove language pair ${index + 1}`}
-                            title="Remove"
-                            onClick={() =>
-                              update({
-                                language_pairs: value.language_pairs.filter((_, i) => i !== index),
-                              })
-                            }
-                          >
-                            <X aria-hidden="true" />
-                          </Button>
-                        </div>
-                      ))}
+                      {value.language_groups.map((group, index) => {
+                        const change = (patch: Partial<LanguageGroup>) =>
+                          update({
+                            language_groups: value.language_groups.map((item, i) =>
+                              i === index ? { ...item, ...patch } : item,
+                            ),
+                          });
+                        return (
+                          <div className={styles.pair} key={index}>
+                            <LanguagePicker
+                              lowercase
+                              aria-label={`Target language ${index + 1}`}
+                              placeholder="Target language"
+                              value={group.target}
+                              exclude={[
+                                ...group.sources,
+                                ...value.language_groups
+                                  .filter((_, i) => i !== index)
+                                  .map((item) => item.target),
+                              ]}
+                              onChange={(target) => change({ target })}
+                            />
+                            <ArrowLeft className={styles.pairArrow} aria-hidden="true" />
+                            <LanguagePicker
+                              multiple
+                              lowercase
+                              aria-label={`Source languages for target ${index + 1}`}
+                              placeholder="Source languages"
+                              value={group.sources}
+                              exclude={group.target ? [group.target] : []}
+                              onChange={(sources) => change({ sources })}
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Remove target language ${index + 1}`}
+                              title="Remove"
+                              onClick={() =>
+                                update({
+                                  language_groups: value.language_groups.filter(
+                                    (_, i) => i !== index,
+                                  ),
+                                })
+                              }
+                            >
+                              <X aria-hidden="true" />
+                            </Button>
+                          </div>
+                        );
+                      })}
                       <Button
                         type="button"
                         variant="outline"
-                        disabled={value.language_pairs.length >= 64}
+                        disabled={pairsOf(value.language_groups).length >= 64}
                         onClick={() =>
                           update({
-                            language_pairs: [...value.language_pairs, { source: "", target: "" }],
+                            language_groups: [
+                              ...value.language_groups,
+                              { target: "", sources: [] },
+                            ],
                           })
                         }
                       >
-                        Add language pair
+                        Add target language
                       </Button>
                     </div>
                   </SettingRow>

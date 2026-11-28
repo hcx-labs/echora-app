@@ -76,11 +76,14 @@ def songs_needing_karaoke(
     library_id: uuid.UUID | None,
     pipeline_revision: str,
     model_revision: str | None,
+    realign_outdated: bool = True,
 ) -> list[str]:
-    """Songs with lyrics text but no current unbounded karaoke.
+    """Songs with lyrics text but no current unbounded karaoke, or asked to be realigned.
 
     Supplied word timing is current when its digest matches; an alignment when its pipeline
-    revision does and, given one, its model revision. ``None`` ids or library is unrestricted.
+    revision does and, given one, its model revision. Without ``realign_outdated`` any alignment
+    is current. A song with a karaoke resync request is always planned. ``None`` ids or library
+    is unrestricted.
     """
     restriction, parameters = _restriction(external_ids, library_id)
     rows = fetch_all(
@@ -89,7 +92,10 @@ def songs_needing_karaoke(
             FROM track_sources ts JOIN lyrics l ON l.track_id=ts.track_id
             WHERE ts.source_type='subsonic'{restriction}
               AND NULLIF(btrim(l.text), '') IS NOT NULL
-              AND NOT EXISTS (
+              AND (EXISTS (
+                SELECT 1 FROM track_resync_requests r
+                WHERE r.track_id=l.track_id AND r.pipeline='karaoke'
+              ) OR NOT EXISTS (
                 SELECT 1 FROM karaoke_lyrics_variants kv
                 WHERE kv.track_id=l.track_id AND kv.bounded=false
                   AND CASE WHEN l.provenance ? 'word_timing_digest'
@@ -97,11 +103,11 @@ def songs_needing_karaoke(
                     THEN kv.model='navidrome'
                       AND kv.provenance->>'source_digest'=l.provenance->>'word_timing_digest'
                     ELSE kv.model<>'navidrome'
-                      AND kv.provenance->>'pipeline_revision'=%s
-                      AND (%s::text IS NULL OR kv.model_revision=%s::text)
+                      AND (NOT %s OR kv.provenance->>'pipeline_revision'=%s
+                        AND (%s::text IS NULL OR kv.model_revision=%s::text))
                   END
-              ) ORDER BY ts.external_id""",
-        [*parameters, pipeline_revision, model_revision, model_revision],
+              )) ORDER BY ts.external_id""",
+        [*parameters, realign_outdated, pipeline_revision, model_revision, model_revision],
     )
     return [str(row["external_id"]) for row in rows]
 

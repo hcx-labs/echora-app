@@ -19,8 +19,8 @@ def songs_without_stems(
 ) -> list[dict[str, Any]]:
     """The library's selected songs with lyrics that have no stems of ``recipe``.
 
-    A song whose stems failed with this recipe is not planned again until the recipe changes.
-    Rows are ``track_id``, ``external_id`` and ``title``.
+    A song whose stems failed with this recipe is not planned again until the recipe changes,
+    unless it has a stems resync request (as has a song asked to be made again). Rows are ``track_id``, ``external_id`` and ``title``.
     """
     return fetch_all(
         db,
@@ -29,8 +29,10 @@ def songs_without_stems(
            WHERE ts.source_type='subsonic' AND ts.library_id=%s AND ts.external_id=ANY(%s)
              AND EXISTS (SELECT 1 FROM lyrics l WHERE l.track_id=ts.track_id
                          AND nullif(btrim(l.text), '') IS NOT NULL)
-             AND NOT EXISTS (SELECT 1 FROM karaoke_stems ks
-                             WHERE ks.track_id=ts.track_id AND ks.recipe=%s)
+             AND (NOT EXISTS (SELECT 1 FROM karaoke_stems ks
+                              WHERE ks.track_id=ts.track_id AND ks.recipe=%s)
+                  OR EXISTS (SELECT 1 FROM track_resync_requests r
+                             WHERE r.track_id=ts.track_id AND r.pipeline='karaoke_stems'))
            ORDER BY ts.track_id, ts.id""",
         (library_id, list(external_ids), recipe),
     )

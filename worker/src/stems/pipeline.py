@@ -24,6 +24,7 @@ from core.errors import InputUnavailableError, ProcessingError
 from core.features import feature_enabled
 from core.integrations.navidrome import NavidromeClient
 from core.media.config import KaraokeStemsConfig
+from core.resync import store as resync
 from core.revisions import SEPARATION_REVISION
 from core.stems import store
 from core.stems.files import stems_path, stems_root
@@ -228,6 +229,8 @@ class KaraokeStemsProcessor(Processor[None, StemsItem, Stems]):
                     store.save_stems(
                         self.connection, item.track_id, self.recipe, error=type(error).__name__
                     )
+                    # Asked for once: a failure is the answer until it is asked for again.
+                    resync.done(self.connection, item.track_id, "karaoke_stems")
                     self.connection.commit()
                     yield ItemResult.failed(
                         item, ProcessingError("Stems failed", stage=type(error).__name__)
@@ -247,6 +250,7 @@ class KaraokeStemsProcessor(Processor[None, StemsItem, Stems]):
                 file_bytes=len(content),
                 duration_seconds=duration,
             )
+            resync.done(self.connection, item.track_id, "karaoke_stems")
             self.connection.commit()
         except Exception:
             self.connection.rollback()
