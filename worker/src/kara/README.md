@@ -64,11 +64,12 @@ evaluated with (duration floors, frame clock, backing-vocal decoding, `text_bonu
 values together, and only with an evaluation. Every setting is listed in
 [runtime settings](../../../docs/runtime-settings.md).
 
-`repeat_template` (`ECHORA_KARA_REPEAT_TEMPLATE`, off) is an experiment awaiting a benchmark. A
-line the model hears clearly and that recurs (at least three times) anchors a block. The block's
-lines before each occurrence are compared by their offset from it, and an occurrence that
-disagrees with the majority takes the majority's timing (`aligner/repeats.py`). It runs on the
-finished alignment document, so a replayed reading applies it without the model.
+`repeat_template` (`ECHORA_KARA_REPEAT_TEMPLATE`, off) is an experiment awaiting a benchmark.
+Sections are runs of lines repeated at least three times, matched by text, or else by shape (lead
+or backing, token counts). Each repeat is placed by its clearly heard lines. A line whose start,
+or else whose end, sits far from where the agreeing repeats put it takes their timing
+(`aligner/repeats.py`). It runs on the finished alignment document, so a replayed reading applies
+it without the model.
 
 ## Failures
 
