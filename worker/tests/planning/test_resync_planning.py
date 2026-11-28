@@ -30,20 +30,15 @@ def test_a_stems_request_retries_a_failed_recipe():
     assert "r.pipeline='karaoke_stems'" in sql
 
 
-def test_only_songs_of_an_older_revision_are_asked_for():
+def test_a_sync_can_select_songs_of_an_older_revision():
     import pytest
 
     from core.resync import store as resync
 
-    connection = MagicMock()
-    resync.request_outdated(
-        connection, "library", ["a", "b"], {"karaoke": "v12 m", "themes": "7"}, "user"
+    sql, params = _executed(
+        lambda db: resync.outdated_sources(db, "library", ["a", "b"], "karaoke", "v12 m")
     )
-    (karaoke_sql, karaoke), (themes_sql, themes) = [
-        call.args for call in connection.execute.call_args_list
-    ]
-    assert "kv.model<>'navidrome'" in karaoke_sql and "<> %s" in karaoke_sql
-    assert karaoke == ("karaoke", "user", "library", ["a", "b"], "v12 m")
-    assert "th.prompt_revision" in themes_sql and themes[-1] == "7"
+    assert sql.lstrip().startswith("SELECT") and "kv.model<>'navidrome'" in sql
+    assert params == ("library", ["a", "b"], "v12 m")
     with pytest.raises(ValueError):
-        resync.request_outdated(connection, "library", ["a"], {"transcription": "x"})
+        resync.outdated_sources(MagicMock(), "library", ["a"], "transcription", "x")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import uuid
@@ -125,6 +126,10 @@ class TranslationProcessor(Processor[None, TranslationItem, list[dict]]):
             self.requested = set(
                 resync.requested(db, "translation", [row["track_id"] for row in tracks])
             )
+        # A sync bringing translations up to date reuses only those of the current model and
+        # prompt.
+        self.current_only = "translation" in (context.options.get("resync") or ())
+        self.prompt_revision = hashlib.sha256(settings.prompt.encode()).hexdigest()
         items = []
         for row in tracks:
             context.check()
@@ -185,6 +190,13 @@ class TranslationProcessor(Processor[None, TranslationItem, list[dict]]):
                 t["source_language"] == pair.source
                 and t["target_language"] == pair.target
                 and t["status"] == "ready"
+                and (
+                    not self.current_only
+                    or (
+                        t["model"] == self.settings.model
+                        and t["prompt_revision"] == self.prompt_revision
+                    )
+                )
                 for t in load_translations(item.track_id, lines)
             ):
                 yield ItemResult(item=item, outcome="reused")

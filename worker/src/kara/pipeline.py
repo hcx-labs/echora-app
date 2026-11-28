@@ -747,9 +747,11 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
                 list(context.track_ids),
                 model_revision,
                 library_id=self.library_id,
-                # An administrator's karaoke backfill realigns; syncs follow the setting.
+                # An administrator's karaoke backfill realigns, as does a sync told to bring
+                # karaoke up to date; other syncs follow the setting.
                 realign_outdated=True
                 if context.options.get("operation") == "karaoke_backfill"
+                or "karaoke" in (context.options.get("resync") or ())
                 else None,
             ).karaoke_external_ids
             if not planned:

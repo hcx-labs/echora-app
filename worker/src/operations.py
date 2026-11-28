@@ -11,7 +11,6 @@ belongs to the job envelope, not the payload.
 from __future__ import annotations
 
 import logging
-import uuid
 from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import Any
@@ -199,6 +198,8 @@ def _expand(job: dict, context, name: str, operation: Operation, batch: Batch, c
     if name == "navidrome_sync":
         base["verify_audio_hashes"] = payload.get("verify_audio_hashes", True)
         base["refresh_lyrics"] = payload.get("mode", "all") == "all"
+        if _resync_pipelines(payload):
+            base["resync"] = _resync_pipelines(payload)
     if operation.library:
         base["connection_id"] = payload["connection_id"]
         if compute == "modal":
@@ -217,8 +218,14 @@ def _expand(job: dict, context, name: str, operation: Operation, batch: Batch, c
         raise jobs.JobCancelled()
 
 
+def _resync_pipelines(payload) -> list[str]:
+    from core.resync.store import BULK_PIPELINES
+
+    return sorted({p for p in payload.get("resync") or () if p in BULK_PIPELINES})
+
+
 def current_revision(pipeline: str) -> str:
-    """A pipeline's current revision as its stored output records it (``request_outdated``)."""
+    """A pipeline's current revision as its stored output records it (``outdated_sources``)."""
     if pipeline == "karaoke":
         from worker.kara.pipeline import (
             KARAOKE_PIPELINE_REVISION,
@@ -247,8 +254,6 @@ def current_revision(pipeline: str) -> str:
 
 def _plan_sync(batch: Batch) -> list[str]:
     """The songs of a full scan that need processing; reconciles the user's library first."""
-    from core.planning import store
-    from core.resync import store as resync
     from worker.planning.sync import select_sync_tracks
 
     payload = batch.payload
@@ -261,22 +266,6 @@ def _plan_sync(batch: Batch) -> list[str]:
     with connect() as connection:
         # A renumbered song keeps its analysis; it is not new work.
         relink_renumbered_sources(connection, batch.url, catalog)
-        pipelines = [p for p in payload.get("resync") or () if p in resync.BULK_PIPELINES]
-        if pipelines:
-            # "Bring every song up to date" for these pipelines: songs whose output is of an
-            # older revision get a request, so the selection below takes them.
-            library_id = store.library_with_namespace(
-                connection, uuid.uuid5(uuid.NAMESPACE_URL, batch.url.rstrip("/"))
-            )
-            if library_id is not None:
-                resync.request_outdated(
-                    connection,
-                    library_id,
-                    catalog_ids,
-                    {p: current_revision(p) for p in pipelines},
-                    batch.user_id,
-                )
-                connection.commit()
         ids = select_sync_tracks(
             connection,
             batch.url,
@@ -284,6 +273,9 @@ def _plan_sync(batch: Batch) -> list[str]:
             payload.get("mode", "all"),
             catalog=catalog,
             verify_audio_hashes=payload.get("verify_audio_hashes", True),
+            # "Bring every song up to date": an option of this sync alone, so a cancelled sync
+            # leaves nothing behind. Its batches carry it (``resync``) for the stages.
+            up_to_date={p: current_revision(p) for p in _resync_pipelines(payload)},
         )
     batch.check()
     attach_user_library(batch.user_id, batch.url)

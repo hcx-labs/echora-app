@@ -25,7 +25,13 @@ def select_sync_tracks(
     *,
     catalog=(),
     verify_audio_hashes=True,
+    up_to_date: dict[str, str] | None = None,
 ) -> list[str]:
+    """The songs a sync processes.
+
+    ``up_to_date``: pipelines this sync brings up to date, with their current revision; their
+    songs of an older revision are selected in either mode.
+    """
     if mode not in {"all", "missing"}:
         raise ValueError("Unknown sync mode")
     ids = list(dict.fromkeys(external_ids))
@@ -40,6 +46,8 @@ def select_sync_tracks(
     selected = set(ids) - known
     # Songs asked to be redone (a pipeline of theirs, whatever its revision) join every sync.
     selected.update(resync.requested_sources(connection, library_id, ids))
+    for pipeline, revision in (up_to_date or {}).items():
+        selected.update(resync.outdated_sources(connection, library_id, ids, pipeline, revision))
     if mode == "missing":
         return [item for item in ids if item in selected]
 

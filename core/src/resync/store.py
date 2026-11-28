@@ -18,7 +18,8 @@ from core.db.connection import fetch_all
 
 PIPELINES = ("transcription", "karaoke", "karaoke_stems", "translation", "themes")
 BULK_PIPELINES = ("karaoke", "karaoke_stems", "translation", "themes")
-"""The pipelines a full sync can redo for every song (a transcription needs a language)."""
+"""Pipelines one sync can bring up to date for every song of an older revision (an option of
+that sync, never stored as requests: a transcription needs a language)."""
 
 
 def request(
@@ -55,31 +56,29 @@ _OUTDATED = {
 }
 
 
-def request_outdated(
+def outdated_sources(
     db: Connection,
     library_id: uuid.UUID,
     external_ids: list[str],
-    current: dict[str, str],
-    requested_by: uuid.UUID | None = None,
-) -> None:
-    """Ask the next sync to redo pipelines for the selection's songs of an older revision.
+    pipeline: str,
+    current: str,
+) -> set[str]:
+    """The selection's songs (Navidrome ids) whose ``pipeline`` output is of an older revision.
 
-    ``current`` is each pipeline's current revision, as stored: karaoke
-    ``"<pipeline revision> <model revision>"``, stems the recipe, translations ``"<model>
-    <prompt sha256>"``, themes the prompt revision. Songs without output are left to the sync.
+    ``current`` is the pipeline's current revision as stored: karaoke ``"<pipeline revision>
+    <model revision>"``, stems the recipe, translations ``"<model> <prompt sha256>"``, themes the
+    prompt revision. Songs without output are not included (a sync makes those anyway).
     """
-    for pipeline, revision in current.items():
-        if pipeline not in BULK_PIPELINES:
-            raise ValueError(f"Pipeline {pipeline!r} cannot be resynced for every song")
-        db.execute(
-            f"""INSERT INTO track_resync_requests (track_id, pipeline, requested_by)
-               SELECT DISTINCT ts.track_id, %s::text, %s::uuid FROM track_sources ts
-               WHERE ts.source_type='subsonic' AND ts.library_id=%s AND ts.external_id=ANY(%s)
-                 AND {_OUTDATED[pipeline]}
-               ON CONFLICT (track_id, pipeline) DO UPDATE
-               SET requested_by=EXCLUDED.requested_by, requested_at=now()""",
-            (pipeline, requested_by, library_id, list(external_ids), revision),
-        )
+    if pipeline not in BULK_PIPELINES:
+        raise ValueError(f"Pipeline {pipeline!r} cannot be brought up to date for every song")
+    rows = fetch_all(
+        db,
+        f"""SELECT DISTINCT ts.external_id FROM track_sources ts
+           WHERE ts.source_type='subsonic' AND ts.library_id=%s AND ts.external_id=ANY(%s)
+             AND {_OUTDATED[pipeline]}""",
+        (library_id, list(external_ids), current),
+    )
+    return {str(row["external_id"]) for row in rows}
 
 
 def cancel(db: Connection, track_id: uuid.UUID, pipeline: str) -> None:
