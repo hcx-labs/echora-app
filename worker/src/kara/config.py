@@ -93,6 +93,10 @@ class KaraConfig(EchoraConfig, env_prefix="ECHORA_KARA_"):
         True,
         description="The text head's evidence also places inline bracketed words (needs text_bonus).",
     )
+    backing_rest: bool = compute(
+        True,
+        description="The first lead pass may be silent where the backing-vocal head hears a voice.",
+    )
     stem_reading: bool = compute(
         True,
         description="Add what the model reads on the separated vocals to what it reads on the mix.",

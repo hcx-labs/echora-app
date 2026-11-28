@@ -53,5 +53,7 @@ class AlignRequest(BaseModel):
     """Weight of the checkpoint's text head in the lead decode (0: not loaded)."""
     in_line_gap_cost: float = 0.0
     """Cost per blank frame inside a line."""
+    backing_rest: bool = False
+    """The first lead pass may be silent where the background head hears a voice."""
     fusion: Literal["off", "on", "gate0"] = "off"
     audio_speed: float = 1.0

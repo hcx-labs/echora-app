@@ -717,6 +717,46 @@ def _display_span_results(
     return results
 
 
+BACKING_REST_VOICE = 0.5
+"""The background head's voice probability (smoothed) from which the lead may rest."""
+BACKING_REST_SMOOTH_SECONDS = 0.5
+BACKING_REST_MIN_SECONDS = 2.0
+"""Shorter stretches of backing voice are echoes on the lead's tail, not a block between lines."""
+
+
+def with_backing_rest(lead, background, blank, frame_shift):
+    """The lead's frames where the backing head hears a voice, with silence at least that likely.
+
+    The lead head hears an echo or answer block between two lead lines as singing too ("eaia,
+    saoaoa" over "(Am I more than the darkness?)"). Backing lines are left out of the lead path,
+    so without a cheap silence there it fills the block with its neighbours' words: it holds the
+    last word, or starts the next line's first word seconds early. Frames are renormalised.
+    """
+    frames = min(lead.shape[0], background.shape[0])
+    voice = 1 - background[:frames, blank].to(lead).exp()
+    # Only through a sustained answer: a faint reading (instruments, the lead's own bleed) would
+    # let the lead rest over its own lines, and a short burst is an echo on the lead's last word;
+    # either moves the window a backing block is placed in.
+    width = max(1, round(BACKING_REST_SMOOTH_SECONDS / frame_shift))
+    smooth = torch.nn.functional.avg_pool1d(
+        voice[None, None], width, stride=1, padding=width // 2, count_include_pad=False
+    )[0, 0, :frames]
+    sure = (smooth >= BACKING_REST_VOICE).tolist()
+    keep = torch.zeros(frames, dtype=torch.bool, device=voice.device)
+    shortest, run = round(BACKING_REST_MIN_SECONDS / frame_shift), None
+    for frame, on in enumerate([*sure, False]):
+        if on and run is None:
+            run = frame
+        elif not on and run is not None:
+            if frame - run >= shortest:
+                keep[run:frame] = True
+            run = None
+    voice = torch.where(keep, voice, torch.zeros_like(voice))
+    rested = lead.clone()
+    rested[:frames, blank] = torch.maximum(lead[:frames, blank], voice.clamp_min(1e-12).log())
+    return rested - rested.logsumexp(dim=-1, keepdim=True)
+
+
 def with_stem_reading(mix, stem, blank):
     """The mix's letter log-probabilities with what the model reads on the separated vocals added.
 
@@ -1308,6 +1348,7 @@ def align_audio_with_timeline(
     gap_onset_pull=False,
     text_bonus=0.0,
     in_line_gap_cost=0.0,
+    backing_rest=False,
 ):
     """Align the complete song from the audio alone, in one global CTC pass.
 
@@ -1330,6 +1371,10 @@ def align_audio_with_timeline(
     of their neighbouring lead lines, so they may overlap the lead. Results keep the input order.
     ``text_bonus`` (§5j) weights the checkpoint's text head in the lead decode (0: head not
     loaded); ``in_line_gap_cost`` charges each blank frame inside a line (gaps go between lines).
+    ``backing_rest`` (with ``background_lines``) lets both lead passes be silent wherever the
+    background head hears a voice (``with_backing_rest``); backing blocks are placed between the
+    lead lines of the first pass. The second pass rests there too, also where the backing words
+    are inline brackets of a lead line rather than backing lines of their own.
     ``optional_tokens`` (opt-in, one flag per acoustic token) marks inline backing vocals: the lead
     path may leave them out (``align_with_minimum_durations(optional_groups=...)``); the ones it
     leaves out are placed on their own, may overlap the lead, and come back with ``"stream": 2``.
@@ -1665,7 +1710,12 @@ def align_audio_with_timeline(
                     backing_share[:, len(inline) :],
                     {token: column for column, token in enumerate(whole)},
                 )
-    emission, scoring_emission, initial_spans, duration_floor, skipped = _decode_lead(emission)
+    first_pass = emission
+    if background_plan is not None and backing_rest:
+        first_pass = with_backing_rest(
+            emission, aligner_model.last_background_log_probs, aligner_model.blank, frame_shift
+        )
+    emission, scoring_emission, initial_spans, duration_floor, skipped = _decode_lead(first_pass)
     background_blocks = None
     if background_plan is not None:
         # B0: place the background lines on their head, then decode the lead again with
@@ -1689,6 +1739,13 @@ def align_audio_with_timeline(
         for block in background_blocks:
             for group in block["spans"]:
                 explained[group[0].start : group[-1].end, aligner_model.blank] = 0.0
+        if backing_rest:
+            # Inline backing ("(I never learn, I never learn) oh") places no block, and without
+            # the rest the lead stretched its next line's word over it: "But my love" went 1 s
+            # early on New Rules (2026-11-28; 16 songs: 7 lines moved, 3 better, 2 worse).
+            explained = with_backing_rest(
+                explained, aligner_model.last_background_log_probs, aligner_model.blank, frame_shift
+            )
         emission, scoring_emission, initial_spans, duration_floor, skipped = _decode_lead(explained)
 
     inline_moved = []

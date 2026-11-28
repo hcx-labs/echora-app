@@ -258,6 +258,7 @@ def align(request: AlignRequest) -> dict:
         gap_onset_pull=request.gap_onset_pull,
         text_bonus=request.text_bonus,
         in_line_gap_cost=request.in_line_gap_cost,
+        backing_rest=request.backing_rest,
         fusion=request.fusion,
         stem_audio=stem_audio,
         inline_text_bonus=request.inline_text_bonus and request.inline_backing,
