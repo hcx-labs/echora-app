@@ -64,6 +64,12 @@ evaluated with (duration floors, frame clock, backing-vocal decoding, `text_bonu
 values together, and only with an evaluation. Every setting is listed in
 [runtime settings](../../../docs/runtime-settings.md).
 
+`repeat_template` (`ECHORA_KARA_REPEAT_TEMPLATE`, off) is an experiment awaiting a benchmark. A
+line the model hears clearly and that recurs (at least three times) anchors a block. The block's
+lines before each occurrence are compared by their offset from it, and an occurrence that
+disagrees with the majority takes the majority's timing (`aligner/repeats.py`). It runs on the
+finished alignment document, so a replayed reading applies it without the model.
+
 ## Failures
 
 - A song whose audio cannot be fetched fails with `InputUnavailableError`.

@@ -656,6 +656,10 @@ def _run_fa_kara(
         diagnostics["separator_revision"] = separator_revision
         if reading:
             diagnostics["model_reading"] = "replayed" if reading == "replay" else "recorded"
+        if config.repeat_template:
+            from worker.kara.aligner.repeats import apply_repeat_template
+
+            diagnostics["repeat_template"] = apply_repeat_template(alignment_document)
         lines = build_lines_from_alignment_document(alignment_document)
         # Keep the model's token-derived line boundaries. The former display
         # padding expanded every line into nearby silence, which moved otherwise

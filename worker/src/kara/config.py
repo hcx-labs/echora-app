@@ -97,6 +97,10 @@ class KaraConfig(EchoraConfig, env_prefix="ECHORA_KARA_"):
         True,
         description="The first lead pass may be silent where the backing-vocal head hears a voice.",
     )
+    repeat_template: bool = compute(
+        False,
+        description="Repeats of a block that disagree with the majority take its timing.",
+    )
     stem_reading: bool = compute(
         True,
         description="Add what the model reads on the separated vocals to what it reads on the mix.",
