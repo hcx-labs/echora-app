@@ -131,12 +131,27 @@ def plan_karaoke(
     external_ids: Iterable[str] | None = None,
     model_revision: str | None = None,
     library_id: uuid.UUID | None = None,
+    realign_outdated: bool | None = None,
 ) -> ProcessingPlan:
+    """Songs to align.
+
+    ``realign_outdated`` (default: the administrator's setting) also plans alignments of another
+    pipeline or model revision; songs with a karaoke resync request are always planned.
+    """
     if not feature_enabled(connection, "karaoke"):
         return ProcessingPlan()
+    if realign_outdated is None:
+        from core.settings.store import karaoke_realign_outdated
+
+        realign_outdated = karaoke_realign_outdated(connection)
     ids = tuple(
         store.songs_needing_karaoke(
-            connection, external_ids, library_id, pipeline_revision, model_revision
+            connection,
+            external_ids,
+            library_id,
+            pipeline_revision,
+            model_revision,
+            realign_outdated,
         )
     )
     return ProcessingPlan(karaoke_external_ids=ids)

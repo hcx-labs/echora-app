@@ -97,6 +97,10 @@ class KaraConfig(EchoraConfig, env_prefix="ECHORA_KARA_"):
         True,
         description="The first lead pass may be silent where the backing-vocal head hears a voice.",
     )
+    repeat_template: bool = compute(
+        False,
+        description="Repeats of a block that disagree with the majority take its timing.",
+    )
     stem_reading: bool = compute(
         True,
         description="Add what the model reads on the separated vocals to what it reads on the mix.",
@@ -107,3 +111,10 @@ class KaraConfig(EchoraConfig, env_prefix="ECHORA_KARA_"):
     )
     kill_grace_seconds: float = setting(5, gt=0, legacy="ECHORA_KARAOKE_KILL_GRACE_SECONDS")
     lock_poll_seconds: float = setting(0.25, gt=0, legacy="ECHORA_KARAOKE_LOCK_POLL_SECONDS")
+    readings_dir: str = setting(
+        "",
+        description=(
+            "Where each song's model reading is kept (about 20 MB a song); a song whose decoder "
+            "changed is then decoded from it, without separation or the model (blank: off)."
+        ),
+    )

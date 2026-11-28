@@ -198,6 +198,8 @@ def _expand(job: dict, context, name: str, operation: Operation, batch: Batch, c
     if name == "navidrome_sync":
         base["verify_audio_hashes"] = payload.get("verify_audio_hashes", True)
         base["refresh_lyrics"] = payload.get("mode", "all") == "all"
+        if _resync_pipelines(payload):
+            base["resync"] = _resync_pipelines(payload)
     if operation.library:
         base["connection_id"] = payload["connection_id"]
         if compute == "modal":
@@ -214,6 +216,40 @@ def _expand(job: dict, context, name: str, operation: Operation, batch: Batch, c
 
     if jobs.expand(job["id"], job.get("claim_token") or context.token, batches) is False:
         raise jobs.JobCancelled()
+
+
+def _resync_pipelines(payload) -> list[str]:
+    from core.resync.store import BULK_PIPELINES
+
+    return sorted({p for p in payload.get("resync") or () if p in BULK_PIPELINES})
+
+
+def current_revision(pipeline: str) -> str:
+    """A pipeline's current revision as its stored output records it (``outdated_sources``)."""
+    if pipeline == "karaoke":
+        from worker.kara.pipeline import (
+            KARAOKE_PIPELINE_REVISION,
+            _stored_model_revision,
+            current_model_revision,
+        )
+
+        return f"{KARAOKE_PIPELINE_REVISION} {_stored_model_revision(current_model_revision())}"
+    if pipeline == "karaoke_stems":
+        from worker.stems.pipeline import stems_recipe
+
+        return stems_recipe()
+    if pipeline == "translation":
+        import hashlib
+
+        from core.lyrics.translations import load_settings
+
+        settings, _ = load_settings()
+        return f"{settings.model} {hashlib.sha256(settings.prompt.encode()).hexdigest()}"
+    if pipeline == "themes":
+        from worker.themes.pipeline import PROMPT_REVISION
+
+        return str(PROMPT_REVISION)
+    raise ValueError(f"Unknown pipeline {pipeline!r}")
 
 
 def _plan_sync(batch: Batch) -> list[str]:
@@ -237,6 +273,9 @@ def _plan_sync(batch: Batch) -> list[str]:
             payload.get("mode", "all"),
             catalog=catalog,
             verify_audio_hashes=payload.get("verify_audio_hashes", True),
+            # "Bring every song up to date": an option of this sync alone, so a cancelled sync
+            # leaves nothing behind. Its batches carry it (``resync``) for the stages.
+            up_to_date={p: current_revision(p) for p in _resync_pipelines(payload)},
         )
     batch.check()
     attach_user_library(batch.user_id, batch.url)

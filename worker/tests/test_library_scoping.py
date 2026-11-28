@@ -50,11 +50,17 @@ class LibraryScopingTests(unittest.TestCase):
         ns = self.plan_namespace()
         self.cursor.fetchone.return_value = (True,)
         self.cursor.fetchall.return_value = [{"external_id": "shared-id"}]
-        for name, args in [("plan_lyrics", ()), ("plan_karaoke", ("pipeline",))]:
+        # plan_karaoke's realign setting is given: the queued rows here are planner rows.
+        for name, args, options in [
+            ("plan_lyrics", (), {}),
+            ("plan_karaoke", ("pipeline",), {"realign_outdated": True}),
+        ]:
             for ids in (None, [], ["shared-id"]):
                 for library in (None, self.library_id):
                     with self.subTest(name=name, ids=ids, library=library):
-                        ns[name](self.connection, *args, external_ids=ids, library_id=library)
+                        ns[name](
+                            self.connection, *args, external_ids=ids, library_id=library, **options
+                        )
                         sql, params = self.cursor.execute.call_args.args
                         self.assertEqual("ts.library_id=%s" in sql, library is not None)
                         self.assertEqual("ts.external_id=ANY(%s)" in sql, ids is not None)

@@ -32,6 +32,7 @@ from core.integrations.claude import ClaudeError, complete_json
 from core.integrations.external_ai import ExternalAISettings
 from core.library.connections import credential_cipher
 from core.lyrics import store
+from core.resync import store as resync
 from core.revisions import LYRIC_THEMES_REVISION
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
 from worker.themes.errors import ThemeError
@@ -188,6 +189,7 @@ def _save(track_id, checksum, model, *, description=None, themes=(), vector=None
             embedding=_vector_literal(vector) if vector is not None else None,
             embedding_model="bge_m3" if vector is not None else None,
         )
+        resync.done(db, track_id, "themes")
 
 
 class _Embedder:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import uuid
@@ -17,6 +18,7 @@ from core.lyrics.translations import (
     save_translation,
     source_checksum,
 )
+from core.resync import store as resync
 from worker.kara.aligner import label_rules
 from worker.processing import Item, ItemResult, ProcessingContext, Processor
 from worker.translation.client import translate
@@ -120,6 +122,14 @@ class TranslationProcessor(Processor[None, TranslationItem, list[dict]]):
         namespace = uuid.uuid5(uuid.NAMESPACE_URL, context.library_url.rstrip("/"))
         with connect() as db:
             tracks = store.batch_lyrics(db, context.user_id, namespace, list(context.track_ids))
+            # Songs asked to be translated again: their ready translations are not reused.
+            self.requested = set(
+                resync.requested(db, "translation", [row["track_id"] for row in tracks])
+            )
+        # A sync bringing translations up to date reuses only those of the current model and
+        # prompt.
+        self.current_only = "translation" in (context.options.get("resync") or ())
+        self.prompt_revision = hashlib.sha256(settings.prompt.encode()).hexdigest()
         items = []
         for row in tracks:
             context.check()
@@ -176,10 +186,17 @@ class TranslationProcessor(Processor[None, TranslationItem, list[dict]]):
             if not load_settings()[0].enabled:
                 return
             pair, lines = item.pair, list(item.lines)
-            if any(
+            if item.track_id not in self.requested and any(
                 t["source_language"] == pair.source
                 and t["target_language"] == pair.target
                 and t["status"] == "ready"
+                and (
+                    not self.current_only
+                    or (
+                        t["model"] == self.settings.model
+                        and t["prompt_revision"] == self.prompt_revision
+                    )
+                )
                 for t in load_translations(item.track_id, lines)
             ):
                 yield ItemResult(item=item, outcome="reused")
@@ -229,3 +246,8 @@ class TranslationProcessor(Processor[None, TranslationItem, list[dict]]):
             model=self.settings.model,
             prompt=self.settings.prompt,
         )
+        if item.track_id in self.requested:
+            # Every pair of the song is translated in this batch; one written fulfils the ask.
+            with connect() as db:
+                resync.done(db, item.track_id, "translation")
+                db.commit()

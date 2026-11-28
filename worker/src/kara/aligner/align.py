@@ -192,7 +192,13 @@ def align(request: AlignRequest) -> dict:
     audio_channels, sr = _read_audio(request.audio_path)
     y_processed = _time_stretch(audio_channels.mean(axis=1), request.audio_speed)
     print("Aligning...")
-    from worker.kara.aligner.decoder import MAX_BLANK_HOLD_SECONDS, align_audio_with_timeline
+    from worker.kara.aligner.decoder import (
+        MAX_BLANK_HOLD_SECONDS,
+        ReadingRecorder,
+        StoredReading,
+        _wav2vec_aligner,
+        align_audio_with_timeline,
+    )
 
     opening_backing_lines = set()
     background_lines = None
@@ -227,8 +233,22 @@ def align(request: AlignRequest) -> dict:
             cursor += len(tokens)
         return flags_out
 
+    model_reading = None
+    if request.reading and not request.reading_path:
+        raise ValueError("reading needs reading_path")
+    if request.reading == "replay":
+        model_reading = StoredReading(
+            hf_model_path, request.reading_path, text_head=request.text_bonus > 0
+        )
+    elif request.reading == "record":
+        model_reading = ReadingRecorder(
+            _wav2vec_aligner(hf_model_path, True, request.fusion, None, request.text_bonus > 0)
+        )
     stem_audio = None
-    if request.stem_path:
+    if isinstance(model_reading, StoredReading):
+        # The recorded stem inference replays in its place; the stem itself is not needed.
+        stem_audio = [0.0] if model_reading.stem_pass else None
+    elif request.stem_path:
         stem_channels, stem_rate = _read_audio(request.stem_path)
         stem_mono = stem_channels.mean(axis=1)
         if stem_rate != sr:
@@ -259,10 +279,13 @@ def align(request: AlignRequest) -> dict:
         text_bonus=request.text_bonus,
         in_line_gap_cost=request.in_line_gap_cost,
         backing_rest=request.backing_rest,
+        model_reading=model_reading,
         fusion=request.fusion,
         stem_audio=stem_audio,
         inline_text_bonus=request.inline_text_bonus and request.inline_backing,
     )
+    if isinstance(model_reading, ReadingRecorder):
+        model_reading.save(str(request.reading_path))
     if len(alignment_results) != len(alignment_tokens):
         raise RuntimeError(
             f"Alignment returned {len(alignment_results)} tokens for {len(alignment_tokens)} inputs"

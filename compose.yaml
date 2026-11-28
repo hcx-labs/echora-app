@@ -89,6 +89,8 @@ services:
       ECHORA_MOTION_ARTWORK_DIR: /motion-artwork
       # Karaoke stems (encoded vocals + instrumental per song). Durable, not a cache.
       ECHORA_KARAOKE_STEMS_DIR: /karaoke-stems
+      # The aligner's reading of each song (~20 MB): decoder changes re-decode from it.
+      ECHORA_KARA_READINGS_DIR: ${ECHORA_KARA_READINGS_DIR-/data/kara-readings}
     volumes: &analysis-volumes
       - ${MUSIC_LIBRARY_PATH:-./testdata/music}:/music:ro
       - ./data:/data

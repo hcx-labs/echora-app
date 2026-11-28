@@ -55,5 +55,10 @@ class AlignRequest(BaseModel):
     """Cost per blank frame inside a line."""
     backing_rest: bool = False
     """The first lead pass may be silent where the background head hears a voice."""
+    reading_path: str | None = None
+    """With ``reading``: where the song's model reading is kept (``decoder.ReadingRecorder``)."""
+    reading: Literal["record", "replay"] | None = None
+    """``record``: run the model and keep its reading at ``reading_path``; ``replay``: decode from
+    that reading without the model (``stem_path`` is then not read)."""
     fusion: Literal["off", "on", "gate0"] = "off"
     audio_speed: float = 1.0

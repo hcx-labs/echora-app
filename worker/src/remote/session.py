@@ -318,14 +318,17 @@ class ModalSession:
         self.upload(digest, audio)
         return digest
 
-    def _map(self, method, *inputs: list) -> Iterator[object]:
-        """Run one call per input in order; yields each result or the exception it raised."""
+    def _map(self, method, *inputs: list, **options: object) -> Iterator[object]:
+        """Run one call per input in order; yields each result or the exception it raised.
+
+        ``options`` go to every call, with the settings.
+        """
         if not inputs or not inputs[0]:
             return iter(())
         return _complete(
             method.map(
                 *inputs,
-                kwargs={"settings": self.settings},
+                kwargs={"settings": self.settings, **options},
                 order_outputs=True,
                 return_exceptions=True,
             ),
@@ -398,9 +401,20 @@ class ModalSession:
         texts: list[str],
         languages: list[str | None],
         source_lines: list[list],
+        keep_reading: bool = False,
     ) -> Iterator[object]:
-        """FA-Kara alignment results for uploaded tracks."""
-        return self._map(self.analysis.karaoke, digests, texts, languages, source_lines)
+        """FA-Kara alignment results for uploaded tracks.
+
+        With ``keep_reading`` each result carries the song's model reading as ``reading``.
+        """
+        return self._map(
+            self.analysis.karaoke,
+            digests,
+            texts,
+            languages,
+            source_lines,
+            keep_reading=keep_reading,
+        )
 
     def embed_lyrics(self, texts: list[str]) -> Iterator[object]:
         """BGE-M3 lyrics embeddings."""

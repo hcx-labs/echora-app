@@ -370,7 +370,8 @@ def songs_needing_themes(
     """The user's selected songs whose lyrics lack a current theme description.
 
     A description is current for the lyrics' checksum and the prompt revision; a failed one is
-    retried after ``retry_failed_after_days``. Rows are ``track_id``, ``text`` and ``title``.
+    retried after ``retry_failed_after_days``. A song with a themes resync request is always
+    selected. Rows are ``track_id``, ``text`` and ``title``.
     """
     return fetch_all(
         db,
@@ -382,6 +383,8 @@ def songs_needing_themes(
            WHERE u.user_id=%s AND lib.namespace=%s AND u.external_id=ANY(%s)
              AND NULLIF(btrim(l.text),'') IS NOT NULL
              AND (th.track_id IS NULL
+                  OR EXISTS (SELECT 1 FROM track_resync_requests r
+                             WHERE r.track_id=l.track_id AND r.pipeline='themes')
                   OR th.source_checksum <> encode(sha256(convert_to(l.text,'UTF8')),'hex')
                   OR th.prompt_revision <> %s
                   OR (th.status='failed'

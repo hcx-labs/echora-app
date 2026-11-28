@@ -24,6 +24,7 @@ from core.errors import InputUnavailableError, ProcessingError
 from core.integrations.navidrome import NavidromeClient
 from core.lyrics import store
 from core.lyrics.backing import BACKING_VOICE, tag_bracketed_backing
+from core.resync import store as resync
 from core.revisions import KARAOKE_PIPELINE_REVISION
 from worker.kara.aligner import label_rules
 from worker.kara.aligner.request import AlignRequest
@@ -77,6 +78,64 @@ def _stored_model_revision(model_revision: str) -> str:
     # the separated vocals added. Stored alignments carry it, so changing the setting redoes them.
     audio = "mix+stem" if KaraConfig.load().stem_reading else "mix"
     return f"{FA_KARA_REVISION}:{model_revision}:{audio}"
+
+
+READING_REVISION = "r1"
+"""What the stored model reading holds and how it is taken (``ReadingRecorder``)."""
+
+
+def reading_recipe() -> str:
+    """What a song's model reading depends on; a stored reading of another recipe is not replayed.
+
+    The checkpoint and the audio the model hears (``_stored_model_revision``), the separator for
+    the stem reading, the MuQ branch, the audio speed and whether the text head's frame
+    embeddings are kept. The decoder (``KARAOKE_PIPELINE_REVISION``) and the lyrics are not part
+    of it: changing them is what a reading is replayed for.
+    """
+    from core.revisions import SEPARATION_REVISION
+
+    config = KaraConfig.load()
+    return ":".join(
+        [
+            READING_REVISION,
+            _stored_model_revision(current_model_revision()),
+            SEPARATION_REVISION if config.stem_reading else "no-stem",
+            f"fusion-{config.fusion}",
+            f"speed-{config.audio_speed}",
+            "text" if config.text_bonus > 0 else "no-text",
+        ]
+    )
+
+
+def reading_path(track_id: uuid.UUID | str, recipe: str | None = None) -> Path | None:
+    """Where the song's reading of ``recipe`` (the current one) is kept; None when readings are off."""
+    root = KaraConfig.load().readings_dir
+    if not root:
+        return None
+    digest = hashlib.sha256((recipe or reading_recipe()).encode()).hexdigest()[:16]
+    return Path(root) / str(track_id)[:2] / f"{track_id}-{digest}.pt"
+
+
+def _keep_reading(track_id: uuid.UUID, content: bytes) -> None:
+    """Store a song's reading atomically and drop its readings of other recipes."""
+    path = reading_path(track_id)
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        dir=path.parent, prefix=".reading-", suffix=".tmp", delete=False
+    ) as stream:
+        temporary = Path(stream.name)
+        stream.write(content)
+    try:
+        temporary.chmod(0o644)
+        temporary.replace(path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    for other in path.parent.glob(f"{track_id}-*.pt"):
+        if other != path:
+            other.unlink(missing_ok=True)
 
 
 def _prepare_vocals(source: bytes, check) -> None:
@@ -506,11 +565,17 @@ def _run_fa_kara(
     language: str | None,
     source_lines: list[dict[str, object]] | None = None,
     provided_audio: bool = False,
+    reading: str | None = None,
+    reading_path: str | None = None,
+    keep_reading: bool = False,
 ) -> dict[str, object]:
     """Align lyrics to the song's full mix, or (``provided_audio``) to audio the caller cut.
 
     With ``stem_reading`` the song's separated vocals are read as well and added to the mix's
     reading (the mix stays the reference). Audio the caller cut is aligned as given.
+    ``reading`` ``record`` keeps the model's reading of the song at ``reading_path``; ``replay``
+    decodes from it without the separator or the model. ``keep_reading`` records it and returns
+    its bytes as ``reading`` (also from Modal).
     """
     model_id = KaraConfig.load().model_id
     model_revision = current_model_revision()
@@ -535,8 +600,15 @@ def _run_fa_kara(
         input_text = "\n".join(line_texts) if line_texts else lyrics_text.rstrip("\r\n")
         config = KaraConfig.load()
         languages = fa_kara_languages(config.label_rules)
+        if keep_reading and reading is None and not provided_audio:
+            reading, reading_path = "record", str(work / "reading.pt")
         stem_path, separator_revision = None, None
-        if config.stem_reading and not provided_audio:
+        if reading == "replay" and config.stem_reading:
+            # The recorded reading is of this separator: it is part of the reading's recipe.
+            from core.revisions import SEPARATION_REVISION
+
+            separator_revision = SEPARATION_REVISION
+        elif config.stem_reading and not provided_audio:
             stem_path = str(work / "stem.wav")
             separator_revision = _write_stem(audio, Path(stem_path))
         request = AlignRequest(
@@ -565,6 +637,8 @@ def _run_fa_kara(
             text_bonus=config.text_bonus,
             in_line_gap_cost=config.in_line_gap_cost,
             backing_rest=config.backing_rest,
+            reading=reading,
+            reading_path=reading_path,
             fusion=config.fusion,
             audio_speed=config.audio_speed,
         )
@@ -580,19 +654,33 @@ def _run_fa_kara(
         diagnostics["audio_source"] = "provided_audio" if provided_audio else "original_mix"
         diagnostics["separator"] = None
         diagnostics["separator_revision"] = separator_revision
+        if reading:
+            diagnostics["model_reading"] = "replayed" if reading == "replay" else "recorded"
+        if config.repeat_template:
+            from worker.kara.aligner.repeats import apply_repeat_template
+
+            diagnostics["repeat_template"] = apply_repeat_template(alignment_document)
         lines = build_lines_from_alignment_document(alignment_document)
         # Keep the model's token-derived line boundaries. The former display
         # padding expanded every line into nearby silence, which moved otherwise
         # correct starts and ends away from the timed-lyrics reference.
         if not lines:
             raise RuntimeError("FA-Kara produced no aligned lyric lines")
-    return {
+        kept = (
+            Path(reading_path).read_bytes()
+            if keep_reading and reading == "record" and reading_path
+            else None
+        )
+    result: dict[str, object] = {
         "lines": lines,
         "alignment_document": alignment_document,
         "diagnostics": alignment_document.get("diagnostics", {}),
         "model": model_id,
         "model_revision": model_revision,
     }
+    if kept is not None:
+        result["reading"] = kept
+    return result
 
 
 def _store_supplied_karaoke(connection, track_id, lines, digest) -> None:
@@ -624,6 +712,8 @@ class KaraokeItem(Item):
     supplied: Any = None
     """Word timing the lyrics came with; stored as it is instead of aligning."""
     supplied_digest: str | None = None
+    reading: str | None = None
+    """The song's stored model reading of the current recipe: decoded from it, not re-read."""
 
     def malformed(self) -> bool:
         """Whether the stored lines or word timing are not lists of objects."""
@@ -637,10 +727,12 @@ class KaraokeItem(Item):
 class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
     """Aligns the batch's lyrics to their audio with the Echora Kara aligner.
 
-    Songs whose lyrics came with word timing keep it (``supplied``). The others are prepared
-    first, every one of them (into the batch's source cache, or up to Modal); then the aligner
-    loads once and aligns them all (on Modal in one call). One batch aligns at a
-    time in this worker; the aligner process stops after the stage.
+    Songs whose lyrics came with word timing keep it (``supplied``). A song with a stored model
+    reading of the current recipe (``ECHORA_KARA_READINGS_DIR``; only the decoder or its lyrics
+    changed) is decoded from it here, without separation or the model, also when Modal is on. The
+    others are prepared first, every one of them (into the batch's source cache, or up to Modal);
+    then the aligner loads once and aligns them all (on Modal in one call), keeping their reading.
+    One batch aligns at a time in this worker; the aligner process stops after the stage.
     """
 
     name = "karaoke"
@@ -659,13 +751,21 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
                 list(context.track_ids),
                 model_revision,
                 library_id=self.library_id,
+                # An administrator's karaoke backfill realigns, as does a sync told to bring
+                # karaoke up to date; other syncs follow the setting.
+                realign_outdated=True
+                if context.options.get("operation") == "karaoke_backfill"
+                or "karaoke" in (context.options.get("resync") or ())
+                else None,
             ).karaoke_external_ids
             if not planned:
                 return []
             rows = store.karaoke_sources(connection, list(planned), self.library_id)
+        recipe = reading_recipe() if KaraConfig.load().readings_dir else None
         items = []
         for row in rows:
             supplied, digest = row.get("word_timing"), row.get("word_timing_digest")
+            stored = reading_path(row["track_id"], recipe) if recipe else None
             items.append(
                 KaraokeItem(
                     key=str(row["track_id"]),
@@ -677,6 +777,7 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
                     source_lines=row["lines"],
                     supplied=supplied if supplied and digest else None,
                     supplied_digest=digest if supplied and digest else None,
+                    reading=str(stored) if stored is not None and stored.is_file() else None,
                 )
             )
         return items
@@ -690,6 +791,16 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
         self.connection = connect()
         self.client = NavidromeClient(*context.library)
         self.client.__enter__()
+        self.keep_readings = False
+        root = KaraConfig.load().readings_dir
+        if root:
+            try:
+                Path(root).mkdir(parents=True, exist_ok=True)
+                self.keep_readings = os.access(root, os.W_OK)
+            except OSError:
+                pass
+            if not self.keep_readings:
+                logger.warning("The karaoke readings directory is not writable; not keeping them")
 
     def process(self, context, items):
         for item in items:
@@ -702,6 +813,10 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
         if not aligning:
             return
         _stop_fa_kara_worker()
+        yield from self._replay(context, [item for item in aligning if item.reading])
+        aligning = [item for item in aligning if not item.reading]
+        if not aligning:
+            return
         prepared, failed = self._prepare(context, aligning)
         ready = [item for item in aligning if item.key in prepared]
         if ready:
@@ -727,6 +842,7 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
                     [item.text for item in ready],
                     [item.language for item in ready],
                     [item.source_lines or [] for item in ready],
+                    keep_reading=self.keep_readings,
                 )
             )
         for item in ready:
@@ -738,6 +854,7 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
                         item.text,
                         item.language,
                         item.source_lines or [],
+                        keep_reading=self.keep_readings,
                     )
                 else:
                     result = next(aligned)
@@ -745,6 +862,43 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
                         raise result
             except Exception as error:  # noqa: BLE001 - one song's alignment
                 logger.exception("FA-Kara alignment failed for %s", item.key)
+                failure = ProcessingError("Alignment failed", stage=type(error).__name__)
+                yield ItemResult.failed(item, failure)
+                continue
+            yield ItemResult(item=item, outcome="aligned", output=result)
+
+    def _replay(self, context, items):
+        """Decode songs from their stored readings.
+
+        Only the mix is fetched (the decoder reads its loudness): no separation, no model, no Modal.
+        """
+        for index, item in enumerate(items):
+            context.publish(
+                {
+                    "phase": "replay",
+                    "message": f"Decoding karaoke from the stored reading of {item.label}",
+                    "completed": index,
+                    "total": len(items),
+                    "unit": "tracks",
+                }
+            )
+            context.check()
+            try:
+                audio = self.client.audio_bytes(item.external_id)
+            except Exception:  # noqa: BLE001 - one song's audio
+                yield ItemResult.failed(item, InputUnavailableError("Karaoke audio unavailable"))
+                continue
+            try:
+                result = _run_fa_kara(
+                    audio,
+                    item.text,
+                    item.language,
+                    item.source_lines or [],
+                    reading="replay",
+                    reading_path=item.reading,
+                )
+            except Exception as error:  # noqa: BLE001 - one song's alignment
+                logger.exception("FA-Kara replay failed for %s", item.key)
                 failure = ProcessingError("Alignment failed", stage=type(error).__name__)
                 yield ItemResult.failed(item, failure)
                 continue
@@ -812,10 +966,18 @@ class KaraokeProcessor(Processor[None, KaraokeItem, dict[str, object]]):
                 )
             else:
                 _store_alignment(self.connection, item.track_id, output)
-                self.connection.commit()
+            resync.done(self.connection, item.track_id, "karaoke")
+            self.connection.commit()
         except Exception:
             self.connection.rollback()
             raise
+        content = output.pop("reading", None) if isinstance(output, dict) else None
+        if content:
+            try:
+                _keep_reading(item.track_id, content)
+            except OSError as error:
+                # The alignment is stored; without its reading the song is only re-read later.
+                logger.warning("Could not keep the karaoke reading of %s: %s", item.key, error)
 
     def close(self) -> None:
         try:

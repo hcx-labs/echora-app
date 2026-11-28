@@ -22,6 +22,8 @@ from backend.api.v1.library.track_lyrics import TrackLyricsEndpoint
 from backend.api.v1.library.track_lyrics_status import TrackLyricsStatus
 from backend.api.v1.library.track_lyrics_update import TrackLyricsUpdate
 from backend.api.v1.library.track_motion_artwork import TrackMotionArtwork
+from backend.api.v1.library.track_processing import TrackProcessingEndpoint
+from backend.api.v1.library.track_processing_resync import TrackResync, TrackResyncCancel
 from backend.api.v1.library.track_recording_group import TrackRecordingGroup
 from backend.api.v1.library.track_similar import TrackSimilar
 from backend.api.v1.library.track_transcription_language import TrackTranscriptionLanguage
@@ -47,6 +49,9 @@ CATEGORY = Category(
         TrackLyricsUpdate,
         TrackLyricsStatus,
         TrackTranscriptionLanguage,
+        TrackProcessingEndpoint,
+        TrackResync,
+        TrackResyncCancel,
         LyricsStatus,
         ArtistProfile,
         ArtistsSimilar,

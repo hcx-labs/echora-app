@@ -143,6 +143,7 @@ def test_parent_batches_selected_work_but_reconciles_full_catalog(
         "missing",
         catalog=client.__enter__.return_value.all_tracks.return_value,
         verify_audio_hashes=True,
+        up_to_date={},
     )
     main._reconcile_user_tracks.assert_called_once_with("user", "https://music", catalog)
     assert store.expand.call_args.args[2] == [
@@ -198,3 +199,33 @@ def test_entire_library_visits_songs_without_karaoke_stems(planner, monkeypatch)
     monkeypatch.setattr(sync_plan, "songs_needing_stems", stems)
     assert sync_plan.select_sync_tracks(connection, "https://music", ["a", "b"]) == ["a"]
     assert stems.call_args.args[2] == ["a", "b"]
+
+
+def test_songs_asked_to_resync_join_a_partial_sync(planner, monkeypatch):
+    from core.resync import store as resync
+
+    connection, cursor, audio, karaoke = planner
+    cursor.fetchall.return_value = [{"external_id": song} for song in ("known", "asked")]
+    monkeypatch.setattr(resync, "requested_sources", lambda db, library, ids: {"asked"})
+    assert sync_plan.select_sync_tracks(
+        connection, "https://music", ["known", "asked", "new"], "missing"
+    ) == ["asked", "new"]
+    karaoke.assert_not_called()
+
+
+def test_bringing_a_pipeline_up_to_date_selects_only_its_outdated_songs(planner, monkeypatch):
+    from core.resync import store as resync
+
+    connection, cursor, _, _ = planner
+    cursor.fetchall.return_value = [{"external_id": song} for song in ("old", "current")]
+    asked = []
+
+    def outdated(db, library, ids, pipeline, revision):
+        asked.append((pipeline, revision))
+        return {"old"}
+
+    monkeypatch.setattr(resync, "outdated_sources", outdated)
+    selected = sync_plan.select_sync_tracks(
+        connection, "https://music", ["old", "current"], "missing", up_to_date={"karaoke": "v12"}
+    )
+    assert selected == ["old"] and asked == [("karaoke", "v12")]

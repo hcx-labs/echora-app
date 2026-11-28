@@ -297,7 +297,7 @@ def test_backfill_prewarms_before_alignment_and_skips_failed_tracks(monkeypatch,
     separated = []
     monkeypatch.setattr(pipeline, "_prepare_vocals", lambda data, check: separated.append(data))
 
-    def align(data, *args):
+    def align(data, *args, **options):
         assert events[:4] == ["stop", b"0", b"1", b"2"]
         # Every fetched song's vocals were separated before the aligner loaded.
         assert separated == [b"0", b"2"]
@@ -365,7 +365,7 @@ def test_backfill_aligns_the_original_mix_without_separating(monkeypatch):
     monkeypatch.setattr(pipeline, "_stop_fa_kara_worker", lambda: None)
     aligned = []
 
-    def align(data, *args):
+    def align(data, *args, **options):
         aligned.append(data)
         return {
             "lines": [],
@@ -745,7 +745,7 @@ def test_karaoke_scope_and_cleanup_on_cancellation(monkeypatch):
     with pytest.raises(_Cancelled):
         align_batch(ids=("shared-id",))
     assert planner.call_args.args[2] == ["shared-id"]
-    assert planner.call_args.kwargs == {"library_id": "library"}
+    assert planner.call_args.kwargs == {"library_id": "library", "realign_outdated": None}
     sql, params = cursor.execute.call_args.args
     assert "ts.library_id=%s" in sql and params == (["shared-id"], "library")
     assert stops.call_count == 2  # Before preparing, and when the stage ends.
@@ -816,3 +816,90 @@ def test_malformed_stored_lines_fail_that_song_only(monkeypatch):
     monkeypatch.setattr(pipeline, "_run_fa_kara", MagicMock(side_effect=AssertionError("aligned")))
     assert align_batch(ids=("0", "1")) == {"total": 2, "aligned": 0, "supplied": 1, "failed": 1}
     assert stored == [(good, timing, "digest")]
+
+
+def _readings_batch(monkeypatch, tmp_path):
+    """Three songs with readings kept in ``tmp_path``; returns (connection, calls of the aligner)."""
+    monkeypatch.setenv("DATABASE_URL", "unused-mocked")
+    monkeypatch.setenv("ECHORA_KARA_READINGS_DIR", str(tmp_path))
+    reset_config_cache()
+    connection = MagicMock()
+    monkeypatch.setattr(pipeline, "connect", lambda **_: connection)
+    connection.__enter__.return_value = connection
+    tracks = [_row(uuid.UUID(int=i), str(i), str(i), "Hello", "en", []) for i in range(3)]
+    connection.cursor.return_value.__enter__.return_value.fetchall.return_value = tracks
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.audio_bytes.side_effect = lambda key: key.encode()
+    monkeypatch.setattr(pipeline, "NavidromeClient", lambda *args: client)
+    monkeypatch.setattr(pipeline, "resolve_library_id", lambda *args: "library")
+    monkeypatch.setattr(
+        pipeline,
+        "plan_karaoke",
+        lambda *args, **kwargs: SimpleNamespace(karaoke_external_ids=["0", "1", "2"]),
+    )
+    monkeypatch.setattr(pipeline, "_stop_fa_kara_worker", lambda: None)
+    calls = []
+
+    def align(data, *args, **options):
+        calls.append((data, options))
+        result = {
+            "lines": [],
+            "diagnostics": {"audio_source": "original_mix", "separator_revision": None},
+            "model": "model",
+            "model_revision": "revision",
+            "alignment_document": {},
+        }
+        if options.get("keep_reading"):
+            result["reading"] = b"reading of " + data
+        return result
+
+    monkeypatch.setattr(pipeline, "_run_fa_kara", align)
+    return calls
+
+
+def test_a_song_with_a_current_reading_is_decoded_from_it_without_separating(monkeypatch, tmp_path):
+    calls = _readings_batch(monkeypatch, tmp_path)
+    separated = []
+    monkeypatch.setattr(pipeline, "_prepare_vocals", lambda source, check: separated.append(source))
+    stored = pipeline.reading_path(uuid.UUID(int=0))
+    stale = stored.with_name(f"{uuid.UUID(int=1)}-0000000000000000.pt")
+    stored.parent.mkdir(parents=True)
+    stored.write_bytes(b"recorded")
+    stale.write_bytes(b"another recipe")
+
+    assert align_batch() == {"total": 3, "aligned": 3, "failed": 0}
+
+    # The song with a reading is decoded from it first, and is not separated.
+    assert calls[0] == (b"0", {"reading": "replay", "reading_path": str(stored)})
+    assert [call[1] for call in calls[1:]] == [{"keep_reading": True}] * 2
+    assert separated == [b"1", b"2"]
+    # The others keep the reading they were aligned with; a reading of another recipe goes.
+    for i in (1, 2):
+        assert pipeline.reading_path(uuid.UUID(int=i)).read_bytes() == f"reading of {i}".encode()
+    assert not stale.exists()
+    assert stored.read_bytes() == b"recorded"
+
+
+def test_without_a_readings_directory_nothing_is_kept_or_replayed(monkeypatch, tmp_path):
+    calls = _readings_batch(monkeypatch, tmp_path)
+    monkeypatch.setenv("ECHORA_KARA_READINGS_DIR", "")
+    reset_config_cache()
+    monkeypatch.setattr(pipeline, "_prepare_vocals", lambda *args: None)
+
+    assert align_batch() == {"total": 3, "aligned": 3, "failed": 0}
+    assert [call[1] for call in calls] == [{"keep_reading": False}] * 3
+    assert pipeline.reading_path(uuid.UUID(int=0)) is None
+    assert not any(tmp_path.iterdir())
+
+
+def test_the_reading_recipe_follows_what_the_model_hears_not_the_decoder(monkeypatch):
+    monkeypatch.setattr(pipeline, "current_model_revision", lambda: "checkpoint")
+    reset_config_cache()
+    with_stem = pipeline.reading_recipe()
+    monkeypatch.setattr(pipeline, "KARAOKE_PIPELINE_REVISION", "another-decoder")
+    assert pipeline.reading_recipe() == with_stem
+    monkeypatch.setenv("ECHORA_KARA_STEM_READING", "false")
+    reset_config_cache()
+    assert pipeline.reading_recipe() != with_stem
+    assert "no-stem" in pipeline.reading_recipe()

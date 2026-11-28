@@ -2,6 +2,7 @@
 
 import logging
 import math
+import types
 from collections.abc import Callable
 from pathlib import Path
 
@@ -444,6 +445,110 @@ class Wav2Vec2ForcedAligner:
         emission, sample_rate, _ = self.infer(waveform, sample_rate)
         token_spans = _align_token_spans(emission, tokens, blank=self.blank)
         return emission.unsqueeze(0), token_spans, sample_rate
+
+
+READING_STATE = (
+    "last_background_log_probs",
+    "last_edge_logits",
+    "last_vad_logits",
+    "last_f0_logits",
+    "last_hidden",
+    "last_frame_times",
+    "last_inference_passes",
+)
+"""What one inference leaves on the aligner for the decoder, besides its emission."""
+
+
+class ReadingRecorder:
+    """An aligner that keeps what each of its inferences produced: the model's reading of a song.
+
+    The decoder reads the model only through ``infer`` and the ``last_*`` state it leaves, so a
+    song's reading (the stem's inference, if any, then the mix's) replays through ``StoredReading``
+    without the separator or the model. Everything else is the wrapped aligner's.
+    """
+
+    def __init__(self, aligner: Wav2Vec2ForcedAligner) -> None:
+        self._aligner = aligner
+        self.passes: list[dict[str, object]] = []
+
+    def __getattr__(self, name):
+        return getattr(self._aligner, name)
+
+    def infer(self, waveform: torch.Tensor, sample_rate: int) -> tuple[torch.Tensor, int, float]:
+        emission, rate, frame_shift = self._aligner.infer(waveform, sample_rate)
+        state = {name: getattr(self._aligner, name, None) for name in READING_STATE}
+        self.passes.append(
+            {
+                "emission": emission,
+                "sample_rate": rate,
+                "frame_shift": frame_shift,
+                **{k: v.detach().cpu() if torch.is_tensor(v) else v for k, v in state.items()},
+            }
+        )
+        return emission, rate, frame_shift
+
+    def save(self, path: str) -> None:
+        """Keep the reading at ``path``.
+
+        Of an inference before the last (the stem's) the decoder reads only the emission, so only
+        that is kept of it. The frame embeddings (``last_hidden``, 9/10 of a reading, read only by the text head) are
+        kept in float16: on 16 songs every syllable decoded the same as from float32 (int8 moved
+        13 of 7,130). Everything the CTC path reads stays as the model gave it.
+        """
+        passes = [
+            {k: p[k] for k in ("emission", "sample_rate", "frame_shift")} for p in self.passes[:-1]
+        ] + [dict(p) for p in self.passes[-1:]]
+        if passes and torch.is_tensor(passes[-1].get("last_hidden")):
+            passes[-1]["last_hidden"] = passes[-1]["last_hidden"].half()
+        torch.save({"model": self._aligner.model_id, "passes": passes}, path)
+
+
+class StoredReading:
+    """A recorded reading in place of the aligner.
+
+    ``infer`` returns the recorded inferences in order and leaves their state. Only the tokenizer,
+    the config and (for a text bonus) the small text head are loaded; decoding from it is the
+    decoder's work alone.
+    """
+
+    def __init__(self, model: str, path: str, *, use_gpu: bool = True, text_head: bool = False):
+        record = torch.load(path, map_location="cpu", weights_only=False)
+        self._passes = list(record["passes"])
+        self.model_id = model
+        self.backbone = _backbone(model)
+        processor = Wav2Vec2BertProcessor if self.backbone == "wav2vec2-bert" else Wav2Vec2Processor
+        self.processor = processor.from_pretrained(model)
+        self.model = types.SimpleNamespace(config=AutoConfig.from_pretrained(model))
+        blank = self.model.config.pad_token_id
+        assert blank is not None
+        self.blank = blank
+        self.device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
+        self.text_aligner = None
+        text_record = getattr(self.model.config, "text_aligner", None)
+        if text_record and text_head:
+            self.text_aligner = _load_text_aligner(model, dict(text_record)).to(self.device)
+        for name in READING_STATE:
+            setattr(self, name, None)
+
+    @property
+    def stem_pass(self) -> bool:
+        """Whether the recording read a separated stem before the mix."""
+        return len(self._passes) == 2
+
+    def infer(self, waveform: torch.Tensor, sample_rate: int) -> tuple[torch.Tensor, int, float]:
+        if not self._passes:
+            raise RuntimeError("the stored reading has no inference left to replay")
+        recorded = self._passes.pop(0)
+        for name in READING_STATE:
+            setattr(self, name, recorded.get(name))
+        if self.last_hidden is not None:
+            self.last_hidden = self.last_hidden.float()
+        return recorded["emission"], recorded["sample_rate"], recorded["frame_shift"]
+
+    tokenizer = Wav2Vec2ForcedAligner.tokenizer
+    tokenize = Wav2Vec2ForcedAligner.tokenize
+    vad_activity = Wav2Vec2ForcedAligner.vad_activity
+    text_token_share = Wav2Vec2ForcedAligner.text_token_share
 
 
 def _backbone(model: str) -> str:
@@ -1349,6 +1454,7 @@ def align_audio_with_timeline(
     text_bonus=0.0,
     in_line_gap_cost=0.0,
     backing_rest=False,
+    model_reading=None,
 ):
     """Align the complete song from the audio alone, in one global CTC pass.
 
@@ -1371,6 +1477,8 @@ def align_audio_with_timeline(
     of their neighbouring lead lines, so they may overlap the lead. Results keep the input order.
     ``text_bonus`` (§5j) weights the checkpoint's text head in the lead decode (0: head not
     loaded); ``in_line_gap_cost`` charges each blank frame inside a line (gaps go between lines).
+    ``model_reading`` replaces the cached model: a ``ReadingRecorder`` keeps the song's reading, a
+    ``StoredReading`` replays one.
     ``backing_rest`` (with ``background_lines``) lets both lead passes be silent wherever the
     background head hears a voice (``with_backing_rest``); backing blocks are placed between the
     lead lines of the first pass. The second pass rests there too, also where the backing words
@@ -1398,7 +1506,9 @@ def align_audio_with_timeline(
     acoustic_tokens = [token for line in token_lines for token in line if token]
     if not acoustic_tokens:
         raise ValueError("lyrics contain no alignable acoustic tokens")
-    aligner_model = _wav2vec_aligner(hf_model_id, use_gpu, fusion, fusion_model, text_bonus > 0)
+    aligner_model = model_reading or _wav2vec_aligner(
+        hf_model_id, use_gpu, fusion, fusion_model, text_bonus > 0
+    )
     encoded = aligner_model.tokenize(acoustic_tokens)
     if len(encoded) != len(acoustic_tokens) or any(not group for group in encoded):
         raise RuntimeError("tokenizer omitted one or more acoustic tokens")

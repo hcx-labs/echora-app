@@ -34,6 +34,21 @@ Summary `karaoke`: `total`, `aligned`, `supplied` (when any), `failed`.
   provenance, including `pipeline_revision`.
 - `lyrics.karaoke_*`: the same lines, mirrored for the player. ASS and LRC are no longer written.
 
+### Stored readings
+
+With `ECHORA_KARA_READINGS_DIR` set, every full alignment also keeps the song's *model reading*:
+what the decoder reads from the model (`decoder.ReadingRecorder`), i.e. the stem's and the mix's
+letter log-probabilities, the backing head, edge logits, the frame clock and the frame embeddings
+the text head reads (float16; on 16 songs every syllable decoded the same as from float32). About
+20 MB a song, as `<dir>/<id[:2]>/<track id>-<recipe digest>.pt`, also from Modal.
+
+A song to realign whose reading is of the current `reading_recipe()` (reading revision,
+checkpoint and the audio it hears, separator, MuQ branch, audio speed, text head) is decoded from
+it in the worker (`decoder.StoredReading`): no separation, no model, no Modal, a few seconds a
+song. So a decoder change (`KARAOKE_PIPELINE_REVISION`) or new lyrics re-decode the library from
+the readings; a model change reads every song again and replaces its reading. Readings are not
+a cache with a budget: one file per song, replaced when its recipe changes.
+
 A song is redone when its stored `pipeline_revision` differs from `KARAOKE_PIPELINE_REVISION`
 (`core/src/revisions.py`) or its model revision differs from the current one. The model revision
 is `<FA_KARA_REVISION>:<checkpoint revision>:mix+stem` (`:mix` with `stem_reading` off); for a local checkpoint
@@ -48,6 +63,13 @@ evaluated with (duration floors, frame clock, backing-vocal decoding, `text_bonu
 `in_line_gap_cost`, `fusion`, `label_rules`) and the worker process timeouts. Change decoder
 values together, and only with an evaluation. Every setting is listed in
 [runtime settings](../../../docs/runtime-settings.md).
+
+`repeat_template` (`ECHORA_KARA_REPEAT_TEMPLATE`, off) is an experiment awaiting a benchmark.
+Sections are runs of lines repeated at least three times, matched by text, or else by shape (lead
+or backing, token counts). Each repeat is placed by its clearly heard lines. A line whose start,
+or else whose end, sits far from where the agreeing repeats put it takes their timing
+(`aligner/repeats.py`). It runs on the finished alignment document, so a replayed reading applies
+it without the model.
 
 ## Failures
 

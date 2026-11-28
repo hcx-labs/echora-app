@@ -1,7 +1,10 @@
+import pytest
 import torch
 
 from worker.kara.aligner.ctc import align_ctc  # noqa: E402
 from worker.kara.aligner.decoder import (  # noqa: E402
+    ReadingRecorder,
+    StoredReading,
     _assign_ctc_blank_holds,
     _decode_background_blocks,
     _inference_chunk_starts,
@@ -446,3 +449,49 @@ def test_the_text_head_places_an_inline_backing_word_the_background_head_cannot_
     assert 60 <= placed[1][0].start < 70
     assert placed[1][0].token == 2
     assert [(g[0].start, g[-1].end) for g in (placed[0], placed[2])] == [(10, 20), (80, 90)]
+
+
+def test_a_recorded_reading_replays_what_the_model_left(tmp_path):
+
+    hidden = torch.randn(5, 8)
+
+    class Model:
+        model_id = "model"
+        calls = 0
+
+        def infer(self, waveform, sample_rate):
+            self.calls += 1
+            self.last_background_log_probs = torch.full((5, 4), float(self.calls))
+            self.last_hidden = hidden * self.calls
+            self.last_edge_logits = None
+            self.last_frame_times = torch.arange(5, dtype=torch.float64)
+            self.last_inference_passes = self.calls
+            return torch.full((5, 4), -float(self.calls)), 16000, 0.02
+
+    recorder = ReadingRecorder(Model())
+    recorder.infer(torch.zeros(1, 10), 44100)  # the stem
+    recorder.infer(torch.zeros(1, 10), 44100)  # the mix
+    path = tmp_path / "reading.pt"
+    recorder.save(str(path))
+
+    stored = torch.load(path, weights_only=False)
+    # Of the stem's inference only its emission is kept; the embeddings are kept in float16.
+    assert set(stored["passes"][0]) == {"emission", "sample_rate", "frame_shift"}
+    assert stored["passes"][1]["last_hidden"].dtype == torch.float16
+
+    replay = StoredReading.__new__(StoredReading)
+    replay._passes = list(stored["passes"])
+    for name in ("last_hidden", "last_background_log_probs"):
+        setattr(replay, name, None)
+    assert replay.stem_pass
+    stem = replay.infer(None, 44100)
+    mix = replay.infer(None, 44100)
+    assert torch.equal(stem[0], torch.full((5, 4), -1.0))
+    assert mix[1:] == (16000, 0.02)
+    assert torch.equal(mix[0], torch.full((5, 4), -2.0))
+    assert torch.equal(replay.last_background_log_probs, torch.full((5, 4), 2.0))
+    assert replay.last_hidden.dtype == torch.float32
+    assert torch.allclose(replay.last_hidden, hidden * 2, atol=1e-2)
+    assert replay.last_inference_passes == 2
+    with pytest.raises(RuntimeError):
+        replay.infer(None, 44100)
