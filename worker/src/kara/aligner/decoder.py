@@ -1479,9 +1479,10 @@ def align_audio_with_timeline(
     loaded); ``in_line_gap_cost`` charges each blank frame inside a line (gaps go between lines).
     ``model_reading`` replaces the cached model: a ``ReadingRecorder`` keeps the song's reading, a
     ``StoredReading`` replays one.
-    ``backing_rest`` (with ``background_lines``) lets the first lead pass be silent wherever the
+    ``backing_rest`` (with ``background_lines``) lets both lead passes be silent wherever the
     background head hears a voice (``with_backing_rest``); backing blocks are placed between the
-    lead lines of that pass.
+    lead lines of the first pass. The second pass rests there too, also where the backing words
+    are inline brackets of a lead line rather than backing lines of their own.
     ``optional_tokens`` (opt-in, one flag per acoustic token) marks inline backing vocals: the lead
     path may leave them out (``align_with_minimum_durations(optional_groups=...)``); the ones it
     leaves out are placed on their own, may overlap the lead, and come back with ``"stream": 2``.
@@ -1848,6 +1849,13 @@ def align_audio_with_timeline(
         for block in background_blocks:
             for group in block["spans"]:
                 explained[group[0].start : group[-1].end, aligner_model.blank] = 0.0
+        if backing_rest:
+            # Inline backing ("(I never learn, I never learn) oh") places no block, and without
+            # the rest the lead stretched its next line's word over it: "But my love" went 1 s
+            # early on New Rules (2026-11-28; 16 songs: 7 lines moved, 3 better, 2 worse).
+            explained = with_backing_rest(
+                explained, aligner_model.last_background_log_probs, aligner_model.blank, frame_shift
+            )
         emission, scoring_emission, initial_spans, duration_floor, skipped = _decode_lead(explained)
 
     inline_moved = []

@@ -45,8 +45,8 @@ SUPPORTED_PROFILE_MODELS = ("muq_mulan", "mert")
 # before them; a line the model did not hear keeps the full minimum word length.
 # v11: what the model reads on the separated vocals is added to what it reads on the mix, and the
 # text head scores inline bracketed words with its backing voice.
-# v12: the first lead pass may rest through a sustained backing block between two lead lines (the
-# lead head hears it as singing and started the next line's first word before it).
+# v12: both lead passes may rest through sustained backing voice (the lead head hears it as
+# singing and started the next line's first word before it, or stretched a word over it).
 KARAOKE_PIPELINE_REVISION = "v12-echora-kara-mix"
 
 # Lyric theme descriptions (worker.themes): the first 16 hex digits of the SHA-256 of the system
